@@ -47,6 +47,20 @@ func (c URLClassifier) Classify(raw string) LinkKind {
 	return LinkKindOther
 }
 
+// JiraKey extracts the issue key from a URL that Classify would report as LinkKindJira.
+// Case is preserved: Jira's REST API accepts either case, so no canonical form is imposed here.
+func (c URLClassifier) JiraKey(raw string) (string, bool) {
+	if c.Classify(raw) != LinkKindJira {
+		return "", false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", false
+	}
+	segments := pathSegments(u.Path)
+	return segments[1], true
+}
+
 func (c URLClassifier) isGHESHost(host string) bool {
 	for _, candidate := range c.GHESHosts {
 		if normalizeHost(candidate) == host {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/ukwhatn/taskherd/internal/config"
+	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/model"
 	"github.com/ukwhatn/taskherd/internal/store"
 )
@@ -44,10 +45,11 @@ type hinter interface {
 }
 
 type app struct {
-	env       Env
-	jsonOut   bool
-	cfg       *config.Config
-	taskStore *store.Store
+	env        Env
+	jsonOut    bool
+	cfg        *config.Config
+	taskStore  *store.Store
+	cacheStore *fetch.Cache
 }
 
 // Run executes args and returns the process exit code.
@@ -88,6 +90,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.unlinkCmd(),
 		a.rmCmd(),
 		a.configCmd(),
+		a.refreshCmd(),
 	)
 	return root
 }
@@ -137,6 +140,32 @@ func (a *app) tasks() *store.Store {
 		a.taskStore = store.New(a.env.Paths.StateDir)
 	}
 	return a.taskStore
+}
+
+// cache owns cache.json's path: config.Paths deliberately has no cache field (PR-1),
+// so callers that need the path (config path) go through here rather than duplicating it.
+func (a *app) cache() *fetch.Cache {
+	if a.cacheStore == nil {
+		a.cacheStore = fetch.NewCache(a.env.Paths.StateDir)
+	}
+	return a.cacheStore
+}
+
+// fetcher builds a Fetcher wired to cfg. The Jira token is read from the environment
+// variable cfg.Jira.TokenEnv names, never from config.toml itself.
+func (a *app) fetcher(cfg *config.Config) *fetch.Fetcher {
+	return &fetch.Fetcher{
+		GitHub:     fetch.NewGitHubFetcher(),
+		Jira:       fetch.NewJiraFetcher(),
+		Cache:      a.cache(),
+		Classifier: cfg.Classifier(),
+		JiraCreds: fetch.JiraCredentials{
+			Site:  cfg.Jira.Site,
+			Email: cfg.Jira.Email,
+			Token: a.env.Getenv(cfg.Jira.TokenEnv),
+		},
+		Now: a.env.Now,
+	}
 }
 
 func (a *app) emitJSON(v any) error {
