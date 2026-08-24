@@ -390,6 +390,35 @@ func TestBoardSaysSoWhenNoColumnFits(t *testing.T) {
 	}
 }
 
+// The footer is subject to the same rule as the rest of the board: nothing it draws may push a
+// line past the terminal. Its second line carries two independently styled halves, so the width
+// has to be spent before either is rendered.
+func TestFooterStaysWithinTheTerminal(t *testing.T) {
+	statuses := []struct {
+		name   string
+		status string
+	}{
+		{"ステータスなし", ""},
+		{"短いステータス", "取得した"},
+		{"sync の予算を食い尽くすステータス", strings.Repeat("長い報告", 12)},
+	}
+	for _, tc := range statuses {
+		for _, width := range []int{4, 8, 11, 12, 20, 40} {
+			t.Run(fmt.Sprintf("%s/width%d", tc.name, width), func(t *testing.T) {
+				h := boardWithCards(t, 3)
+				h.board.width, h.board.height = width, 24
+				h.board.status = tc.status
+
+				for _, line := range strings.Split(h.board.render(), "\n") {
+					if got := lipgloss.Width(line); got > width {
+						t.Fatalf("行幅 = %d, want <= %d: %q", got, width, line)
+					}
+				}
+			})
+		}
+	}
+}
+
 // The folded columns are one box at the board's right edge, and the columns beside it keep the
 // width the stack left them: nothing the stack draws may push the row past the terminal.
 func TestCollapsedStackSitsAtTheRightEdge(t *testing.T) {

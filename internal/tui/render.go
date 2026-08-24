@@ -524,12 +524,24 @@ func (b *Board) renderFooter() string {
 		sync = append(sync, fmt.Sprintf("live: %s", b.fetchFooter()))
 	}
 
-	statusLine := b.styles.dim.Render(strings.Join(sync, "  "))
+	// The width is spent on each half before it is styled, and never on the joined result: cutting
+	// a styled string would land inside an escape sequence instead of between two characters.
+	statusLine, budget := "", b.width
 	if b.status != "" {
-		statusLine = b.statusLine() + "  " + statusLine
+		statusLine = b.statusLine()
+		budget = b.width - lipgloss.Width(statusLine) - len(statusSeparator)
+	}
+	if text := truncate(strings.Join(sync, "  "), budget); text != "" {
+		if statusLine != "" {
+			statusLine += statusSeparator
+		}
+		statusLine += b.styles.dim.Render(text)
 	}
 	return b.styles.footer.Render(truncate(b.boardHelp(), b.width)) + "\n" + statusLine
 }
+
+// statusSeparator divides the status message from the sync state on the footer's second line.
+const statusSeparator = "  "
 
 // statusLine renders the last message the board reported, in the style its severity calls for.
 func (b *Board) statusLine() string {
