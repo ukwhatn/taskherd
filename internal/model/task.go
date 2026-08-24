@@ -16,11 +16,16 @@ const CurrentVersion = 1
 const dateLayout = "2006-01-02"
 
 var (
-	ErrTaskNotFound = errors.New("タスクが見つからない")
-	ErrLinkNotFound = errors.New("リンクが見つからない")
-	ErrLinkExists   = errors.New("同じ URL が既に紐づいている")
-	ErrEmptyTitle   = errors.New("タイトルが空")
-	ErrEmptyStatus  = errors.New("ステータスが空")
+	ErrTaskNotFound    = errors.New("タスクが見つからない")
+	ErrLinkNotFound    = errors.New("リンクが見つからない")
+	ErrLinkExists      = errors.New("同じ URL が既に紐づいている")
+	ErrEmptyTitle      = errors.New("タイトルが空")
+	ErrEmptyStatus     = errors.New("ステータスが空")
+	ErrSessionNotFound = errors.New("セッションが紐づいていない")
+	ErrSessionExists   = errors.New("同じセッションが既にこのタスクに紐づいている")
+	ErrEmptySessionID  = errors.New("セッション ID が空")
+	ErrEmptySessionCwd = errors.New("セッションの cwd が空")
+	ErrEmptyAgent      = errors.New("エージェント名が空")
 )
 
 // Timestamp is a point in time in RFC 3339 notation.
@@ -244,6 +249,60 @@ func (t *Task) AddLink(url string, kind LinkKind, note string, now time.Time) (*
 	t.Links = append(t.Links, Link{URL: url, Kind: kind, Note: note, AddedAt: NewTimestamp(now)})
 	t.touch(now)
 	return &t.Links[len(t.Links)-1], nil
+}
+
+// AddSession links an agent session to the task.
+//
+// The same session may be linked to several tasks, but not twice to the same one: unlink
+// identifies a session by its id. cwd is required because it is what makes a resume possible
+// once the pane is gone.
+func (t *Task) AddSession(ref SessionRef, now time.Time) (*SessionRef, error) {
+	ref.Agent = strings.TrimSpace(ref.Agent)
+	ref.SessionID = strings.TrimSpace(ref.SessionID)
+	ref.Cwd = strings.TrimSpace(ref.Cwd)
+
+	switch {
+	case ref.SessionID == "":
+		return nil, ErrEmptySessionID
+	case ref.Agent == "":
+		return nil, ErrEmptyAgent
+	case ref.Cwd == "":
+		return nil, ErrEmptySessionCwd
+	}
+	for _, existing := range t.Sessions {
+		if existing.SessionID == ref.SessionID {
+			return nil, fmt.Errorf("%s: %w", ref.SessionID, ErrSessionExists)
+		}
+	}
+
+	ref.LinkedAt = NewTimestamp(now)
+	t.Sessions = append(t.Sessions, ref)
+	t.touch(now)
+	return &t.Sessions[len(t.Sessions)-1], nil
+}
+
+func (t *Task) RemoveSession(sessionID string, now time.Time) (*SessionRef, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	for i := range t.Sessions {
+		if t.Sessions[i].SessionID != sessionID {
+			continue
+		}
+		removed := t.Sessions[i]
+		t.Sessions = append(t.Sessions[:i], t.Sessions[i+1:]...)
+		t.touch(now)
+		return &removed, nil
+	}
+	return nil, fmt.Errorf("%s: %w", sessionID, ErrSessionNotFound)
+}
+
+// Session returns the linked session with the given id.
+func (t *Task) Session(sessionID string) (*SessionRef, bool) {
+	for i := range t.Sessions {
+		if t.Sessions[i].SessionID == sessionID {
+			return &t.Sessions[i], true
+		}
+	}
+	return nil, false
 }
 
 func (t *Task) RemoveLink(url string, now time.Time) (*Link, error) {
