@@ -74,6 +74,20 @@ token_env = "TASKHERD_JIRA_TOKEN"
 
 `site` / `email` は自分のテナントの値に置き換える。`ghes_hosts` は GitHub.com 以外の PR/Issue リンクを `github_pr` / `github_issue` として判別させたいホストの一覧。
 
+### note を開くエディタ
+
+note の編集に使うエディタは、次の順で解決する:
+
+1. config.toml トップレベルの `editor`
+2. `$VISUAL`
+3. `$EDITOR`
+
+```toml
+editor = "nano"
+```
+
+herdr プラグインが開いた pane は shell を経由しないため `$EDITOR` が届かないことがある。board から note を編集するなら `editor` を書いておくのが確実。値は空白区切りで引数を書ける（例: `editor = "code -w"`）。
+
 ### Jira トークンの設定
 
 Jira のトークンは config.toml に書かず、`token_env` が指す環境変数（既定 `TASKHERD_JIRA_TOKEN`）から読む:
@@ -100,7 +114,7 @@ herdr integration install claude
 | `taskherd list [--status S]... [--all] [--json]` | 一覧表示（既定は完了・却下列を除く） |
 | `taskherd show <id>` | 詳細（note・リンクのライブ状態・紐づくセッション） |
 | `taskherd edit <id> [--title] [--due] [--status]` | 属性を更新する |
-| `taskherd note <id> [--set TEXT\|--append TEXT]` | note を編集する（既定は `$EDITOR`） |
+| `taskherd note <id> [--set TEXT\|--append TEXT]` | note を編集する（既定は config の `editor` / `$VISUAL` / `$EDITOR`） |
 | `taskherd move <id> <status>` / `taskherd done <id>` | 列を移動する |
 | `taskherd link <id> <url> [--note N]` / `taskherd unlink <id> <url>` | 外部リンクの付け外し |
 | `taskherd session link <id> [--current\|--session-id UUID\|--pane PANE_ID]` | エージェントセッションを紐づける |
@@ -129,12 +143,19 @@ herdr integration install claude
 | `t` | 完了・却下列（terminal 列）の折り畳み切替 |
 | `q` / `Ctrl+C` | 終了 |
 
+### 画面の見え方
+
+- カードは角丸ボーダーのボックスで描画し、選択中のカードは列の色でボーダーを強調する。列ヘッダは列色のラベルと件数、フォーカス中の列は反転表示
+- 列に入りきらないカードは上下の `↑ N件` / `↓ N件` で件数を示し、カーソルの移動に追従してスクロールする（黙って切り落とさない）
+- 詳細・追加・セレクタ・確認ダイアログは、タイトル付きのボーダーボックスとして画面中央に重ねて描画する。背後のボードはそのまま見える
+- 端末が狭いときは、列間の余白 → カードのボーダー → 表示する列数（横スクロール）の順に削る。配色は ANSI 16 色のみを使うため、端末のテーマにそのまま追従する
+
 ### 詳細モーダル（`Enter`）
 
 項目を `↑↓` で選び `Enter` で編集する、の 1 文法だけで動く。項目は タイトル / ステータス / 期限 / note / 各リンク / ＋リンクを追加 / 各セッション / ＋セッションを紐づける。
 
 - **ステータス**: 選択中に `←→` でその場切替（`Enter` ならセレクタを開く）
-- **note**: `Enter` で `$EDITOR` を開く（board は一時的に退避する）
+- **note**: `Enter` でエディタを開く（config の `editor` / `$VISUAL` / `$EDITOR`。board は一時的に退避する）
 - **リンク行**: `Enter` でリンクメモの編集、`Delete` で確認付きの解除
 - **＋リンクを追加**: 空白・改行区切りで複数 URL を一括登録できる（1 つでも不正なら全体を中止する）
 - **セッション行**: `Enter` でそのセッションへジャンプ、`Delete` で確認付きの解除
