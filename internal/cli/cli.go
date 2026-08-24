@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/ukwhatn/taskherd/internal/config"
 	"github.com/ukwhatn/taskherd/internal/fetch"
+	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/model"
 	"github.com/ukwhatn/taskherd/internal/store"
 )
@@ -27,6 +29,8 @@ type Env struct {
 	In     io.Reader
 	Now    func() time.Time
 	Getenv func(string) string
+	// Herdr overrides the herdr client. When nil it is built from Getenv.
+	Herdr *herdrc.Client
 }
 
 // UserError is an error caused by the invocation itself. Hint tells the user how to fix it.
@@ -45,11 +49,13 @@ type hinter interface {
 }
 
 type app struct {
-	env        Env
-	jsonOut    bool
-	cfg        *config.Config
-	taskStore  *store.Store
-	cacheStore *fetch.Cache
+	env         Env
+	jsonOut     bool
+	cfg         *config.Config
+	taskStore   *store.Store
+	cacheStore  *fetch.Cache
+	herdrClient *herdrc.Client
+	stdin       *bufio.Reader
 }
 
 // Run executes args and returns the process exit code.
@@ -88,6 +94,8 @@ func (a *app) rootCmd() *cobra.Command {
 		a.noteCmd(),
 		a.linkCmd(),
 		a.unlinkCmd(),
+		a.sessionCmd(),
+		a.jumpCmd(),
 		a.rmCmd(),
 		a.configCmd(),
 		a.refreshCmd(),
@@ -166,6 +174,16 @@ func (a *app) fetcher(cfg *config.Config) *fetch.Fetcher {
 		},
 		Now: a.env.Now,
 	}
+}
+
+func (a *app) herdr() *herdrc.Client {
+	if a.env.Herdr != nil {
+		return a.env.Herdr
+	}
+	if a.herdrClient == nil {
+		a.herdrClient = herdrc.New(herdrc.Options{Getenv: a.env.Getenv})
+	}
+	return a.herdrClient
 }
 
 func (a *app) emitJSON(v any) error {

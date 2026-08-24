@@ -164,10 +164,33 @@ func writeTempNote(id int, note string) (string, error) {
 func (a *app) confirm(prompt string) (bool, error) {
 	fmt.Fprintf(a.env.Out, "%s。よろしいか [y/N]: ", prompt)
 
-	line, err := bufio.NewReader(a.env.In).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, fmt.Errorf("入力を読めない: %w", err)
+	line, err := a.readInput()
+	if err != nil {
+		return false, err
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
 	return answer == "y" || answer == "yes", nil
+}
+
+// readLine prompts for one line of input.
+func (a *app) readLine(prompt string) (string, error) {
+	fmt.Fprintf(a.env.Out, "%s: ", prompt)
+	line, err := a.readInput()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
+// readInput reads through one buffered reader kept for the whole invocation, so a second
+// prompt does not lose input the first one buffered.
+func (a *app) readInput() (string, error) {
+	if a.stdin == nil {
+		a.stdin = bufio.NewReader(a.env.In)
+	}
+	line, err := a.stdin.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("入力を読めない: %w", err)
+	}
+	return line, nil
 }
