@@ -45,6 +45,7 @@ type harness struct {
 	env          map[string]string
 	stdinContent string
 	stdin        *trackedReader
+	herdr        *fakeHerdr
 }
 
 type result struct {
@@ -78,14 +79,18 @@ func (h *harness) run(t *testing.T, args ...string) result {
 	t.Helper()
 	var out, errOut bytes.Buffer
 	h.stdin = &trackedReader{content: h.stdinContent}
-	code := cli.Run(cli.Env{
+	env := cli.Env{
 		Paths:  config.Paths{StateDir: h.stateDir, ConfigPath: h.configPath},
 		Out:    &out,
 		Err:    &errOut,
 		In:     h.stdin,
 		Now:    func() time.Time { return h.now },
 		Getenv: func(key string) string { return h.env[key] },
-	}, args)
+	}
+	if h.herdr != nil {
+		env.Herdr = h.herdr.client(func(key string) string { return h.env[key] })
+	}
+	code := cli.Run(env, args)
 	return result{code: code, stdout: out.String(), stderr: errOut.String()}
 }
 
