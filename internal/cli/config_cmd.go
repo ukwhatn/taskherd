@@ -26,28 +26,35 @@ func (a *app) configPathCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st := a.tasks()
+			cache := a.cache()
 			paths := struct {
-				Config   string `json:"config"`
-				StateDir string `json:"state_dir"`
-				Tasks    string `json:"tasks"`
-				Backup   string `json:"backup"`
-				Lock     string `json:"lock"`
+				Config    string `json:"config"`
+				StateDir  string `json:"state_dir"`
+				Tasks     string `json:"tasks"`
+				Backup    string `json:"backup"`
+				Lock      string `json:"lock"`
+				Cache     string `json:"cache"`
+				CacheLock string `json:"cache_lock"`
 			}{
-				Config:   a.env.Paths.ConfigPath,
-				StateDir: st.Dir(),
-				Tasks:    st.TasksPath(),
-				Backup:   st.BakPath(),
-				Lock:     st.LockPath(),
+				Config:    a.env.Paths.ConfigPath,
+				StateDir:  st.Dir(),
+				Tasks:     st.TasksPath(),
+				Backup:    st.BakPath(),
+				Lock:      st.LockPath(),
+				Cache:     cache.Path(),
+				CacheLock: cache.LockPath(),
 			}
 
 			if a.jsonOut {
 				return a.emitJSON(paths)
 			}
-			fmt.Fprintf(a.env.Out, "config:  %s\n", paths.Config)
-			fmt.Fprintf(a.env.Out, "state:   %s\n", paths.StateDir)
-			fmt.Fprintf(a.env.Out, "tasks:   %s\n", paths.Tasks)
-			fmt.Fprintf(a.env.Out, "backup:  %s\n", paths.Backup)
-			fmt.Fprintf(a.env.Out, "lock:    %s\n", paths.Lock)
+			fmt.Fprintf(a.env.Out, "config:     %s\n", paths.Config)
+			fmt.Fprintf(a.env.Out, "state:      %s\n", paths.StateDir)
+			fmt.Fprintf(a.env.Out, "tasks:      %s\n", paths.Tasks)
+			fmt.Fprintf(a.env.Out, "backup:     %s\n", paths.Backup)
+			fmt.Fprintf(a.env.Out, "lock:       %s\n", paths.Lock)
+			fmt.Fprintf(a.env.Out, "cache:      %s\n", paths.Cache)
+			fmt.Fprintf(a.env.Out, "cache_lock: %s\n", paths.CacheLock)
 			return nil
 		},
 	}
