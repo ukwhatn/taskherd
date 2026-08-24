@@ -1,7 +1,8 @@
-// Package store は tasks.json の永続化を担う。
+// Package store persists tasks.json.
 //
-// 書き込みは flock による排他・原子 rename・1 世代バックアップを 1 トランザクションに束ねた
-// Update に集約する。将来の同期アダプタ（外部サービスへの反映等）の差し込み点もこの境界に限る。
+// Every write goes through Update, which bundles flock exclusion, one generation of backup
+// and an atomic rename into a single transaction. A future sync adapter plugs in at this
+// boundary only; no other layer persists data.
 package store
 
 import (
@@ -28,7 +29,7 @@ const (
 	filePerm = 0o600
 )
 
-// CorruptError は tasks.json が解析不能または検証違反であることを表す。自動上書きはしない。
+// CorruptError reports tasks.json as unparsable or invalid. Such a file is never overwritten.
 type CorruptError struct {
 	Path    string
 	BakPath string
@@ -41,12 +42,12 @@ func (e *CorruptError) Error() string {
 
 func (e *CorruptError) Unwrap() error { return e.Err }
 
-// Hint は復旧手順を返す。
+// Hint returns how to recover.
 func (e *CorruptError) Hint() string {
 	return fmt.Sprintf("書き込み前の内容は %s に残っている。内容を確認して手動で復旧する（taskherd は自動上書きしない）", e.BakPath)
 }
 
-// LockError はロック待ちが timeout したことを表す。
+// LockError reports that waiting for the lock timed out.
 type LockError struct {
 	Path    string
 	Timeout time.Duration
@@ -59,26 +60,26 @@ func (e *LockError) Error() string {
 
 func (e *LockError) Unwrap() error { return e.Err }
 
-// Hint は復旧手順を返す。
+// Hint returns how to recover.
 func (e *LockError) Hint() string {
 	return "他の taskherd プロセスが書き込み中の可能性がある。完了を待ってから再実行する"
 }
 
-// Store は 1 つのデータディレクトリに対する読み書きを担う。
+// Store reads and writes one data directory.
 type Store struct {
 	dir         string
 	lockTimeout time.Duration
 }
 
-// Option は Store の生成オプション。
+// Option configures a Store.
 type Option func(*Store)
 
-// WithLockTimeout はロック待ちの上限を変更する。
+// WithLockTimeout changes how long Update waits for the lock.
 func WithLockTimeout(d time.Duration) Option {
 	return func(s *Store) { s.lockTimeout = d }
 }
 
-// New は dir をデータディレクトリとする Store を返す。
+// New returns a Store over the data directory dir.
 func New(dir string, opts ...Option) *Store {
 	s := &Store{dir: dir, lockTimeout: defaultLockTimeout}
 	for _, opt := range opts {
@@ -92,15 +93,15 @@ func (s *Store) TasksPath() string { return filepath.Join(s.dir, tasksFileName) 
 func (s *Store) BakPath() string   { return filepath.Join(s.dir, bakFileName) }
 func (s *Store) LockPath() string  { return filepath.Join(s.dir, lockFileName) }
 
-// Load は tasks.json を読み込む。ファイルが無ければ空のデータを返す。
-// 原子 rename でのみ更新されるため、ロックを取らずに読んでも中間状態は見えない。
+// Load reads tasks.json, returning empty data when the file does not exist.
+// Reads take no lock: the file only ever changes by atomic rename, so no partial state is visible.
 func (s *Store) Load() (*model.File, error) {
 	_, f, err := s.read()
 	return f, err
 }
 
-// Update はロック内で「再読込 → 検証 → 変更適用 → .bak 退避 → 原子書込」を 1 トランザクションで実行する。
-// fn はロック取得後に読み直した内容を受け取るため、ロック外で読んだ内容を書き戻す経路は生じない。
+// Update runs re-read, validate, mutate, back up and atomic write as one transaction under the lock.
+// fn receives data read after the lock was taken, so no content read outside the lock is written back.
 func (s *Store) Update(ctx context.Context, fn func(*model.File) error) error {
 	if err := s.ensureDir(); err != nil {
 		return err
@@ -126,7 +127,7 @@ func (s *Store) Update(ctx context.Context, fn func(*model.File) error) error {
 	if err != nil {
 		return err
 	}
-	// .bak は rename より前に残す（後にすると .bak も新内容になり、誤削除を復旧できない）。
+	// The backup must land before the rename; afterwards it would hold the new content and recover nothing.
 	if raw != nil {
 		if err := writeFileAtomic(s.BakPath(), raw); err != nil {
 			return fmt.Errorf("バックアップを書けない: %w", err)
@@ -153,7 +154,7 @@ func (s *Store) acquire(ctx context.Context, lock *flock.Flock) error {
 	return nil
 }
 
-// read は tasks.json の生バイト列と解析結果を返す。ファイルが無い場合は raw=nil と空データ。
+// read returns the raw bytes and the parsed file, or raw=nil and empty data when the file is absent.
 func (s *Store) read() ([]byte, *model.File, error) {
 	raw, err := os.ReadFile(s.TasksPath())
 	if errors.Is(err, os.ErrNotExist) {
@@ -174,7 +175,7 @@ func (s *Store) ensureDir() error {
 	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
 		return fmt.Errorf("%s を作成できない: %w", s.dir, err)
 	}
-	// MkdirAll は umask 適用後の権限で作るため、既存ディレクトリを含めて明示的に締める。
+	// MkdirAll applies umask, so the mode is set explicitly here (this also tightens an existing directory).
 	if err := os.Chmod(s.dir, dirPerm); err != nil {
 		return fmt.Errorf("%s の権限を設定できない: %w", s.dir, err)
 	}

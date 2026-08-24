@@ -1,5 +1,5 @@
-// Package model は taskherd のタスクデータモデルと、その検証・変更操作を提供する。
-// 永続化（ファイル入出力・排他制御）は store パッケージが担う。
+// Package model holds the taskherd task data model with its validation and mutations.
+// Persistence (file IO, locking) belongs to the store package.
 package model
 
 import (
@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// CurrentVersion は本バイナリが読み書きできる tasks.json の version。
+// CurrentVersion is the tasks.json version this binary can read and write.
 const CurrentVersion = 1
 
 const dateLayout = "2006-01-02"
@@ -23,13 +23,13 @@ var (
 	ErrEmptyStatus  = errors.New("ステータスが空")
 )
 
-// Timestamp は RFC 3339 表記の時刻。
+// Timestamp is a point in time in RFC 3339 notation.
 type Timestamp string
 
-// Date は YYYY-MM-DD 表記のカレンダー日付。
+// Date is a calendar date in YYYY-MM-DD notation.
 type Date string
 
-// LinkKind は外部リンクの種別。URL から自動判別する。
+// LinkKind is the kind of an external link, derived from its URL.
 type LinkKind string
 
 const (
@@ -39,14 +39,14 @@ const (
 	LinkKindOther       LinkKind = "other"
 )
 
-// File は tasks.json 全体。
+// File is the whole tasks.json document.
 type File struct {
 	Version int    `json:"version"`
 	NextID  int    `json:"next_id"`
 	Tasks   []Task `json:"tasks"`
 }
 
-// Task は 1 件のタスク。
+// Task is a single task.
 type Task struct {
 	ID        int          `json:"id"`
 	Title     string       `json:"title"`
@@ -59,7 +59,7 @@ type Task struct {
 	UpdatedAt Timestamp    `json:"updated_at"`
 }
 
-// SessionRef はタスクに紐づくエージェントセッション。pane_id は可変キーのため保存しない。
+// SessionRef is an agent session linked to a task. pane_id is volatile, so it is not stored.
 type SessionRef struct {
 	Agent     string    `json:"agent"`
 	SessionID string    `json:"session_id"`
@@ -68,7 +68,7 @@ type SessionRef struct {
 	LinkedAt  Timestamp `json:"linked_at"`
 }
 
-// Link はタスクに紐づく外部リンク。
+// Link is an external link attached to a task.
 type Link struct {
 	URL     string    `json:"url"`
 	Kind    LinkKind  `json:"kind"`
@@ -76,7 +76,7 @@ type Link struct {
 	AddedAt Timestamp `json:"added_at"`
 }
 
-// TaskInput は新規タスクの属性。
+// TaskInput carries the attributes of a task to create.
 type TaskInput struct {
 	Title  string
 	Status string
@@ -84,17 +84,17 @@ type TaskInput struct {
 	Note   string
 }
 
-// NewFile は空の tasks.json 相当を返す。
+// NewFile returns the empty equivalent of tasks.json.
 func NewFile() *File {
 	return &File{Version: CurrentVersion, NextID: 1, Tasks: []Task{}}
 }
 
-// NewTimestamp は t を RFC 3339（ローカルオフセット付き）の Timestamp にする。
+// NewTimestamp formats t as RFC 3339 with its local offset.
 func NewTimestamp(t time.Time) Timestamp {
 	return Timestamp(t.Format(time.RFC3339))
 }
 
-// ParseDate は YYYY-MM-DD 表記を検証して Date にする。
+// ParseDate validates YYYY-MM-DD notation and returns it as a Date.
 func ParseDate(s string) (Date, error) {
 	if _, err := time.Parse(dateLayout, s); err != nil {
 		return "", fmt.Errorf("日付は YYYY-MM-DD 形式で指定する: %q", s)
@@ -102,17 +102,17 @@ func ParseDate(s string) (Date, error) {
 	return Date(s), nil
 }
 
-// Time は Timestamp を time.Time に変換する。
+// Time converts the Timestamp to time.Time.
 func (t Timestamp) Time() (time.Time, error) {
 	return time.Parse(time.RFC3339, string(t))
 }
 
-// Time は Date を、その日の 0 時（ローカル）の time.Time に変換する。
+// Time converts the Date to midnight local time.
 func (d Date) Time() (time.Time, error) {
 	return time.ParseInLocation(dateLayout, string(d), time.Local)
 }
 
-// ParseFile は tasks.json のバイト列を解析し、§3.1 の検証規則を適用する。
+// ParseFile parses tasks.json bytes and applies the validation rules.
 func ParseFile(data []byte) (*File, error) {
 	var f File
 	if err := json.Unmarshal(data, &f); err != nil {
@@ -125,7 +125,7 @@ func ParseFile(data []byte) (*File, error) {
 	return &f, nil
 }
 
-// MarshalFile は tasks.json のバイト列を生成する。
+// MarshalFile renders the file as tasks.json bytes.
 func MarshalFile(f *File) ([]byte, error) {
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
@@ -134,7 +134,7 @@ func MarshalFile(f *File) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-// Normalize は省略された配列を空スライスに揃える（JSON 出力を null でなく [] にする）。
+// Normalize replaces omitted arrays with empty slices so JSON output shows [] instead of null.
 func (f *File) Normalize() {
 	for i := range f.Tasks {
 		if f.Tasks[i].Sessions == nil {
@@ -149,7 +149,7 @@ func (f *File) Normalize() {
 	}
 }
 
-// Task は id に対応するタスクへのポインタを返す。返り値への変更は File に反映される。
+// Task returns a pointer to the task with the given id; mutations through it reach the File.
 func (f *File) Task(id int) (*Task, error) {
 	for i := range f.Tasks {
 		if f.Tasks[i].ID == id {
@@ -159,7 +159,7 @@ func (f *File) Task(id int) (*Task, error) {
 	return nil, fmt.Errorf("#%d: %w", id, ErrTaskNotFound)
 }
 
-// AddTask は next_id を採番して新規タスクを追加する。
+// AddTask appends a task using next_id as its id.
 func (f *File) AddTask(in TaskInput, now time.Time) (*Task, error) {
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
@@ -170,7 +170,7 @@ func (f *File) AddTask(in TaskInput, now time.Time) (*Task, error) {
 	}
 
 	ts := NewTimestamp(now)
-	// next_id > max(id) は読込時に検証済みのため、この採番で id は一意になる。
+	// next_id > max(id) is validated on read, which is what makes this id unique.
 	task := Task{
 		ID:        f.NextID,
 		Title:     title,
@@ -187,7 +187,7 @@ func (f *File) AddTask(in TaskInput, now time.Time) (*Task, error) {
 	return &f.Tasks[len(f.Tasks)-1], nil
 }
 
-// RemoveTask は id のタスクを物理削除する。next_id は減らさない（id を再利用しない）。
+// RemoveTask deletes the task outright. next_id is never lowered, so ids are not reused.
 func (f *File) RemoveTask(id int) (*Task, error) {
 	for i := range f.Tasks {
 		if f.Tasks[i].ID != id {
@@ -229,7 +229,7 @@ func (t *Task) SetNote(note string, now time.Time) {
 	t.touch(now)
 }
 
-// AppendNote は既存 note の末尾に改行区切りで追記する。
+// AppendNote appends to the existing note on a new line.
 func (t *Task) AppendNote(note string, now time.Time) {
 	if t.Note == "" {
 		t.Note = note
@@ -239,7 +239,7 @@ func (t *Task) AppendNote(note string, now time.Time) {
 	t.touch(now)
 }
 
-// AddLink は外部リンクを追加する。同一 URL の重複は unlink の指定が曖昧になるため拒否する。
+// AddLink attaches an external link. Duplicate URLs are rejected because unlink identifies links by URL.
 func (t *Task) AddLink(url string, kind LinkKind, note string, now time.Time) (*Link, error) {
 	for _, existing := range t.Links {
 		if existing.URL == url {

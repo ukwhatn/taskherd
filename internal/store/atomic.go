@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 )
 
-// writeFileAtomic は temp ファイルへ書いて fsync し、rename で差し替えたうえで親ディレクトリを fsync する。
-// rename の永続化には rename 後の親ディレクトリ fsync が必要（temp の fsync だけでは足りない）。
+// writeFileAtomic writes to a temp file, fsyncs it, renames it over path and fsyncs the parent
+// directory: durability of the rename itself requires that last fsync, not just the file's.
 func writeFileAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// ColumnKind は列の性質。terminal 列は board で折り畳み、list の既定表示から除く。
+// ColumnKind marks how a column behaves. Terminal columns collapse on the board and are hidden from list by default.
 type ColumnKind string
 
 const (
@@ -13,7 +13,7 @@ const (
 	ColumnKindTerminal ColumnKind = "terminal"
 )
 
-// Column は kanban の 1 列。config で定義され、Task.Status がこの ID を指す。
+// Column is one kanban column, defined in config and referenced by Task.Status.
 type Column struct {
 	ID    string     `toml:"id" json:"id"`
 	Label string     `toml:"label" json:"label"`
@@ -21,10 +21,10 @@ type Column struct {
 	Color string     `toml:"color" json:"color"`
 }
 
-// Columns は列の定義列。並び順が board / list の表示順になる。
+// Columns is the ordered column set; the order drives board and list display.
 type Columns []Column
 
-// DefaultColumns は config 未設定時に使う既定 6 列。
+// DefaultColumns returns the six columns used when config defines none.
 func DefaultColumns() Columns {
 	return Columns{
 		{ID: "todo", Label: "ToDo", Kind: ColumnKindOpen, Color: "gray"},
@@ -36,7 +36,7 @@ func DefaultColumns() Columns {
 	}
 }
 
-// Validate は列定義の重複・空定義・未知の kind を検出する。
+// Validate detects duplicate ids, empty definitions and unknown kinds.
 func (cs Columns) Validate() error {
 	var violations []Violation
 	add := func(path, format string, args ...any) {
@@ -72,7 +72,7 @@ func (cs Columns) Validate() error {
 	return nil
 }
 
-// Find は id に一致する列を返す。
+// Find returns the column with the given id.
 func (cs Columns) Find(id string) (Column, bool) {
 	for _, col := range cs {
 		if col.ID == id {
@@ -82,7 +82,7 @@ func (cs Columns) Find(id string) (Column, bool) {
 	return Column{}, false
 }
 
-// Index は id の並び順を返す。未定義の列 id は -1（board 末尾の (unknown) 列相当）。
+// Index returns the display position of id, or -1 for an undefined column.
 func (cs Columns) Index(id string) int {
 	for i, col := range cs {
 		if col.ID == id {
@@ -92,7 +92,7 @@ func (cs Columns) Index(id string) int {
 	return -1
 }
 
-// IDs は定義順の列 id を返す。
+// IDs returns the column ids in definition order.
 func (cs Columns) IDs() []string {
 	ids := make([]string, 0, len(cs))
 	for _, col := range cs {
@@ -101,7 +101,7 @@ func (cs Columns) IDs() []string {
 	return ids
 }
 
-// OpenIDs は kind=open の列 id を定義順で返す（list の既定フィルタ）。
+// OpenIDs returns the ids of open columns in definition order.
 func (cs Columns) OpenIDs() []string {
 	ids := make([]string, 0, len(cs))
 	for _, col := range cs {

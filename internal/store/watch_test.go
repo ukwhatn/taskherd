@@ -38,7 +38,7 @@ func TestWatchNotifiesAfterAtomicRename(t *testing.T) {
 	}
 	waitForEvent(t, w.Events(), "tasks.json の新規作成")
 
-	// 2 回目以降は既存ファイルへの rename 上書きになり、inode が入れ替わる。
+	// From the second write on, the rename replaces an existing file and swaps the inode.
 	if err := st.Update(context.Background(), addTask("2 件目")); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}

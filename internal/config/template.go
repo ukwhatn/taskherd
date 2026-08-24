@@ -1,7 +1,7 @@
 package config
 
-// defaultFileContent は config init が書き出す内容。Default() と同じ設定を表す。
-// 環境依存の値（GHES ホスト・Jira サイト・メールアドレス）は例としてコメントアウトしておく。
+// defaultFileContent is what config init writes; it must describe the same settings as Default().
+// Environment specific values (GHES hosts, Jira site, address) stay commented out as examples.
 const defaultFileContent = `# taskherd 設定ファイル
 # 生成: taskherd config init / パス上書き: 環境変数 TASKHERD_CONFIG
 
@@ -60,7 +60,7 @@ color = "gray"
 token_env = "TASKHERD_JIRA_TOKEN"
 `
 
-// DefaultFileContent は既定 config.toml の内容を返す。
+// DefaultFileContent returns the generated config.toml content.
 func DefaultFileContent() string {
 	return defaultFileContent
 }

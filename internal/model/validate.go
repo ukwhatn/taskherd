@@ -6,13 +6,13 @@ import (
 	"time"
 )
 
-// Violation は検証違反 1 件。Path は tasks.json 内の位置（例: tasks[0].due）。
+// Violation is one validation failure. Path locates it in the document (e.g. tasks[0].due).
 type Violation struct {
 	Path    string
 	Message string
 }
 
-// ValidationError は検証違反の集合。書き込みを拒否する根拠として全件を保持する。
+// ValidationError collects every violation, so a refused write can report all of them.
 type ValidationError struct {
 	Subject    string
 	Violations []Violation
@@ -31,7 +31,7 @@ func (e *ValidationError) Error() string {
 	return strings.Join(lines, "\n")
 }
 
-// VersionMismatchError は version が本バイナリの対応値と一致しないことを表す。
+// VersionMismatchError reports a version this binary does not handle.
 type VersionMismatchError struct {
 	Got  int
 	Want int
@@ -41,7 +41,7 @@ func (e *VersionMismatchError) Error() string {
 	return fmt.Sprintf("tasks.json の version が %d（このバイナリの対応は %d）", e.Got, e.Want)
 }
 
-// Validate は §3.1 の検証規則を適用する。status は未知の値も通す（(unknown) 列として扱う）。
+// Validate applies the read-time rules. Unknown status values pass; they render as an (unknown) column.
 func Validate(f *File) error {
 	if f.Version != CurrentVersion {
 		return &VersionMismatchError{Got: f.Version, Want: CurrentVersion}

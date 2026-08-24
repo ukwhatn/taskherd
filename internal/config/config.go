@@ -1,4 +1,4 @@
-// Package config は config.toml の読み込みと、データ・設定ファイルのパス解決を担う。
+// Package config loads config.toml and resolves the data and config file paths.
 package config
 
 import (
@@ -13,13 +13,13 @@ import (
 
 const appName = "taskherd"
 
-// Paths は taskherd が使うファイルの置き場所。個別ファイル名は各パッケージが持つ。
+// Paths locates the directories taskherd uses; individual file names belong to their own packages.
 type Paths struct {
 	StateDir   string
 	ConfigPath string
 }
 
-// Config は config.toml の内容。
+// Config is the content of config.toml.
 type Config struct {
 	Board   Board
 	Columns model.Columns
@@ -27,25 +27,27 @@ type Config struct {
 	Jira    Jira
 }
 
-// Board は board（TUI）とライブ取得の挙動。
+// Board configures the board TUI and the live fetch cadence.
 type Board struct {
 	RefreshIntervalMinutes int
 	CacheTTLMinutes        int
 }
 
-// GitHub は GitHub / GHES の設定。
+// GitHub configures GitHub and GHES handling.
 type GitHub struct {
 	GHESHosts []string
 }
 
-// Jira は Jira Cloud の設定。トークンは token_env で指定した環境変数から読む（平文保存はしない）。
+// Jira configures Jira Cloud. The token is read from the environment variable named by TokenEnv,
+// never stored in the file.
 type Jira struct {
 	Site     string
 	Email    string
 	TokenEnv string
 }
 
-// fileConfig は config.toml の生の形。未指定と 0 を区別するためスカラーはポインタで受ける。
+// fileConfig mirrors config.toml. Scalars are pointers so that an explicit 0 is distinguishable
+// from an absent key (0 disables background refresh).
 type fileConfig struct {
 	Board struct {
 		RefreshIntervalMinutes *int `toml:"refresh_interval_minutes"`
@@ -62,7 +64,7 @@ type fileConfig struct {
 	} `toml:"jira"`
 }
 
-// Default は config.toml が無いときに使う既定値。
+// Default returns the settings used when config.toml is absent.
 func Default() *Config {
 	return &Config{
 		Board:   Board{RefreshIntervalMinutes: 10, CacheTTLMinutes: 5},
@@ -71,7 +73,7 @@ func Default() *Config {
 	}
 }
 
-// ResolvePaths は環境変数からパスを決める。データは XDG_STATE_HOME、config は TASKHERD_CONFIG で上書きできる。
+// ResolvePaths derives the paths from the environment: XDG_STATE_HOME for data, TASKHERD_CONFIG for the config file.
 func ResolvePaths(getenv func(string) string) (Paths, error) {
 	var paths Paths
 
@@ -98,7 +100,7 @@ func ResolvePaths(getenv func(string) string) (Paths, error) {
 	return paths, nil
 }
 
-// Load は config.toml を読む。ファイルが無ければ既定値を返す（config init を必須にしない）。
+// Load reads config.toml, falling back to defaults when it does not exist so config init stays optional.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -142,7 +144,7 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// Validate は列定義と間隔設定を検証する。
+// Validate checks the column definitions and the interval settings.
 func (c *Config) Validate() error {
 	var violations []model.Violation
 
@@ -172,12 +174,12 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Classifier は URL 種別判別器を返す。
+// Classifier returns the link classifier built from the configured hosts.
 func (c *Config) Classifier() model.URLClassifier {
 	return model.URLClassifier{GHESHosts: c.GitHub.GHESHosts, JiraSite: c.Jira.Site}
 }
 
-// DefaultStatus は add / board で既定の列 id（先頭列）を返す。
+// DefaultStatus returns the column id used when none is given: the first column.
 func (c *Config) DefaultStatus() string {
 	if len(c.Columns) == 0 {
 		return ""

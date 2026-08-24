@@ -7,18 +7,18 @@ import (
 	"strings"
 )
 
-// jiraKeyPattern は Jira の課題キー（PROJ-123）。実在するキーを弾かないため大小文字を問わない。
+// jiraKeyPattern matches a Jira issue key (PROJ-123). Case is ignored so real keys are not rejected.
 var jiraKeyPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*-[0-9]+$`)
 
 const githubHost = "github.com"
 
-// URLClassifier は config の設定値に基づいて URL の種別を判別する。
+// URLClassifier decides the kind of a URL from the configured hosts.
 type URLClassifier struct {
 	GHESHosts []string
 	JiraSite  string
 }
 
-// Classify は URL から LinkKind を判別する。判別できない URL は LinkKindOther。
+// Classify returns the LinkKind of raw. Anything unrecognized is LinkKindOther.
 func (c URLClassifier) Classify(raw string) LinkKind {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -56,8 +56,8 @@ func (c URLClassifier) isGHESHost(host string) bool {
 	return false
 }
 
-// classifyGitHubPath は <owner>/<repo>/pull|issues/<n> を判別する。
-// 後続セグメント（/files 等）は同じ PR/Issue を指すため無視する。
+// classifyGitHubPath matches <owner>/<repo>/pull|issues/<n>.
+// Trailing segments (/files and friends) still point at the same PR or issue, so they are ignored.
 func classifyGitHubPath(segments []string) LinkKind {
 	if len(segments) < 4 || !isPositiveInt(segments[3]) {
 		return LinkKindOther
@@ -72,8 +72,8 @@ func classifyGitHubPath(segments []string) LinkKind {
 	}
 }
 
-// normalizeHost はスキーム・パス・ポートを落として比較用のホスト名にする。
-// config には "https://dena.atlassian.net/" のような表記も書かれうる。
+// normalizeHost strips scheme, path and port for comparison,
+// because config values may be written as "https://example.atlassian.net/".
 func normalizeHost(raw string) string {
 	host := strings.TrimSpace(strings.ToLower(raw))
 	if host == "" {

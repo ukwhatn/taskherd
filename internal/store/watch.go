@@ -8,8 +8,8 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// Watcher は tasks.json の変更通知。Events は合体（coalesce）されるため、
-// 受信側は「変わった」ことだけを知り、内容は Load で読み直す。
+// Watcher reports changes to tasks.json. Events are coalesced: a receiver learns only that
+// something changed and re-reads the content with Load.
 type Watcher struct {
 	fsw    *fsnotify.Watcher
 	events chan struct{}
@@ -17,9 +17,9 @@ type Watcher struct {
 	once   sync.Once
 }
 
-// Watch は tasks.json の変更を監視する。
-// 監視対象は tasks.json ではなく親ディレクトリ（原子 rename で inode が入れ替わり、
-// ファイル自体に張った監視は新しい inode を追えないため）。
+// Watch observes tasks.json for changes.
+// It watches the parent directory rather than the file, because an atomic rename swaps the inode
+// and a watch on the file cannot follow the new one.
 func (s *Store) Watch() (*Watcher, error) {
 	if err := s.ensureDir(); err != nil {
 		return nil, err
@@ -43,13 +43,13 @@ func (s *Store) Watch() (*Watcher, error) {
 	return w, nil
 }
 
-// Events は tasks.json が変わったことを通知する。Close 後にクローズされる。
+// Events signals that tasks.json changed. It is closed after Close.
 func (w *Watcher) Events() <-chan struct{} { return w.events }
 
-// Errors は監視中のエラーを通知する。
+// Errors reports failures from the underlying watcher.
 func (w *Watcher) Errors() <-chan error { return w.errs }
 
-// Close は監視を終了する。複数回呼んでよい。
+// Close stops watching. It is safe to call more than once.
 func (w *Watcher) Close() error {
 	var err error
 	w.once.Do(func() {
@@ -70,7 +70,7 @@ func (w *Watcher) loop() {
 			if filepath.Base(ev.Name) != tasksFileName {
 				continue
 			}
-			// Remove も拾う: rename での上書きは、旧 inode の削除として届くプラットフォームがある。
+			// Remove counts too: on some platforms a rename over the file arrives as the old inode's deletion.
 			if !ev.Has(fsnotify.Create) && !ev.Has(fsnotify.Write) &&
 				!ev.Has(fsnotify.Rename) && !ev.Has(fsnotify.Remove) {
 				continue
