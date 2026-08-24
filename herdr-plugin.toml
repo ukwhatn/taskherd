@@ -1,0 +1,35 @@
+id = "taskherd"
+name = "Taskherd"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Task board linked to herdr agent sessions, PRs, and Jira tickets"
+platforms = ["macos", "linux"]
+
+[[build]]
+command = ["go", "build", "-o", "bin/taskherd", "./cmd/taskherd"]
+
+[[panes]]
+id = "board"
+title = "Taskherd board"
+placement = "overlay"
+command = ["bin/taskherd", "board"]
+
+[[panes]]
+id = "picker"
+title = "Link pane to task"
+placement = "popup"
+width = "60%"
+height = "60%"
+command = ["bin/taskherd", "picker"]
+
+[[actions]]
+id = "open-board"
+title = "Open Taskherd board"
+contexts = ["global"]
+command = ["bin/taskherd", "plugin", "open-board"]
+
+[[actions]]
+id = "link-pane"
+title = "Link this pane to a task"
+contexts = ["pane"]
+command = ["bin/taskherd", "plugin", "link-pane"]
