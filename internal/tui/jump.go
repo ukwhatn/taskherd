@@ -8,15 +8,15 @@ import (
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
-// beginJump starts the jump flow for the focused card: straight to the session when there is
-// only one, through a picker when there are several.
+// beginJump starts the jump flow for the active task: straight to the session when there is only
+// one, through a picker when there are several.
 func (b *Board) beginJump() tea.Cmd {
-	task := b.currentTask()
+	task := b.activeTask()
 	if task == nil {
 		return status("カードが選択されていない", true)
 	}
 	if len(task.Sessions) == 0 {
-		return status(fmt.Sprintf("#%d にセッションが紐づいていない（taskherd session link %d --current）", task.ID, task.ID), true)
+		return status(fmt.Sprintf("#%d にセッションが紐づいていない（詳細モーダルの ＋セッションを紐づける）", task.ID), true)
 	}
 	if b.deps.Herdr == nil {
 		return status("herdr に接続できないため jump できない", true)
@@ -25,9 +25,32 @@ func (b *Board) beginJump() tea.Cmd {
 		return b.jumpTo(task.ID, task.Title, task.Sessions[0])
 	}
 
-	b.mode = modeJump
 	b.jump = jumpState{taskID: task.ID, title: task.Title, sessions: task.Sessions}
+	b.openOverlay(modeJump)
 	return nil
+}
+
+func (b *Board) handleJumpKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if !isCommandKey(msg) {
+		return b, nil
+	}
+	switch msg.String() {
+	case "esc":
+		b.closeOverlay()
+	case "down":
+		if b.jump.cursor < len(b.jump.sessions)-1 {
+			b.jump.cursor++
+		}
+	case "up":
+		if b.jump.cursor > 0 {
+			b.jump.cursor--
+		}
+	case "enter":
+		target := b.jump
+		b.closeOverlay()
+		return b, b.jumpTo(target.taskID, target.title, target.sessions[target.cursor])
+	}
+	return b, nil
 }
 
 // jumpTo acts on one session: focus its pane when herdr still has it, otherwise ask before resuming.
@@ -50,13 +73,13 @@ func (b *Board) jumpTo(taskID int, title string, session model.SessionRef) tea.C
 		return status(fmt.Sprintf("%s セッションの pane が消滅している。この agent の resume には未対応。%s で手動再開する", session.Agent, session.Cwd), true)
 	}
 
-	b.mode = modeConfirm
-	b.confirm = confirmState{
+	b.openConfirm(confirmState{
+		kind:    confirmResume,
 		prompt:  fmt.Sprintf("pane が消滅している。%s で claude --resume を起動する", session.Cwd),
 		taskID:  taskID,
 		title:   title,
 		session: session,
-	}
+	})
 	return nil
 }
 

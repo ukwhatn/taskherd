@@ -305,6 +305,19 @@ func (t *Task) Session(sessionID string) (*SessionRef, bool) {
 	return nil, false
 }
 
+// SetLinkNote replaces the memo on an already-attached link.
+func (t *Task) SetLinkNote(url, note string, now time.Time) error {
+	for i := range t.Links {
+		if t.Links[i].URL != url {
+			continue
+		}
+		t.Links[i].Note = strings.TrimSpace(note)
+		t.touch(now)
+		return nil
+	}
+	return fmt.Errorf("%s: %w", url, ErrLinkNotFound)
+}
+
 func (t *Task) RemoveLink(url string, now time.Time) (*Link, error) {
 	for i := range t.Links {
 		if t.Links[i].URL != url {

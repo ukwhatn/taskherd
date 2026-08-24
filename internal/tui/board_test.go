@@ -19,23 +19,18 @@ func TestBoardMovesFocusBetweenColumns(t *testing.T) {
 	if h.board.colIdx != 0 {
 		t.Fatalf("colIdx = %d, want 0", h.board.colIdx)
 	}
-	h.key("l")
-	if h.board.colIdx != 1 {
-		t.Errorf("l 後の colIdx = %d, want 1", h.board.colIdx)
-	}
-	h.key("h")
-	if h.board.colIdx != 0 {
-		t.Errorf("h 後の colIdx = %d, want 0", h.board.colIdx)
-	}
-	// The edges hold: h at the leftmost column is a no-op rather than a wrap.
-	h.key("h")
-	if h.board.colIdx != 0 {
-		t.Errorf("左端で h した後の colIdx = %d, want 0", h.board.colIdx)
-	}
-
 	h.key("right")
 	if h.board.colIdx != 1 {
 		t.Errorf("→ 後の colIdx = %d, want 1", h.board.colIdx)
+	}
+	h.key("left")
+	if h.board.colIdx != 0 {
+		t.Errorf("← 後の colIdx = %d, want 0", h.board.colIdx)
+	}
+	// The edges hold: ← at the leftmost column is a no-op rather than a wrap.
+	h.key("left")
+	if h.board.colIdx != 0 {
+		t.Errorf("左端で ← した後の colIdx = %d, want 0", h.board.colIdx)
 	}
 }
 
@@ -43,76 +38,176 @@ func TestBoardMovesSelectionWithinColumn(t *testing.T) {
 	store := newFakeStore(task(1, "todo"), task(2, "todo"), task(3, "todo"))
 	h := newHarness(t, Deps{Tasks: store}, Settings{})
 
-	h.key("j")
+	h.key("down")
 	if got := h.board.currentTask(); got == nil || got.ID != 2 {
-		t.Fatalf("j 後の選択 = %+v, want #2", got)
+		t.Fatalf("↓ 後の選択 = %+v, want #2", got)
 	}
 	h.key("down")
 	if got := h.board.currentTask(); got == nil || got.ID != 3 {
-		t.Fatalf("↓ 後の選択 = %+v, want #3", got)
+		t.Fatalf("↓↓ 後の選択 = %+v, want #3", got)
 	}
-	h.key("j")
+	h.key("down")
 	if got := h.board.currentTask(); got == nil || got.ID != 3 {
-		t.Errorf("末尾で j した後の選択 = %+v, want #3 のまま", got)
+		t.Errorf("末尾で ↓ した後の選択 = %+v, want #3 のまま", got)
 	}
-	h.key("k")
+	h.key("up")
 	if got := h.board.currentTask(); got == nil || got.ID != 2 {
-		t.Errorf("k 後の選択 = %+v, want #2", got)
+		t.Errorf("↑ 後の選択 = %+v, want #2", got)
 	}
 }
 
-// H/L change the task's status, and the change goes through the store rather than the board's
-// own copy of the data.
-func TestBoardMoveTaskWritesThroughStore(t *testing.T) {
+// v0.2 dropped the vim bindings: the letters they used are free for other meanings, so pressing
+// them must do nothing at all rather than quietly still moving the cursor.
+func TestBoardVimKeysAreInert(t *testing.T) {
+	store := newFakeStore(task(1, "todo"), task(2, "todo"), task(3, "working"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	for _, name := range []string{"h", "j", "k", "l", "H", "L", "n", "x"} {
+		h.key(name)
+		if h.board.colIdx != 0 {
+			t.Fatalf("%s で列が動いた: colIdx = %d", name, h.board.colIdx)
+		}
+		if got := h.board.currentTask(); got == nil || got.ID != 1 {
+			t.Fatalf("%s で選択が動いた: %+v", name, got)
+		}
+		if h.board.mode != modeBoard {
+			t.Fatalf("%s でモードが変わった: %v", name, h.board.mode)
+		}
+	}
+	if got := store.snapshot().Tasks[0].Status; got != "todo" {
+		t.Errorf("status = %q, want todo（旧 H/L で移動しない）", got)
+	}
+}
+
+// Tab opens the destination picker on the next column, so Enter alone is the one-step move that
+// H/L used to be.
+func TestBoardStatusSelectorDefaultsToNextColumn(t *testing.T) {
 	store := newFakeStore(task(1, "todo"))
 	h := newHarness(t, Deps{Tasks: store}, Settings{})
 
-	h.key("L")
-
-	file := store.snapshot()
-	if file.Tasks[0].Status != "working" {
-		t.Fatalf("status = %q, want working", file.Tasks[0].Status)
+	h.key("tab")
+	if h.board.mode != modeStatusSelect {
+		t.Fatalf("mode = %v, want modeStatusSelect", h.board.mode)
 	}
-	if store.updates != 1 {
-		t.Errorf("updates = %d, want 1", store.updates)
+	if got := h.board.statusSel.targets[h.board.statusSel.cursor].ID; got != "working" {
+		t.Fatalf("既定の選択 = %q, want working（次の列）", got)
+	}
+
+	h.key("enter")
+
+	if got := store.snapshot().Tasks[0].Status; got != "working" {
+		t.Fatalf("status = %q, want working", got)
+	}
+	if h.board.mode != modeBoard {
+		t.Errorf("mode = %v, want modeBoard", h.board.mode)
 	}
 	// The cursor follows the card into its new column instead of staying on an empty slot.
 	if h.board.colIdx != 1 {
 		t.Errorf("colIdx = %d, want 1（移動先の列）", h.board.colIdx)
 	}
-	if got := h.board.currentTask(); got == nil || got.ID != 1 {
-		t.Errorf("選択 = %+v, want #1", got)
-	}
 }
 
-func TestBoardMoveTaskBackwards(t *testing.T) {
+func TestBoardStatusSelectorMovesWithArrows(t *testing.T) {
 	store := newFakeStore(task(1, "working"))
 	h := newHarness(t, Deps{Tasks: store}, Settings{})
-	h.key("l")
+	h.key("right")
 
-	h.key("H")
+	h.key("tab")
+	// Columns are todo / working / done, and the picker opened on done.
+	h.key("left")
+	h.key("left")
+	h.key("enter")
 
 	if got := store.snapshot().Tasks[0].Status; got != "todo" {
 		t.Errorf("status = %q, want todo", got)
 	}
 }
 
-// The (unknown) column holds tasks whose status was deleted from config. It is a place a card can
-// leave, never one it can be moved into.
-func TestBoardMoveOutOfUnknownColumn(t *testing.T) {
-	store := newFakeStore(task(1, "retired"))
+func TestBoardStatusSelectorCancels(t *testing.T) {
+	store := newFakeStore(task(1, "todo"))
 	h := newHarness(t, Deps{Tasks: store}, Settings{})
 
-	last := len(h.board.columns) - 1
-	if !h.board.columns[last].Unknown {
-		t.Fatalf("末尾が (unknown) でない: %+v", h.board.columns)
+	h.key("tab")
+	h.key("esc")
+
+	if h.board.mode != modeBoard {
+		t.Fatalf("mode = %v, want modeBoard", h.board.mode)
 	}
-	h.board.colIdx = last
+	if got := store.snapshot().Tasks[0].Status; got != "todo" {
+		t.Errorf("status = %q, want todo（esc で取消）", got)
+	}
+	if store.updates != 0 {
+		t.Errorf("updates = %d, want 0", store.updates)
+	}
+}
 
-	h.key("H")
+// The terminal column is a destination like any other; only (unknown) is excluded.
+func TestBoardStatusSelectorExcludesUnknownColumn(t *testing.T) {
+	store := newFakeStore(task(1, "retired"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+	h.board.colIdx = len(h.board.columns) - 1
 
-	if got := store.snapshot().Tasks[0].Status; got != "done" {
-		t.Errorf("status = %q, want done（(unknown) の左隣）", got)
+	h.key("tab")
+
+	for _, target := range h.board.statusSel.targets {
+		if target.Unknown {
+			t.Fatalf("移行先に (unknown) が含まれている: %+v", h.board.statusSel.targets)
+		}
+	}
+	if got := h.board.statusSel.targets[h.board.statusSel.cursor].ID; got != "todo" {
+		t.Errorf("既定の選択 = %q, want todo（(unknown) には次の列が無い）", got)
+	}
+	if !containsColumn(h.board.statusSel.targets, "done") {
+		t.Error("terminal 列が移行先に含まれていない")
+	}
+}
+
+func TestBoardStatusSelectorAtLastColumnStaysPut(t *testing.T) {
+	store := newFakeStore(task(1, "done"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+	h.key("t") // a collapsed column has no card to focus
+	h.key("right")
+	h.key("right")
+
+	h.key("tab")
+
+	if got := h.board.statusSel.targets[h.board.statusSel.cursor].ID; got != "done" {
+		t.Errorf("既定の選択 = %q, want done（右端は動かない）", got)
+	}
+}
+
+func TestBoardDeleteTaskAsksFirst(t *testing.T) {
+	store := newFakeStore(task(1, "todo"), task(2, "todo"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.key("backspace")
+	if h.board.mode != modeConfirm {
+		t.Fatalf("mode = %v, want modeConfirm", h.board.mode)
+	}
+	h.key("n")
+	if len(store.snapshot().Tasks) != 2 {
+		t.Fatal("n で中止したのにタスクが消えた")
+	}
+
+	h.key("backspace")
+	h.key("y")
+
+	tasks := store.snapshot().Tasks
+	if len(tasks) != 1 || tasks[0].ID != 2 {
+		t.Fatalf("tasks = %+v, want #2 のみ", tasks)
+	}
+}
+
+// The Delete key and Backspace are the same gesture on most keyboards, so both do this.
+func TestBoardDeleteKeyAlsoDeletes(t *testing.T) {
+	store := newFakeStore(task(1, "todo"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.key("delete")
+	h.key("y")
+
+	if len(store.snapshot().Tasks) != 0 {
+		t.Errorf("tasks = %+v, want 0 件", store.snapshot().Tasks)
 	}
 }
 
@@ -132,177 +227,6 @@ func TestBoardToggleTerminalCollapse(t *testing.T) {
 	h.key("t")
 	if !h.board.columns[len(h.board.columns)-1].Collapsed {
 		t.Error("t を再度押しても折り畳まれない")
-	}
-}
-
-func TestBoardAddTaskIntoFocusedColumn(t *testing.T) {
-	store := newFakeStore()
-	h := newHarness(t, Deps{Tasks: store}, Settings{})
-	h.key("l") // focus "working"
-
-	h.key("a")
-	if h.board.mode != modeInput {
-		t.Fatalf("mode = %v, want modeInput", h.board.mode)
-	}
-	h.typeText("新規タスク")
-	h.key("enter")
-
-	file := store.snapshot()
-	if len(file.Tasks) != 1 {
-		t.Fatalf("tasks = %+v, want 1 件", file.Tasks)
-	}
-	if file.Tasks[0].Title != "新規タスク" || file.Tasks[0].Status != "working" {
-		t.Errorf("task = %+v, want 新規タスク/working", file.Tasks[0])
-	}
-	if h.board.mode != modeBoard {
-		t.Errorf("mode = %v, want modeBoard", h.board.mode)
-	}
-}
-
-func TestBoardAddTaskCancelled(t *testing.T) {
-	store := newFakeStore()
-	h := newHarness(t, Deps{Tasks: store}, Settings{})
-
-	h.key("a")
-	h.typeText("捨てる")
-	h.key("esc")
-
-	if len(store.snapshot().Tasks) != 0 {
-		t.Error("esc で取り消したのにタスクが作られた")
-	}
-	if h.board.mode != modeBoard {
-		t.Errorf("mode = %v, want modeBoard", h.board.mode)
-	}
-}
-
-// A new task cannot be created with a status that does not exist, so the prompt falls back to a
-// real column when the cursor is parked on (unknown).
-func TestBoardAddTaskFromUnknownColumnUsesRealColumn(t *testing.T) {
-	store := newFakeStore(task(1, "retired"))
-	h := newHarness(t, Deps{Tasks: store}, Settings{})
-	h.board.colIdx = len(h.board.columns) - 1
-
-	h.key("a")
-	h.typeText("x")
-	h.key("enter")
-
-	created := store.snapshot().Tasks[1]
-	if created.Status != "todo" {
-		t.Errorf("status = %q, want todo", created.Status)
-	}
-}
-
-func TestBoardAddLink(t *testing.T) {
-	store := newFakeStore(task(1, "todo"))
-	links := &fakeLinks{}
-	h := newHarness(t, Deps{Tasks: store, Links: links, Cache: &fakeCache{}}, Settings{
-		Classifier: model.URLClassifier{},
-	})
-
-	h.key("x")
-	h.typeText("https://github.com/o/r/pull/7")
-	h.key("enter")
-
-	task := store.snapshot().Tasks[0]
-	if len(task.Links) != 1 {
-		t.Fatalf("links = %+v, want 1 件", task.Links)
-	}
-	if task.Links[0].Kind != model.LinkKindGitHubPR {
-		t.Errorf("kind = %q, want github_pr", task.Links[0].Kind)
-	}
-	// A link with no cached status yet is worth fetching straight away rather than at the next tick.
-	if len(links.calls) != 1 {
-		t.Errorf("RefreshLinks 呼び出し = %d 回, want 1", len(links.calls))
-	}
-}
-
-func TestBoardAddLinkRejectsBareText(t *testing.T) {
-	store := newFakeStore(task(1, "todo"))
-	h := newHarness(t, Deps{Tasks: store}, Settings{})
-
-	h.key("x")
-	h.typeText("github.com/o/r")
-	h.key("enter")
-
-	if len(store.snapshot().Tasks[0].Links) != 0 {
-		t.Error("スキーム無しの文字列がリンクとして登録された")
-	}
-	if !h.board.statusIsError {
-		t.Error("エラーが報告されていない")
-	}
-}
-
-func TestBoardDetailViewAndBack(t *testing.T) {
-	store := newFakeStore(model.Task{ID: 1, Title: "設計", Status: "todo", Note: "詳細メモ"})
-	h := newHarness(t, Deps{Tasks: store}, Settings{})
-
-	h.key("enter")
-	if h.board.mode != modeDetail {
-		t.Fatalf("mode = %v, want modeDetail", h.board.mode)
-	}
-	if view := h.board.render(); !strings.Contains(view, "詳細メモ") {
-		t.Errorf("詳細ビューに note が出ていない:\n%s", view)
-	}
-
-	h.key("esc")
-	if h.board.mode != modeBoard {
-		t.Errorf("mode = %v, want modeBoard", h.board.mode)
-	}
-}
-
-func TestBoardDetailEditsTitle(t *testing.T) {
-	store := newFakeStore(model.Task{ID: 1, Title: "旧", Status: "todo"})
-	h := newHarness(t, Deps{Tasks: store}, Settings{})
-
-	h.key("enter")
-	h.key("e")
-	if h.board.mode != modeInput {
-		t.Fatalf("mode = %v, want modeInput", h.board.mode)
-	}
-	if got := h.board.input.Value(); got != "旧" {
-		t.Errorf("prefill = %q, want 旧", got)
-	}
-	h.typeText("新")
-	h.key("enter")
-
-	if got := store.snapshot().Tasks[0].Title; got != "旧新" {
-		t.Errorf("title = %q, want 旧新", got)
-	}
-	// A prompt opened from the detail view returns there, not out to the board.
-	if h.board.mode != modeDetail {
-		t.Errorf("mode = %v, want modeDetail", h.board.mode)
-	}
-}
-
-func TestBoardDetailEditsDue(t *testing.T) {
-	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
-	h := newHarness(t, Deps{Tasks: store}, Settings{})
-
-	h.key("enter")
-	h.key("d")
-	h.typeText("2026-09-30")
-	h.key("enter")
-
-	got := store.snapshot().Tasks[0].Due
-	if got == nil || string(*got) != "2026-09-30" {
-		t.Fatalf("due = %v, want 2026-09-30", got)
-	}
-}
-
-func TestBoardDetailRejectsBadDue(t *testing.T) {
-	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
-	h := newHarness(t, Deps{Tasks: store}, Settings{})
-
-	h.key("enter")
-	h.key("d")
-	h.typeText("2026/09/30")
-	h.key("enter")
-
-	if store.snapshot().Tasks[0].Due != nil {
-		t.Error("不正な日付が保存された")
-	}
-	if !h.board.statusIsError {
-		t.Error("エラーが報告されていない")
 	}
 }
 
@@ -415,7 +339,8 @@ func TestBoardDegradesWithoutHerdr(t *testing.T) {
 	}
 
 	// The core still writes: task management does not depend on herdr.
-	h.key("L")
+	h.key("tab")
+	h.key("enter")
 	if got := store.snapshot().Tasks[0].Status; got != "working" {
 		t.Errorf("status = %q, want working（herdr 不達でも列移動は動く）", got)
 	}
@@ -561,7 +486,7 @@ func TestBoardJumpPicksBetweenSessions(t *testing.T) {
 	if h.board.mode != modeJump {
 		t.Fatalf("mode = %v, want modeJump", h.board.mode)
 	}
-	h.key("j")
+	h.key("down")
 	h.key("enter")
 
 	if len(herdrOps.focused) != 1 || herdrOps.focused[0] != "pane-2" {
@@ -599,7 +524,7 @@ func TestBoardRefreshTaskOnlyFetchesFocusedCard(t *testing.T) {
 	)
 	links := &fakeLinks{}
 	h := newHarness(t, Deps{Tasks: store, Links: links, Cache: &fakeCache{}}, Settings{})
-	h.key("j")
+	h.key("down")
 
 	h.key("r")
 
@@ -807,7 +732,8 @@ func TestBoardStoreErrorSurfacesOnFooter(t *testing.T) {
 	store.failWith = errUnavailable
 	h := newHarness(t, Deps{Tasks: store}, Settings{})
 
-	h.key("L")
+	h.key("tab")
+	h.key("enter")
 
 	if !h.board.statusIsError || h.board.status == "" {
 		t.Errorf("status = %q err=%v, want 失敗の報告", h.board.status, h.board.statusIsError)
@@ -843,6 +769,15 @@ func TestBoardRendersUnknownColumn(t *testing.T) {
 	if !strings.Contains(view, unknownColumnLabel) {
 		t.Errorf("(unknown) 列が描画されていない:\n%s", view)
 	}
+}
+
+func containsColumn(columns []Column, id string) bool {
+	for _, col := range columns {
+		if col.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // firstOf and secondOf pick one command out of a batch, so a test can run the part it means to

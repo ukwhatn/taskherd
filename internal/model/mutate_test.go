@@ -223,6 +223,16 @@ func TestTaskLinks(t *testing.T) {
 		t.Fatalf("links = %d, want 1", len(task.Links))
 	}
 
+	if err := task.SetLinkNote(prURL, "  レビュー待ち  ", later); err != nil {
+		t.Fatalf("SetLinkNote() error = %v", err)
+	}
+	if task.Links[0].Note != "レビュー待ち" {
+		t.Errorf("link.Note = %q, want レビュー待ち（前後空白は除く）", task.Links[0].Note)
+	}
+	if err := task.SetLinkNote("https://github.com/owner/repo/pull/2", "x", later); !errors.Is(err, model.ErrLinkNotFound) {
+		t.Errorf("未登録 URL の SetLinkNote error = %v, want ErrLinkNotFound", err)
+	}
+
 	if _, err := task.RemoveLink("https://github.com/owner/repo/pull/2", later); !errors.Is(err, model.ErrLinkNotFound) {
 		t.Errorf("未登録 URL の RemoveLink error = %v, want ErrLinkNotFound", err)
 	}
