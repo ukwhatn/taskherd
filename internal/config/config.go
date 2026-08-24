@@ -34,11 +34,18 @@ type Config struct {
 type Board struct {
 	RefreshIntervalMinutes int
 	CacheTTLMinutes        int
+	// Icons is the glyph vocabulary: "nerd", "ascii" or "none".
+	Icons string
+	// Hyperlinks wraps link rows in OSC 8 so a terminal that understands it opens them on a click.
+	Hyperlinks bool
 }
 
 // GitHub configures GitHub and GHES handling.
 type GitHub struct {
 	GHESHosts []string
+	// Accounts names the gh account to use per host, so fetching does not depend on which account
+	// gh happens to have active. The value is an account name, never a token.
+	Accounts map[string]string
 }
 
 // Jira configures Jira Cloud. The token is read from the environment variable named by TokenEnv,
@@ -54,12 +61,15 @@ type Jira struct {
 type fileConfig struct {
 	Editor *string `toml:"editor"`
 	Board  struct {
-		RefreshIntervalMinutes *int `toml:"refresh_interval_minutes"`
-		CacheTTLMinutes        *int `toml:"cache_ttl_minutes"`
+		RefreshIntervalMinutes *int    `toml:"refresh_interval_minutes"`
+		CacheTTLMinutes        *int    `toml:"cache_ttl_minutes"`
+		Icons                  *string `toml:"icons"`
+		Hyperlinks             *bool   `toml:"hyperlinks"`
 	} `toml:"board"`
 	Columns []model.Column `toml:"columns"`
 	GitHub  struct {
-		GHESHosts []string `toml:"ghes_hosts"`
+		GHESHosts []string          `toml:"ghes_hosts"`
+		Accounts  map[string]string `toml:"accounts"`
 	} `toml:"github"`
 	Jira struct {
 		Site     *string `toml:"site"`
@@ -68,10 +78,15 @@ type fileConfig struct {
 	} `toml:"jira"`
 }
 
+// validIconModes are the glyph vocabularies board.icons may name. The list is repeated here rather
+// than imported from the TUI so that config stays below the UI in the dependency order; tui.Icons
+// is what turns the value into an actual icon set.
+var validIconModes = map[string]bool{"nerd": true, "ascii": true, "none": true}
+
 // Default returns the settings used when config.toml is absent.
 func Default() *Config {
 	return &Config{
-		Board:   Board{RefreshIntervalMinutes: 10, CacheTTLMinutes: 5},
+		Board:   Board{RefreshIntervalMinutes: 10, CacheTTLMinutes: 5, Icons: "nerd", Hyperlinks: true},
 		Columns: model.DefaultColumns(),
 		Jira:    Jira{TokenEnv: "TASKHERD_JIRA_TOKEN"},
 	}
@@ -129,11 +144,20 @@ func Load(path string) (*Config, error) {
 	if raw.Board.CacheTTLMinutes != nil {
 		cfg.Board.CacheTTLMinutes = *raw.Board.CacheTTLMinutes
 	}
+	if raw.Board.Icons != nil {
+		cfg.Board.Icons = *raw.Board.Icons
+	}
+	if raw.Board.Hyperlinks != nil {
+		cfg.Board.Hyperlinks = *raw.Board.Hyperlinks
+	}
 	if raw.Columns != nil {
 		cfg.Columns = raw.Columns
 	}
 	if raw.GitHub.GHESHosts != nil {
 		cfg.GitHub.GHESHosts = raw.GitHub.GHESHosts
+	}
+	if raw.GitHub.Accounts != nil {
+		cfg.GitHub.Accounts = raw.GitHub.Accounts
 	}
 	if raw.Jira.Site != nil {
 		cfg.Jira.Site = *raw.Jira.Site
@@ -173,6 +197,20 @@ func (c *Config) Validate() error {
 			Path:    "board.cache_ttl_minutes",
 			Message: fmt.Sprintf("0 以上でなければならない（実際: %d）", c.Board.CacheTTLMinutes),
 		})
+	}
+	if !validIconModes[c.Board.Icons] {
+		violations = append(violations, model.Violation{
+			Path:    "board.icons",
+			Message: fmt.Sprintf("nerd / ascii / none のいずれかを指定する（実際: %q）", c.Board.Icons),
+		})
+	}
+	for host, account := range c.GitHub.Accounts {
+		if strings.TrimSpace(host) == "" || strings.TrimSpace(account) == "" {
+			violations = append(violations, model.Violation{
+				Path:    "github.accounts",
+				Message: fmt.Sprintf("ホスト名とアカウント名の両方が必要（実際: %q = %q）", host, account),
+			})
+		}
 	}
 
 	if len(violations) > 0 {
