@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
@@ -126,8 +127,9 @@ func TestRenderCardKeepsBorderAligned(t *testing.T) {
 						t.Fatalf("density=%v width=%d: 行幅 = %d: %q", density, width, w, line)
 					}
 				}
-				if lines := strings.Count(got, "\n") + 1; lines != cardHeight(card, density.metrics()) {
-					t.Fatalf("density=%v: 行数 = %d, want %d", density, lines, cardHeight(card, density.metrics()))
+				if lines := strings.Count(got, "\n") + 1; lines != cardHeight(card, width, density.metrics()) {
+					t.Fatalf("density=%v width=%d: 行数 = %d, want %d",
+						density, width, lines, cardHeight(card, width, density.metrics()))
 				}
 			}
 		}
@@ -278,9 +280,87 @@ func TestCardHeightFollowsLinkCount(t *testing.T) {
 		for _, density := range []Density{DensityRoomy, DensityTight, DensityCompact} {
 			m := density.metrics()
 			got := h.board.renderCard(card, Column{Color: "green"}, 40, false, m)
-			if lines := strings.Count(got, "\n") + 1; lines != cardHeight(card, m) {
-				t.Errorf("links=%d density=%v: 行数 = %d, want %d", count, density, lines, cardHeight(card, m))
+			if lines := strings.Count(got, "\n") + 1; lines != cardHeight(card, 40, m) {
+				t.Errorf("links=%d density=%v: 行数 = %d, want %d", count, density, lines, cardHeight(card, 40, m))
 			}
 		}
+	}
+}
+
+// A title that does not fit on one line costs the card a second one, which is what the column's
+// scrolling has to be measured in.
+func TestCardHeightGrowsWithWrappedTitle(t *testing.T) {
+	h := newHarness(t, Deps{Tasks: newFakeStore()}, Settings{})
+	m := DensityRoomy.metrics()
+
+	short := BuildCard(model.Task{ID: 1, Title: "短い"}, SessionBadge{}, nil, h.board.cardStyle(), boardNow)
+	long := BuildCard(model.Task{ID: 2, Title: "折り返しが必要になるくらい長いタイトル"},
+		SessionBadge{}, nil, h.board.cardStyle(), boardNow)
+
+	if got, want := cardHeight(long, 30, m), cardHeight(short, 30, m)+1; got != want {
+		t.Errorf("折り返したカードの高さ = %d, want %d", got, want)
+	}
+	// The same title stops wrapping once the column is wide enough for it.
+	if got, want := cardHeight(long, 60, m), cardHeight(short, 60, m); got != want {
+		t.Errorf("広い列でのカードの高さ = %d, want %d（折り返さない）", got, want)
+	}
+}
+
+// Cards of differing heights still scroll to the cursor: the window is measured per card, so a
+// wrapped title cannot leave the selection off screen.
+func TestColumnScrollsWithMixedTitleHeights(t *testing.T) {
+	titles := []string{
+		"短い",
+		"折り返しが要るくらい長いタイトルを持つタスクの設計と実装",
+		"短い",
+		"こちらも折り返しが要る長さのタイトルでレビューまで含む",
+		"短い",
+		"三行目には届かないが二行は使うタイトルの実装とレビュー",
+		"短い",
+		"最後も折り返す長さのタイトルにしておく設計と実装の作業",
+	}
+	tasks := make([]model.Task, 0, len(titles))
+	for i, title := range titles {
+		tasks = append(tasks, model.Task{ID: i + 1, Title: title, Status: "todo"})
+	}
+	h := newHarness(t, Deps{Tasks: newFakeStore(tasks...)}, Settings{})
+	h.board.width, h.board.height = 90, 20
+
+	for i := 1; i <= len(titles); i++ {
+		view := h.board.render()
+		if !strings.Contains(view, fmt.Sprintf("#%d ", i)) {
+			t.Fatalf("#%d を選択中なのに描画されていない:\n%s", i, view)
+		}
+		for _, line := range strings.Split(view, "\n") {
+			if got := lipgloss.Width(line); got > h.board.width {
+				t.Fatalf("行幅 = %d, want <= %d: %q", got, h.board.width, line)
+			}
+		}
+		if i < len(titles) {
+			h.key("down")
+		}
+	}
+}
+
+// Widening the terminal unwraps titles, so more cards fit and the window that had scrolled down
+// has to come back rather than leave blank space under the last card.
+func TestColumnWindowFollowsResize(t *testing.T) {
+	h := boardWithCards(t, 12)
+	h.board.width, h.board.height = 60, 20
+
+	for i := 0; i < 11; i++ {
+		h.key("down")
+	}
+	h.board.render()
+	narrow := h.board.offsets["todo"]
+	if narrow == 0 {
+		t.Fatalf("狭い端末で窓が送られていない")
+	}
+
+	h.dispatch(tea.WindowSizeMsg{Width: 200, Height: 40})
+	h.board.render()
+
+	if wide := h.board.offsets["todo"]; wide >= narrow {
+		t.Errorf("リサイズ後の offset = %d, want < %d", wide, narrow)
 	}
 }

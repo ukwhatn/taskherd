@@ -123,7 +123,7 @@ func (b *Board) renderCards(col Column, focused bool, width, avail int, m metric
 	heights := make([]int, len(col.Tasks))
 	for i, task := range col.Tasks {
 		cards[i] = BuildCard(task, BuildSessionBadge(task, b.sessions, b.icons), b.links, b.cardStyle(), b.deps.now())
-		heights[i] = cardHeight(cards[i], m)
+		heights[i] = cardHeight(cards[i], width, m)
 	}
 
 	selected := b.selectedIndex(col)
@@ -216,16 +216,17 @@ func (b *Board) renderNoteBox(text string, width int, m metrics) string {
 // The selected card is outlined in its column's color and the rest in the dim border color, which
 // is what makes the cursor readable without a marker column stealing width from every card.
 func (b *Board) renderCard(card Card, col Column, width int, focused bool, m metrics) string {
-	inner := width - 2 - 2*m.padX
-	if inner < 1 {
-		inner = 1
-	}
+	inner := cardInner(width, m)
 
 	titleStyle := b.styles.cardTitle
 	if focused {
 		titleStyle = b.styles.cardTitleFocused
 	}
-	body := titleStyle.Render(truncate(card.Title, inner))
+	title := wrapTitle(card.Title, inner, maxTitleLines)
+	for i, line := range title {
+		title[i] = titleStyle.Render(line)
+	}
+	body := strings.Join(title, "\n")
 	if len(card.Meta) > 0 {
 		body += "\n" + b.renderMeta(card.Meta, inner)
 	}
@@ -272,11 +273,27 @@ func (b *Board) cardEdge(col Column, focused bool) color.Color {
 	return accentColor
 }
 
-// cardHeight is how many lines the card takes once drawn, which is what the column's scrolling is
-// measured in. A task with nothing to put on its meta line gives that line back, and every link
-// it holds costs it one.
-func cardHeight(card Card, m metrics) int {
-	lines := 1 + len(card.Links)
+// cardInner is the cells a card drawn in a column of the given width has for its own text: the
+// box takes its borders and padding out, and the bar form its edge and the space after it.
+//
+// renderCard and cardHeight both measure from here, so the height a column scrolls by cannot
+// drift from the lines it actually draws.
+func cardInner(width int, m metrics) int {
+	inner := width - 2
+	if m.boxed {
+		inner -= 2 * m.padX
+	}
+	if inner < 1 {
+		inner = 1
+	}
+	return inner
+}
+
+// cardHeight is how many lines the card takes once drawn in a column of the given width, which is
+// what the column's scrolling is measured in. The title costs as many lines as it wraps to, a task
+// with nothing to put on its meta line gives that line back, and every link it holds costs one.
+func cardHeight(card Card, width int, m metrics) int {
+	lines := len(wrapTitle(card.Title, cardInner(width, m), maxTitleLines)) + len(card.Links)
 	if len(card.Meta) > 0 {
 		lines++
 	}
