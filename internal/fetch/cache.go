@@ -34,11 +34,17 @@ type CacheFile struct {
 // FetchedAt is nil until the first successful fetch. A later failure leaves FetchedAt and
 // Data at their last-success values while OK/Error report the failure, so callers can show
 // a stale-but-known value instead of blanking out on a transient error.
+//
+// FailedSince is when the current run of failures began, which is what tells a value that is
+// merely old apart from a value nothing has been able to refresh for an hour. It is a new field
+// rather than a new version: an entry written before it existed decodes with it nil, which reads
+// as "failing for an unknown length of time", and the next failure fills it in.
 type CacheEntry struct {
-	FetchedAt *string         `json:"fetched_at"`
-	OK        bool            `json:"ok"`
-	Error     string          `json:"error"`
-	Data      json.RawMessage `json:"data"`
+	FetchedAt   *string         `json:"fetched_at"`
+	OK          bool            `json:"ok"`
+	Error       string          `json:"error"`
+	FailedSince *string         `json:"failed_since,omitempty"`
+	Data        json.RawMessage `json:"data"`
 }
 
 func newCacheFile() *CacheFile {
@@ -64,8 +70,15 @@ func (f *CacheFile) SetSuccess(url string, data any, now time.Time) error {
 
 // SetFailure records a failed fetch without touching fetched_at or data: those still hold
 // whatever the last success was (or remain nil if there never was one).
-func (f *CacheFile) SetFailure(url string, fetchErr error) {
+//
+// failed_since is set only by the failure that starts a run, so a link failing every cycle keeps
+// reporting how long it has been broken instead of resetting to "just now" each time.
+func (f *CacheFile) SetFailure(url string, fetchErr error, now time.Time) {
 	existing := f.Entries[url]
+	if existing.FailedSince == nil {
+		ts := now.Format(time.RFC3339)
+		existing.FailedSince = &ts
+	}
 	existing.OK = false
 	existing.Error = fetchErr.Error()
 	f.Entries[url] = existing

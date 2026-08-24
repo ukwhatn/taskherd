@@ -86,7 +86,7 @@ func TestShowKeepsLastSuccessAlongsideError(t *testing.T) {
 		if err := cf.SetSuccess(url, fetch.GitHubData{State: "MERGED", Checks: "pass"}, h.now.Add(-time.Minute)); err != nil {
 			t.Fatalf("SetSuccess: %v", err)
 		}
-		cf.SetFailure(url, errFetch("gh: not authenticated"))
+		cf.SetFailure(url, errFetch("gh: not authenticated"), h.now)
 	})
 
 	res := h.mustRun(t, "show", "1")

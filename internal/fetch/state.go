@@ -28,6 +28,12 @@ type LinkState struct {
 	Age time.Duration
 	// Err is the last failure, empty when the last attempt succeeded.
 	Err string
+	// FailingSince is when the current run of failures began. It is zero when the last attempt
+	// succeeded, and also for a failure recorded before the cache tracked this, which reads as
+	// "failing, for a length of time nothing recorded".
+	FailingSince time.Time
+	// FailingFor is how long that run has lasted, meaningful only when FailingSince is set.
+	FailingFor time.Duration
 
 	GitHub *GitHubData
 	Jira   *JiraData
@@ -58,6 +64,12 @@ func (f *CacheFile) LinkState(link model.Link, now time.Time, ttl time.Duration)
 	state.Cached = true
 	if !entry.OK {
 		state.Err = entry.Error
+		if entry.FailedSince != nil {
+			if failedSince, err := time.Parse(time.RFC3339, *entry.FailedSince); err == nil {
+				state.FailingSince = failedSince
+				state.FailingFor = now.Sub(failedSince)
+			}
+		}
 	}
 	if entry.FetchedAt == nil {
 		return state

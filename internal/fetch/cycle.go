@@ -85,7 +85,7 @@ func (f *Fetcher) refreshOne(ctx context.Context, url string, doFetch func(conte
 
 	updateErr := f.Cache.Update(ctx, func(cf *CacheFile) {
 		if fetchErr != nil {
-			cf.SetFailure(url, fetchErr)
+			cf.SetFailure(url, fetchErr, now)
 			return
 		}
 		if err := cf.SetSuccess(url, data, now); err != nil {

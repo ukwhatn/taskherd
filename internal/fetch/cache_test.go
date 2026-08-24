@@ -50,9 +50,10 @@ func TestCacheUpdateSetSuccessThenLoad(t *testing.T) {
 func TestCacheNeverFetchedHasNullFetchedAt(t *testing.T) {
 	dir := t.TempDir()
 	c := fetch.NewCache(dir)
+	failedAt := time.Date(2026, 8, 24, 16, 40, 0, 0, time.UTC)
 
 	err := c.Update(context.Background(), func(f *fetch.CacheFile) {
-		f.SetFailure("https://github.com/o/r/pull/1", fmt.Errorf("network error"))
+		f.SetFailure("https://github.com/o/r/pull/1", fmt.Errorf("network error"), failedAt)
 	})
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
@@ -95,7 +96,7 @@ func TestCacheFailureAfterSuccessKeepsLastSuccessValue(t *testing.T) {
 	}
 
 	if err := c.Update(context.Background(), func(f *fetch.CacheFile) {
-		f.SetFailure(url, fmt.Errorf("timeout"))
+		f.SetFailure(url, fmt.Errorf("timeout"), successAt.Add(time.Minute))
 	}); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -218,5 +219,90 @@ func TestCacheLoadOnCorruptFileReturnsEmptyAndUpdateRebuildsIt(t *testing.T) {
 	}
 	if _, ok := c.Load().Get("https://github.com/o/r/pull/1"); !ok {
 		t.Error("破損ファイルからの再構築後にエントリが無い")
+	}
+}
+
+// A run of failures is timed from the failure that started it, not from the latest one: a link
+// failing every cycle has to be able to say it has been failing for an hour.
+func TestCacheFailedSinceMarksStartOfRun(t *testing.T) {
+	dir := t.TempDir()
+	c := fetch.NewCache(dir)
+	const url = "https://github.com/o/r/pull/1"
+	start := time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
+
+	for i := 0; i < 3; i++ {
+		at := start.Add(time.Duration(i) * 10 * time.Minute)
+		if err := c.Update(context.Background(), func(f *fetch.CacheFile) {
+			f.SetFailure(url, fmt.Errorf("attempt %d", i), at)
+		}); err != nil {
+			t.Fatalf("Update() error = %v", err)
+		}
+	}
+
+	entry, _ := c.Load().Get(url)
+	if entry.FailedSince == nil {
+		t.Fatal("FailedSince = nil, want 最初の失敗時刻")
+	}
+	if *entry.FailedSince != start.Format(time.RFC3339) {
+		t.Errorf("FailedSince = %q, want %q（最初の失敗のまま）", *entry.FailedSince, start.Format(time.RFC3339))
+	}
+}
+
+// A success ends the run, so the next failure starts timing again rather than reporting a gap that
+// had already been repaired.
+func TestCacheSuccessClearsFailedSince(t *testing.T) {
+	dir := t.TempDir()
+	c := fetch.NewCache(dir)
+	const url = "https://github.com/o/r/pull/1"
+	start := time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
+
+	steps := []func(*fetch.CacheFile){
+		func(f *fetch.CacheFile) { f.SetFailure(url, fmt.Errorf("down"), start) },
+		func(f *fetch.CacheFile) {
+			_ = f.SetSuccess(url, fetch.GitHubData{State: "OPEN"}, start.Add(time.Minute))
+		},
+	}
+	for _, step := range steps {
+		if err := c.Update(context.Background(), step); err != nil {
+			t.Fatalf("Update() error = %v", err)
+		}
+	}
+
+	entry, _ := c.Load().Get(url)
+	if entry.FailedSince != nil {
+		t.Errorf("FailedSince = %q, want nil（成功で解消）", *entry.FailedSince)
+	}
+
+	if err := c.Update(context.Background(), func(f *fetch.CacheFile) {
+		f.SetFailure(url, fmt.Errorf("down again"), start.Add(2*time.Minute))
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	entry, _ = c.Load().Get(url)
+	if entry.FailedSince == nil || *entry.FailedSince != start.Add(2*time.Minute).Format(time.RFC3339) {
+		t.Errorf("FailedSince = %v, want 再開後の失敗時刻", entry.FailedSince)
+	}
+}
+
+// failed_since is a new field, not a new cache version: a cache.json written before it existed has
+// to keep loading, or the first run after an upgrade would blank every card.
+func TestCacheWithoutFailedSinceStillLoads(t *testing.T) {
+	dir := t.TempDir()
+	c := fetch.NewCache(dir)
+	legacy := `{"version":1,"entries":{"https://github.com/o/r/pull/1":{` +
+		`"fetched_at":"2026-08-24T16:00:00Z","ok":false,"error":"boom","data":{"state":"OPEN"}}}}`
+	if err := os.WriteFile(c.Path(), []byte(legacy), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	entry, ok := c.Load().Get("https://github.com/o/r/pull/1")
+	if !ok {
+		t.Fatal("旧形式の cache.json が読めていない")
+	}
+	if entry.FailedSince != nil {
+		t.Errorf("FailedSince = %q, want nil", *entry.FailedSince)
+	}
+	if entry.Error != "boom" {
+		t.Errorf("Error = %q, want boom", entry.Error)
 	}
 }
