@@ -54,7 +54,14 @@ type Board struct {
 
 	file     *model.File
 	sessions SessionStates
+	cache    *fetch.CacheFile
 	links    map[string]fetch.LinkState
+
+	// tasksLoaded and cacheLoaded gate the startup fetch: which links are stale is only
+	// answerable once both the task list and the cache are in, and they arrive in either order.
+	tasksLoaded    bool
+	cacheLoaded    bool
+	startupFetched bool
 
 	columns  []Column
 	colIdx   int
@@ -110,12 +117,15 @@ func New(ctx context.Context, deps Deps, settings Settings) *Board {
 	input.Prompt = "> "
 
 	return &Board{
-		ctx:              ctx,
-		deps:             deps,
-		settings:         settings,
-		styles:           newStyles(),
-		file:             model.NewFile(),
-		links:            map[string]fetch.LinkState{},
+		ctx:      ctx,
+		deps:     deps,
+		settings: settings,
+		styles:   newStyles(),
+		file:     model.NewFile(),
+		cache:    &fetch.CacheFile{Version: 1, Entries: map[string]fetch.CacheEntry{}},
+		links:    map[string]fetch.LinkState{},
+		// Without a cache there is nothing to wait for before the first fetch.
+		cacheLoaded:      deps.Cache == nil,
 		selected:         map[string]int{},
 		offsets:          map[string]int{},
 		input:            input,
@@ -173,10 +183,8 @@ func (b *Board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case cacheLoadedMsg:
 		b.applyCache(msg.cache)
-		if msg.initial {
-			return b, b.refreshStaleCmd()
-		}
-		return b, nil
+		b.cacheLoaded = true
+		return b, b.startupFetchCmd()
 
 	case refreshDoneMsg:
 		return b, b.applyRefresh(msg)
@@ -462,13 +470,26 @@ func (b *Board) applyTasks(msg tasksLoadedMsg) tea.Cmd {
 		b.focusTaskID = msg.focus
 	}
 	b.rebuild()
+	// The link states are derived from the cache and the task list together, so a new task list
+	// means re-deriving them: a link the CLI just added has to pick up its cached value.
+	b.rebuildLinks()
+	b.tasksLoaded = true
 
-	// A task added or linked since the last cycle has no cached status yet, and a link removed
-	// from every task no longer needs one.
+	// A change that may have added a link needs a fetch of its own: waiting for the next
+	// background cycle would leave the new link blank for minutes.
 	if msg.refresh {
 		return b.refreshStaleCmd()
 	}
-	return nil
+	return b.startupFetchCmd()
+}
+
+// startupFetchCmd runs the one-off fetch of everything stale, once both sources are in.
+func (b *Board) startupFetchCmd() tea.Cmd {
+	if b.startupFetched || !b.tasksLoaded || !b.cacheLoaded {
+		return nil
+	}
+	b.startupFetched = true
+	return b.refreshStaleCmd()
 }
 
 func (b *Board) applySessionUpdate(update herdrc.Update) tea.Cmd {
@@ -496,7 +517,13 @@ func (b *Board) applyCache(cache *fetch.CacheFile) {
 	if cache == nil {
 		return
 	}
-	b.links = cache.LinkStates(allLinks(b.file.Tasks), b.deps.now(), b.settings.CacheTTL)
+	b.cache = cache
+	b.rebuildLinks()
+}
+
+// rebuildLinks re-derives the displayed link states from the cache the board holds.
+func (b *Board) rebuildLinks() {
+	b.links = b.cache.LinkStates(allLinks(b.file.Tasks), b.deps.now(), b.settings.CacheTTL)
 }
 
 func (b *Board) applyRefresh(msg refreshDoneMsg) tea.Cmd {

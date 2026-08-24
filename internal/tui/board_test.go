@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -633,6 +634,100 @@ func TestBoardBackgroundRefreshSkipsFreshLinks(t *testing.T) {
 	h.key("R")
 	if len(links.calls) != 1 {
 		t.Errorf("calls = %v, want 手動なら TTL を無視して取得", links.calls)
+	}
+}
+
+// tasks.json and cache.json are read by two independent commands and land in either order.
+// Link badges are derived from both, so whichever arrives second has to re-derive them; getting
+// this wrong leaves every badge reading "not fetched yet" on a board whose cache is full.
+func TestBoardDerivesLinkStatesWhateverTheLoadOrder(t *testing.T) {
+	url := "https://github.com/o/r/pull/1"
+	tasks := []model.Task{{
+		ID: 1, Title: "a", Status: "todo",
+		Links: []model.Link{{URL: url, Kind: model.LinkKindGitHubPR}},
+	}}
+
+	fresh := boardNow.Add(-time.Minute).Format(time.RFC3339)
+	cacheFile := &fetch.CacheFile{Version: 1, Entries: map[string]fetch.CacheEntry{
+		url: {FetchedAt: &fresh, OK: true, Data: []byte(`{"state":"OPEN","checks":"pass"}`)},
+	}}
+
+	for _, cacheFirst := range []bool{false, true} {
+		name := "tasks が先"
+		if cacheFirst {
+			name = "cache が先"
+		}
+		t.Run(name, func(t *testing.T) {
+			store := newFakeStore(tasks...)
+			links := &fakeLinks{}
+			board := New(context.Background(), Deps{
+				Tasks: store,
+				Cache: &fakeCache{file: cacheFile},
+				Links: links,
+				Now:   func() time.Time { return boardNow },
+			}, Settings{Columns: testColumns(), CacheTTL: 5 * time.Minute})
+			board.width, board.height = 200, 30
+			h := &harness{t: t, board: board, store: store}
+
+			file, err := store.Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cacheFirst {
+				h.dispatch(cacheLoadedMsg{cache: cacheFile})
+				h.run(h.dispatch(tasksLoadedMsg{file: file}))
+			} else {
+				h.dispatch(tasksLoadedMsg{file: file})
+				h.run(h.dispatch(cacheLoadedMsg{cache: cacheFile}))
+			}
+
+			badges := BuildLinkBadges(tasks[0], board.links)
+			if len(badges) != 1 || badges[0].Text != "PR:open✓ci" {
+				t.Fatalf("badges = %+v, want PR:open✓ci（キャッシュ由来）", badges)
+			}
+			// Nothing was stale, so the startup fetch had nothing to do either way.
+			if len(links.calls) != 0 {
+				t.Errorf("calls = %v, want TTL 内なので取得なし", links.calls)
+			}
+		})
+	}
+}
+
+// The startup fetch needs both sources before it can tell what is stale, and it runs exactly once.
+func TestBoardStartupFetchWaitsForBothSources(t *testing.T) {
+	url := "https://github.com/o/r/pull/1"
+	store := newFakeStore(model.Task{
+		ID: 1, Title: "a", Status: "todo",
+		Links: []model.Link{{URL: url, Kind: model.LinkKindGitHubPR}},
+	})
+	links := &fakeLinks{}
+	cache := &fakeCache{}
+
+	board := New(context.Background(), Deps{
+		Tasks: store, Cache: cache, Links: links,
+		Now: func() time.Time { return boardNow },
+	}, Settings{Columns: testColumns(), CacheTTL: 5 * time.Minute})
+	board.width, board.height = 200, 30
+	h := &harness{t: t, board: board, store: store}
+
+	file, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	h.run(h.dispatch(tasksLoadedMsg{file: file}))
+	if len(links.calls) != 0 {
+		t.Fatalf("calls = %v, want cache 未着なので取得しない", links.calls)
+	}
+
+	h.run(h.dispatch(cacheLoadedMsg{cache: cache.Load()}))
+	if len(links.calls) != 1 {
+		t.Fatalf("calls = %v, want 1 サイクル", links.calls)
+	}
+
+	// A later cache read is not a new startup.
+	h.run(h.dispatch(cacheLoadedMsg{cache: cache.Load()}))
+	if len(links.calls) != 1 {
+		t.Errorf("calls = %v, want 1 サイクルのまま", links.calls)
 	}
 }
 

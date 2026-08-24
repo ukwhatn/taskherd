@@ -36,8 +36,6 @@ type (
 	// cacheLoadedMsg delivers a read of cache.json.
 	cacheLoadedMsg struct {
 		cache *fetch.CacheFile
-		// initial marks the read done at startup, which is what triggers the first fetch cycle.
-		initial bool
 	}
 
 	// refreshDoneMsg reports the outcome of one fetch cycle.
@@ -112,7 +110,7 @@ func (b *Board) loadTasksCmd(note string) tea.Cmd {
 
 func (b *Board) loadCacheCmd() tea.Cmd {
 	return func() tea.Msg {
-		return cacheLoadedMsg{cache: b.deps.Cache.Load(), initial: true}
+		return cacheLoadedMsg{cache: b.deps.Cache.Load()}
 	}
 }
 
