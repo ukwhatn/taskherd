@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/ukwhatn/taskherd/internal/model"
@@ -21,6 +22,8 @@ type Paths struct {
 
 // Config is the content of config.toml.
 type Config struct {
+	// Editor is the command note editing opens, taking precedence over the environment.
+	Editor  string
 	Board   Board
 	Columns model.Columns
 	GitHub  GitHub
@@ -49,7 +52,8 @@ type Jira struct {
 // fileConfig mirrors config.toml. Scalars are pointers so that an explicit 0 is distinguishable
 // from an absent key (0 disables background refresh).
 type fileConfig struct {
-	Board struct {
+	Editor *string `toml:"editor"`
+	Board  struct {
 		RefreshIntervalMinutes *int `toml:"refresh_interval_minutes"`
 		CacheTTLMinutes        *int `toml:"cache_ttl_minutes"`
 	} `toml:"board"`
@@ -116,6 +120,9 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg := Default()
+	if raw.Editor != nil {
+		cfg.Editor = *raw.Editor
+	}
 	if raw.Board.RefreshIntervalMinutes != nil {
 		cfg.Board.RefreshIntervalMinutes = *raw.Board.RefreshIntervalMinutes
 	}
@@ -172,6 +179,24 @@ func (c *Config) Validate() error {
 		return &model.ValidationError{Subject: "config.toml", Violations: violations}
 	}
 	return nil
+}
+
+// ResolveEditor is the command note editing opens, in the order the answer is looked for: the
+// config's own setting, then VISUAL, then EDITOR.
+//
+// Config comes first because a pane the herdr plugin starts does not go through a login shell, so
+// VISUAL and EDITOR may never reach it; naming the editor in config is what makes note editing
+// work there at all. An empty answer means no editor is configured anywhere.
+func (c *Config) ResolveEditor(getenv func(string) string) string {
+	if getenv == nil {
+		getenv = func(string) string { return "" }
+	}
+	for _, candidate := range []string{c.Editor, getenv("VISUAL"), getenv("EDITOR")} {
+		if editor := strings.TrimSpace(candidate); editor != "" {
+			return editor
+		}
+	}
+	return ""
 }
 
 // Classifier returns the link classifier built from the configured hosts.

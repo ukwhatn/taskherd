@@ -280,3 +280,65 @@ func TestClassifierUsesConfiguredHosts(t *testing.T) {
 		t.Errorf("Jira = %q, want jira", got)
 	}
 }
+
+func TestLoadReadsEditor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := `
+editor = "nano"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("config.toml を書けない: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Editor != "nano" {
+		t.Errorf("editor = %q, want nano", cfg.Editor)
+	}
+}
+
+// The generated config leaves editor commented out: an uncommented value would take precedence
+// over the environment, which is not what a user who never set the key asked for.
+func TestDefaultFileContentLeavesEditorUnset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(config.DefaultFileContent()), 0o600); err != nil {
+		t.Fatalf("config.toml を書けない: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Editor != "" {
+		t.Errorf("editor = %q, want 空", cfg.Editor)
+	}
+	if got := cfg.ResolveEditor(envFunc(map[string]string{"EDITOR": "vim"})); got != "vim" {
+		t.Errorf("ResolveEditor = %q, want vim（既定 config が環境を上書きしない）", got)
+	}
+}
+
+func TestResolveEditorOrder(t *testing.T) {
+	tests := []struct {
+		name   string
+		editor string
+		env    map[string]string
+		want   string
+	}{
+		{"config が最優先", "nano", map[string]string{"VISUAL": "code -w", "EDITOR": "vim"}, "nano"},
+		{"config が無ければ VISUAL", "", map[string]string{"VISUAL": "code -w", "EDITOR": "vim"}, "code -w"},
+		{"VISUAL も無ければ EDITOR", "", map[string]string{"EDITOR": "vim"}, "vim"},
+		{"空白だけの指定は未設定として扱う", "  ", map[string]string{"EDITOR": "vim"}, "vim"},
+		{"どこにも無ければ空", "", map[string]string{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Editor = tt.editor
+			if got := cfg.ResolveEditor(envFunc(tt.env)); got != tt.want {
+				t.Errorf("ResolveEditor() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

@@ -970,19 +970,15 @@ func (b *Board) addSessionCmd(taskID int, ref model.SessionRef) tea.Cmd {
 	})
 }
 
-// editNoteCmd opens the task's note in $EDITOR, suspending the board while it runs.
+// editNoteCmd opens the task's note in the configured editor, suspending the board while it runs.
 func (b *Board) editNoteCmd() tea.Cmd {
 	task := b.activeTask()
 	if task == nil {
 		return status("カードが選択されていない", true)
 	}
-
-	editor := b.deps.getenv("VISUAL")
+	editor := b.settings.Editor
 	if editor == "" {
-		editor = b.deps.getenv("EDITOR")
-	}
-	if editor == "" {
-		return status("$EDITOR が設定されていない", true)
+		return status("エディタが設定されていない（config.toml の editor / $VISUAL / $EDITOR）", true)
 	}
 
 	path, err := writeTempNote(task.ID, task.Note)
