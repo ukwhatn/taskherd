@@ -36,6 +36,7 @@ func (a *app) pickerDeps(cfg *config.Config) tui.PickerDeps {
 		Tasks:   a.tasks(),
 		Herdr:   a.herdr(),
 		Columns: cfg.Columns,
+		Icons:   tui.IconMode(cfg.Board.Icons),
 		Now:     a.env.Now,
 	}
 }

@@ -69,7 +69,7 @@ func (b *Board) renderModal(m modal) string {
 		lines = append(lines, b.styles.dim.Render(truncate(m.help, inner)))
 	}
 	if limit := b.modalBody(0); len(lines) > limit {
-		lines = append(lines[:limit-1:limit-1], b.styles.dim.Render("…"))
+		lines = append(lines[:limit-1:limit-1], b.styles.dim.Render(truncateMark))
 	}
 
 	edge := b.boxColor(m.focused)

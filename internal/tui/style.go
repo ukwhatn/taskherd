@@ -55,6 +55,12 @@ type styles struct {
 	link                lipgloss.Style
 	linkStale           lipgloss.Style
 	linkAttention       lipgloss.Style
+	linkOpen            lipgloss.Style
+	linkDraft           lipgloss.Style
+	linkMerged          lipgloss.Style
+	linkClosed          lipgloss.Style
+	linkPending         lipgloss.Style
+	linkUnfetched       lipgloss.Style
 	footer              lipgloss.Style
 	status              lipgloss.Style
 	alert               lipgloss.Style
@@ -78,6 +84,12 @@ func newStyles() styles {
 		link:                lipgloss.NewStyle().Foreground(lipgloss.Blue),
 		linkStale:           lipgloss.NewStyle().Foreground(lipgloss.BrightBlack).Faint(true),
 		linkAttention:       lipgloss.NewStyle().Foreground(lipgloss.Red),
+		linkOpen:            lipgloss.NewStyle().Foreground(lipgloss.Green),
+		linkDraft:           lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
+		linkMerged:          lipgloss.NewStyle().Foreground(lipgloss.Magenta),
+		linkClosed:          lipgloss.NewStyle().Foreground(lipgloss.Red),
+		linkPending:         lipgloss.NewStyle().Foreground(lipgloss.Yellow),
+		linkUnfetched:       lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
 		footer:              lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
 		status:              lipgloss.NewStyle().Foreground(lipgloss.Green),
 		alert:               lipgloss.NewStyle().Foreground(lipgloss.Red),
@@ -102,6 +114,18 @@ func (s styles) segment(kind SegmentKind) lipgloss.Style {
 		return s.linkStale
 	case SegLinkAttention:
 		return s.linkAttention
+	case SegLinkOpen:
+		return s.linkOpen
+	case SegLinkDraft:
+		return s.linkDraft
+	case SegLinkMerged:
+		return s.linkMerged
+	case SegLinkClosed:
+		return s.linkClosed
+	case SegLinkPending:
+		return s.linkPending
+	case SegLinkUnfetched:
+		return s.linkUnfetched
 	default:
 		return s.link
 	}

@@ -278,9 +278,10 @@ func TestBoardSessionBadgesFromLiveUpdate(t *testing.T) {
 
 	h.dispatch(snapshotUpdate(agent("pane-1", "s-1", herdrc.StateWorking)))
 
-	badge := BuildSessionBadge(store.snapshot().Tasks[0], h.board.sessions)
-	if badge.Text != "●working" {
-		t.Errorf("badge = %q, want ●working", badge.Text)
+	badge := BuildSessionBadge(store.snapshot().Tasks[0], h.board.sessions, h.board.icons)
+	want := sessionStateText(herdrc.StateWorking, h.board.icons)
+	if badge.Text != want {
+		t.Errorf("badge = %q, want %q", badge.Text, want)
 	}
 	if h.board.lastHerdrSync.IsZero() {
 		t.Error("herdr 同期時刻が記録されていない")
@@ -606,9 +607,9 @@ func TestBoardDerivesLinkStatesWhateverTheLoadOrder(t *testing.T) {
 				h.run(h.dispatch(cacheLoadedMsg{cache: cacheFile}))
 			}
 
-			badges := BuildLinkBadges(tasks[0], board.links)
-			if len(badges) != 1 || badges[0].Text != "PR:open✓ci" {
-				t.Fatalf("badges = %+v, want PR:open✓ci（キャッシュ由来）", badges)
+			rows := BuildLinkRows(tasks[0], board.links, CardStyle{Icons: testIcons, Classifier: testClassifier})
+			if len(rows) != 1 || rowText(rows[0]) != "PR o/r#1 open CI+" {
+				t.Fatalf("rows = %+v, want キャッシュ由来の open CI+", rows)
 			}
 			// Nothing was stale, so the startup fetch had nothing to do either way.
 			if len(links.calls) != 0 {
@@ -755,7 +756,7 @@ func TestBoardRendersColumnHeadersAndCards(t *testing.T) {
 		}
 	}
 	// A collapsed terminal column shows only its header and count.
-	if !strings.Contains(view, "▸Done") {
+	if !strings.Contains(view, h.board.icons.Collapsed+" Done") {
 		t.Errorf("折り畳まれた terminal 列が描画されていない:\n%s", view)
 	}
 }

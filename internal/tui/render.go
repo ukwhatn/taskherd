@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/ukwhatn/taskherd/internal/herdrc"
 )
 
 // footerReserve is the lines the board keeps at the bottom: the key help, the sync line, and one
@@ -17,7 +18,12 @@ const footerReserve = 3
 // line under it.
 const headerReserve = 2
 
-const boardHelp = "←→ 列  ↑↓ カード  tab 移行  enter 詳細  a 追加  delete 削除  g jump  r/R 取得  t 折り畳み  q 終了"
+// boardHelp is the footer's key list. The arrow keys are named with the icon set's glyphs, so
+// the line stays readable in a terminal without a patched font.
+func (b *Board) boardHelp() string {
+	return fmt.Sprintf("%s 列  %s カード  tab 移行  enter 詳細  a 追加  delete 削除  g jump  r/R 取得  t 折り畳み  q 終了",
+		b.icons.horizontalKeys(), b.icons.verticalKeys())
+}
 
 // View renders the whole board. AltScreen is declared here rather than entered with a command,
 // which is how bubbletea v2 handles terminal state. Bracketed paste stays on (the default), which
@@ -69,8 +75,8 @@ func (b *Board) renderColumns(bodyHeight int) string {
 	// columns a line when it does.
 	notice := ""
 	if layout.Start > 0 || layout.End() < len(b.columns) {
-		notice = b.styles.dim.Render(fmt.Sprintf("… 列 %d-%d / %d（←→ で移動）",
-			layout.Start+1, layout.End(), len(b.columns)))
+		notice = b.styles.dim.Render(fmt.Sprintf("%s 列 %d-%d / %d（%s で移動）",
+			truncateMark, layout.Start+1, layout.End(), len(b.columns), b.icons.horizontalKeys()))
 		bodyHeight--
 	}
 
@@ -116,7 +122,7 @@ func (b *Board) renderCards(col Column, focused bool, width, avail int, m metric
 	cards := make([]Card, len(col.Tasks))
 	heights := make([]int, len(col.Tasks))
 	for i, task := range col.Tasks {
-		cards[i] = BuildCard(task, BuildSessionBadge(task, b.sessions), BuildLinkBadges(task, b.links), b.deps.now())
+		cards[i] = BuildCard(task, BuildSessionBadge(task, b.sessions, b.icons), b.links, b.cardStyle(), b.deps.now())
 		heights[i] = cardHeight(cards[i], m)
 	}
 
@@ -126,7 +132,7 @@ func (b *Board) renderCards(col Column, focused bool, width, avail int, m metric
 
 	lines := make([]string, 0, avail)
 	if window.Above > 0 {
-		lines = append(lines, b.overflowIndicator("↑", window.Above, width))
+		lines = append(lines, b.overflowIndicator(b.icons.ScrollUp, window.Above, width))
 	}
 	for i := window.Start; i < window.End; i++ {
 		for g := 0; i > window.Start && g < m.cardGap; g++ {
@@ -135,13 +141,13 @@ func (b *Board) renderCards(col Column, focused bool, width, avail int, m metric
 		lines = append(lines, b.renderCard(cards[i], col, width, focused && i == selected, m))
 	}
 	if window.Below > 0 {
-		lines = append(lines, b.overflowIndicator("↓", window.Below, width))
+		lines = append(lines, b.overflowIndicator(b.icons.ScrollDown, window.Below, width))
 	}
 	return lines
 }
 
 func (b *Board) overflowIndicator(arrow string, count, width int) string {
-	return padCell(b.styles.dim.Render(truncate(fmt.Sprintf("%s %d件", arrow, count), width)), width)
+	return padCell(b.styles.dim.Render(truncate(joinIcon(arrow, fmt.Sprintf("%d件", count)), width)), width)
 }
 
 // renderColumnHeader labels the column in its own color, with the card count beside it. The
@@ -150,7 +156,7 @@ func (b *Board) overflowIndicator(arrow string, count, width int) string {
 func (b *Board) renderColumnHeader(col Column, focused bool, width int) string {
 	label := col.Label
 	if col.Collapsed {
-		label = "▸" + label
+		label = joinIcon(b.icons.Collapsed, label)
 	}
 
 	style := b.styles.columnHeader
@@ -165,7 +171,7 @@ func (b *Board) renderColumnHeader(col Column, focused bool, width int) string {
 
 // headerText fits a column's label and count into width, giving up the decoration around them
 // before it gives up the label itself: a folded column is narrow enough that the padding and the
-// parentheses are the difference between reading "Wontfix" and reading "Wontfi…".
+// parentheses are the difference between reading "Wontfix" and reading a cut-off label.
 func headerText(label string, count, width int) string {
 	for _, text := range []string{
 		fmt.Sprintf(" %s (%d) ", label, count),
@@ -223,6 +229,9 @@ func (b *Board) renderCard(card Card, col Column, width int, focused bool, m met
 	if len(card.Meta) > 0 {
 		body += "\n" + b.renderMeta(card.Meta, inner)
 	}
+	for _, row := range card.Links {
+		body += "\n" + b.renderLinkRow(row, inner)
+	}
 
 	if !m.boxed {
 		return b.renderCardBar(body, col, width, focused)
@@ -239,9 +248,9 @@ func (b *Board) renderCard(card Card, col Column, width int, focused bool, m met
 // renderCardBar is the card without its box: the narrowest form that still reads as a card, used
 // once the terminal cannot afford borders around every one of them.
 func (b *Board) renderCardBar(body string, col Column, width int, focused bool) string {
-	bar := b.styles.dim.Render("▏")
+	bar := b.styles.dim.Render(b.icons.CardEdge)
 	if focused {
-		bar = lipgloss.NewStyle().Foreground(b.cardEdge(col, true)).Render("▌")
+		bar = lipgloss.NewStyle().Foreground(b.cardEdge(col, true)).Render(b.icons.CardEdgeFocused)
 	}
 
 	lines := strings.Split(body, "\n")
@@ -264,9 +273,10 @@ func (b *Board) cardEdge(col Column, focused bool) color.Color {
 }
 
 // cardHeight is how many lines the card takes once drawn, which is what the column's scrolling is
-// measured in. A task with nothing to put on its meta line gives that line back.
+// measured in. A task with nothing to put on its meta line gives that line back, and every link
+// it holds costs it one.
 func cardHeight(card Card, m metrics) int {
-	lines := 1
+	lines := 1 + len(card.Links)
 	if len(card.Meta) > 0 {
 		lines++
 	}
@@ -274,6 +284,58 @@ func cardHeight(card Card, m metrics) int {
 		lines += 2
 	}
 	return lines
+}
+
+// renderLinkRow draws one link: its icon, the widest reference that still fits, and as much of the
+// live state as the cells left over allow.
+//
+// The reference degrades from owner/repo#123 to repo#123 to #123 rather than being cut off, so the
+// number — the part that identifies the link to a person — survives every width the board reaches.
+func (b *Board) renderLinkRow(row LinkRow, width int) string {
+	var (
+		text string
+		used int
+	)
+	if row.Icon.Text != "" {
+		text = b.styles.segment(row.Icon.Kind).Render(row.Icon.Text) + " "
+		used = lipgloss.Width(row.Icon.Text) + 1
+	}
+
+	ref := pickRef(row.Refs, width-used)
+	if ref == "" {
+		return ""
+	}
+	used += lipgloss.Width(ref)
+	text += b.styles.segment(row.RefKind).Render(ref)
+
+	for _, segment := range row.Status {
+		segWidth := lipgloss.Width(segment.Text) + 1
+		if used+segWidth > width {
+			break
+		}
+		used += segWidth
+		text += " " + b.styles.segment(segment.Kind).Render(segment.Text)
+	}
+	return b.linkText(row.URL, text)
+}
+
+// pickRef takes the widest reference that fits, falling back to a truncated shortest one when even
+// that does not.
+func pickRef(refs []string, width int) string {
+	if width <= 0 || len(refs) == 0 {
+		return ""
+	}
+	for _, ref := range refs {
+		if lipgloss.Width(ref) <= width {
+			return ref
+		}
+	}
+	return truncate(refs[len(refs)-1], width)
+}
+
+// cursorWidth is the cells every row of a list spends on its selection marker, marked or not.
+func cursorWidth(icons IconSet) int {
+	return lipgloss.Width(icons.Cursor) + 1
 }
 
 // renderMeta styles the meta segments and drops the ones that no longer fit, so a narrow column
@@ -289,7 +351,11 @@ func (b *Board) renderMeta(segments []Segment, width int) string {
 			segWidth++
 		}
 		if used+segWidth > width {
-			parts = append(parts, "…")
+			// The marker costs a separator and a cell of its own. A column too narrow for even
+			// that keeps the segments it did fit rather than overflowing to say it dropped one.
+			if len(parts) == 0 || used+1+lipgloss.Width(truncateMark) <= width {
+				parts = append(parts, truncateMark)
+			}
 			break
 		}
 		used += segWidth
@@ -320,17 +386,17 @@ func (b *Board) renderJump() string {
 
 	lines := make([]string, 0, len(b.jump.sessions))
 	for i, session := range b.jump.sessions {
-		marker := "  "
+		marker := padCell("", cursorWidth(b.icons))
 		if i == b.jump.cursor {
-			marker = "▌ "
+			marker = b.icons.Cursor + " "
 		}
 		label := session.Label
 		if label == "" {
 			label = session.Cwd
 		}
-		state := b.sessions.State[session.SessionID]
+		state := sessionStateText(b.sessions.State[session.SessionID], b.icons)
 		if !b.sessions.Available {
-			state = offlineBadge
+			state = sessionStateText(herdrc.StateOffline, b.icons)
 		}
 		row := truncate(fmt.Sprintf("%s%s %s  %s  %s", marker, session.Agent, shortID(session.SessionID), state, label), inner)
 		if i == b.jump.cursor {
@@ -342,7 +408,7 @@ func (b *Board) renderJump() string {
 	return b.renderModal(modal{
 		title:   fmt.Sprintf("#%d の移動先セッション", b.jump.taskID),
 		body:    lines,
-		help:    "↑↓ 選択 / enter 決定 / esc 取消",
+		help:    fmt.Sprintf("%s 選択 / enter 決定 / esc 取消", b.icons.verticalKeys()),
 		width:   width,
 		focused: true,
 	})
@@ -370,7 +436,7 @@ func (b *Board) renderFooter() string {
 	if b.status != "" {
 		statusLine = b.statusLine() + "  " + statusLine
 	}
-	return b.styles.footer.Render(truncate(boardHelp, b.width)) + "\n" + statusLine
+	return b.styles.footer.Render(truncate(b.boardHelp(), b.width)) + "\n" + statusLine
 }
 
 // statusLine renders the last message the board reported, in the style its severity calls for.

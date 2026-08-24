@@ -96,7 +96,7 @@ func (b *Board) renderStatusSelect() string {
 	return b.renderModal(modal{
 		title:   fmt.Sprintf("#%d の移行先", b.statusSel.taskID),
 		body:    []string{strings.Join(cells, " ")},
-		help:    "←→ 選択 / enter 確定 / esc 取消",
+		help:    fmt.Sprintf("%s 選択 / enter 確定 / esc 取消", b.icons.horizontalKeys()),
 		width:   width,
 		focused: true,
 	})
@@ -217,9 +217,9 @@ func (b *Board) renderSessionSelect() string {
 		lines = append(lines, b.styles.dim.Render("エージェントがいない"))
 	default:
 		for i, agent := range b.sessionSel.agents {
-			marker := "  "
+			marker := padCell("", cursorWidth(b.icons))
 			if i == b.sessionSel.cursor {
-				marker = "▌ "
+				marker = b.icons.Cursor + " "
 			}
 			id := shortID(agent.SessionID())
 			if id == "" {
@@ -242,7 +242,7 @@ func (b *Board) renderSessionSelect() string {
 	return b.renderModal(modal{
 		title:   fmt.Sprintf("#%d に紐づけるセッション", b.sessionSel.taskID),
 		body:    lines,
-		help:    "↑↓ 選択 / enter 紐づけ / esc 取消",
+		help:    fmt.Sprintf("%s 選択 / enter 紐づけ / esc 取消", b.icons.verticalKeys()),
 		width:   width,
 		focused: true,
 	})

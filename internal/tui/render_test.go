@@ -45,10 +45,10 @@ func TestColumnScrollsWithOverflowIndicators(t *testing.T) {
 	h.board.height = 20
 
 	view := h.board.render()
-	if !strings.Contains(view, "↓ 7件") {
+	if !strings.Contains(view, h.board.icons.ScrollDown+" 7件") {
 		t.Fatalf("下方向のオーバーフローインジケータが無い:\n%s", view)
 	}
-	if strings.Contains(view, "↑ ") {
+	if strings.Contains(view, h.board.icons.ScrollUp+" ") {
 		t.Errorf("先頭にいるのに上方向のインジケータが出ている:\n%s", view)
 	}
 	if !strings.Contains(view, "#1 タスク 1") {
@@ -59,7 +59,7 @@ func TestColumnScrollsWithOverflowIndicators(t *testing.T) {
 		h.key("down")
 	}
 	view = h.board.render()
-	if !strings.Contains(view, "↑ 7件") {
+	if !strings.Contains(view, h.board.icons.ScrollUp+" 7件") {
 		t.Errorf("末尾まで送ったのに上方向のインジケータが無い:\n%s", view)
 	}
 	if !strings.Contains(view, "#10 タスク 10") {
@@ -113,8 +113,12 @@ func TestRenderCardKeepsBorderAligned(t *testing.T) {
 		for _, title := range titles {
 			for width := 15; width <= 40; width++ {
 				card := BuildCard(
-					model.Task{ID: 12, Title: title, Due: due("2026-08-30")},
-					SessionBadge{}, nil, boardNow)
+					model.Task{ID: 12, Title: title, Due: due("2026-08-30"),
+						Links: []model.Link{
+							{URL: "https://github.com/owner/repo/pull/1234", Kind: model.LinkKindGitHubPR},
+							{URL: "https://x.atlassian.net/browse/ABC-123", Kind: model.LinkKindJira},
+						}},
+					SessionBadge{Text: "* working"}, nil, h.board.cardStyle(), boardNow)
 				got := h.board.renderCard(card, Column{Color: "green"}, width, true, density.metrics())
 
 				for _, line := range strings.Split(got, "\n") {
@@ -146,7 +150,7 @@ func TestModalIsBoxOverTheBoard(t *testing.T) {
 	if !strings.Contains(view, "ToDo (3)") {
 		t.Errorf("ダイアログの背後に盤面が残っていない:\n%s", view)
 	}
-	if !strings.Contains(view, boardHelp[:12]) {
+	if !strings.Contains(view, "tab 移行") {
 		t.Errorf("ダイアログの背後にフッタが残っていない:\n%s", view)
 	}
 }
@@ -201,5 +205,82 @@ func TestEmptyColumnShowsPlaceholder(t *testing.T) {
 
 	if view := h.board.render(); !strings.Contains(view, "カードなし") {
 		t.Errorf("空列のプレースホルダが無い:\n%s", view)
+	}
+}
+
+// A narrow column drops the owner, then the repository, but never the number: the number is what
+// tells one PR from another, so it is the last thing to go.
+func TestLinkRowDegradesReferenceByWidth(t *testing.T) {
+	h := newHarness(t, Deps{Tasks: newFakeStore()}, Settings{Classifier: testClassifier, Icons: IconASCII})
+	rows := BuildLinkRows(
+		linkTask(model.Link{URL: "https://github.com/owner/repo/pull/123", Kind: model.LinkKindGitHubPR}),
+		nil, h.board.cardStyle())
+
+	tests := []struct {
+		width int
+		want  string
+	}{
+		{30, "PR owner/repo#123 未取得"},
+		{17, "PR owner/repo#123"},
+		{16, "PR repo#123"},
+		{11, "PR repo#123"},
+		{10, "PR #123"},
+		{7, "PR #123"},
+		{6, "PR #1~"},
+		// Narrower than the icon and one cell, nothing identifies the link, so the row goes blank
+		// rather than printing a reference that is only a truncation mark.
+		{3, ""},
+	}
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("width%d", tc.width), func(t *testing.T) {
+			rendered := h.board.renderLinkRow(rows[0], tc.width)
+			got := stripANSI(rendered)
+			if got != tc.want {
+				t.Errorf("renderLinkRow(width=%d) = %q, want %q", tc.width, got, tc.want)
+			}
+			if w := lipgloss.Width(rendered); w > tc.width {
+				t.Errorf("表示幅 = %d, want <= %d", w, tc.width)
+			}
+		})
+	}
+}
+
+// stripANSI drops the styling from a rendered line so a test can assert on what the user reads.
+func stripANSI(s string) string {
+	var (
+		out    strings.Builder
+		escape bool
+	)
+	for _, r := range s {
+		switch {
+		case r == 0x1b:
+			escape = true
+		case escape && (r == 'm' || r == '\\'):
+			escape = false
+		case !escape:
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
+}
+
+// A card grows a row per link, and its box has to grow with it rather than clipping the last one.
+func TestCardHeightFollowsLinkCount(t *testing.T) {
+	h := newHarness(t, Deps{Tasks: newFakeStore()}, Settings{Classifier: testClassifier, Icons: IconASCII})
+	links := []model.Link{
+		{URL: "https://github.com/owner/repo/pull/1", Kind: model.LinkKindGitHubPR},
+		{URL: "https://x.atlassian.net/browse/ABC-1", Kind: model.LinkKindJira},
+	}
+
+	for count := 0; count <= len(links); count++ {
+		card := BuildCard(model.Task{ID: 1, Title: "task", Status: "todo", Links: links[:count]},
+			SessionBadge{}, nil, h.board.cardStyle(), boardNow)
+		for _, density := range []Density{DensityRoomy, DensityTight, DensityCompact} {
+			m := density.metrics()
+			got := h.board.renderCard(card, Column{Color: "green"}, 40, false, m)
+			if lines := strings.Count(got, "\n") + 1; lines != cardHeight(card, m) {
+				t.Errorf("links=%d density=%v: 行数 = %d, want %d", count, density, lines, cardHeight(card, m))
+			}
+		}
 	}
 }

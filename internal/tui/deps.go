@@ -75,6 +75,10 @@ type Settings struct {
 	// RefreshInterval is the background fetch cadence. Zero disables background refresh entirely;
 	// r and R still work.
 	RefreshInterval time.Duration
+	// Icons is the glyph vocabulary the board draws with.
+	Icons IconMode
+	// Hyperlinks wraps link rows in OSC 8 so a terminal that understands it opens them on a click.
+	Hyperlinks bool
 }
 
 func (d Deps) now() time.Time {

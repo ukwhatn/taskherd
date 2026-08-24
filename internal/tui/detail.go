@@ -12,7 +12,11 @@ import (
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
-const detailHelp = "↑↓ 項目  enter 編集  ←→ ステータス  delete 解除  g jump  r 取得  esc 戻る"
+// detailHelp is the modal's key list, with the arrow keys named by the icon set in use.
+func (b *Board) detailHelp() string {
+	return fmt.Sprintf("%s 項目  enter 編集  %s ステータス  delete 解除  g jump  r 取得  esc 戻る",
+		b.icons.verticalKeys(), b.icons.horizontalKeys())
+}
 
 // detailItemKind is what one row of the detail modal stands for.
 type detailItemKind int
@@ -117,7 +121,7 @@ func (b *Board) detailItems(task model.Task) []detailItem {
 	for _, link := range task.Links {
 		value := fmt.Sprintf("[%s] %s", link.Kind, link.URL)
 		if link.Note != "" {
-			value += "  — " + link.Note
+			value += "  - " + link.Note
 		}
 		items = append(items, detailItem{kind: itemLink, ref: link.URL, label: "リンク", value: value})
 	}
@@ -149,15 +153,13 @@ func (b *Board) detailItems(task model.Task) []detailItem {
 
 // sessionRow is the one-line summary of a linked session shown in the item list.
 func (b *Board) sessionRow(session model.SessionRef) string {
-	state := offlineBadge
+	state := herdrc.StateOffline
 	if b.sessions.Available {
 		if live, ok := b.sessions.State[session.SessionID]; ok {
 			state = live
-		} else {
-			state = herdrc.StateOffline
 		}
 	}
-	row := fmt.Sprintf("%s %s  %s", session.Agent, shortID(session.SessionID), state)
+	row := fmt.Sprintf("%s %s  %s", session.Agent, shortID(session.SessionID), sessionStateText(state, b.icons))
 	if paneID := b.sessions.Pane[session.SessionID]; paneID != "" {
 		row += fmt.Sprintf(" (pane %s)", paneID)
 	}
@@ -397,7 +399,7 @@ func (b *Board) renderDetail(focused bool) string {
 	lines = append(lines, noteLines...)
 	lines = append(lines, prompt...)
 
-	help := detailHelp
+	help := b.detailHelp()
 	if b.detail.editing {
 		help = "enter 確定 / esc 取消"
 	}
@@ -439,7 +441,7 @@ func (b *Board) detailNoteBlock(task model.Task, body, inner int) []string {
 	lines := []string{b.styles.dim.Render(truncate("── note ──", inner))}
 	for _, line := range strings.Split(task.Note, "\n") {
 		if len(lines) >= budget {
-			lines = append(lines, b.styles.dim.Render("…"))
+			lines = append(lines, b.styles.dim.Render(truncateMark))
 			break
 		}
 		lines = append(lines, b.styles.dim.Render(truncate(line, inner)))
@@ -448,9 +450,9 @@ func (b *Board) detailNoteBlock(task model.Task, body, inner int) []string {
 }
 
 func (b *Board) renderDetailItem(item detailItem, focused bool, inner int) string {
-	marker := "  "
+	marker := padCell("", cursorWidth(b.icons))
 	if focused {
-		marker = "▌ "
+		marker = b.icons.Cursor + " "
 	}
 
 	// The live suffix is styled, so the row is trimmed to width before it is appended rather than
@@ -461,12 +463,16 @@ func (b *Board) renderDetailItem(item detailItem, focused bool, inner int) strin
 	}
 	switch {
 	case focused:
-		return b.styles.cardTitleSelected.Render(padCell(line, inner))
+		line = b.styles.cardTitleSelected.Render(padCell(line, inner))
 	case item.disabled:
-		return b.styles.dim.Render(line)
-	default:
-		return line
+		line = b.styles.dim.Render(line)
 	}
+	// The hyperlink goes on last, around the finished row: an escape inside the styled text would
+	// be measured and cut with it.
+	if item.kind == itemLink {
+		line = b.linkText(item.ref, line)
+	}
+	return line
 }
 
 // decorateLinkRow is the cached live state appended to a link row, so the row says what the badge
@@ -536,5 +542,5 @@ func titleSuffix(title string) string {
 	if title == "" {
 		return ""
 	}
-	return " — " + title
+	return " - " + title
 }
