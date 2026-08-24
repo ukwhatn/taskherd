@@ -129,9 +129,3 @@ func (c *Client) Snapshot(ctx context.Context) (*Snapshot, error) {
 	}
 	return snapshot, nil
 }
-
-// Ping reports whether herdr answers on the socket.
-func (c *Client) Ping(ctx context.Context) error {
-	_, err := c.call(ctx, "ping", struct{}{})
-	return err
-}

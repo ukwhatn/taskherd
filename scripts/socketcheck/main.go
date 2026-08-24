@@ -11,29 +11,67 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
 	"os"
 	"time"
+
+	"github.com/ukwhatn/taskherd/internal/herdrc"
 )
 
 func main() {
 	duration := flag.Duration("duration", 20*time.Second, "イベントを待ち受ける時間")
 	pane := flag.String("pane", os.Getenv("HERDR_PANE_ID"), "pane.agent_status_changed を購読する pane_id")
+	watch := flag.Bool("watch", false, "生の購読ではなく herdrc.Watcher を実機に対して動かす")
 	flag.Parse()
 
-	socketPath := os.Getenv("HERDR_SOCKET_PATH")
-	if socketPath == "" {
-		fmt.Fprintln(os.Stderr, "HERDR_SOCKET_PATH が未設定")
-		os.Exit(1)
+	if *watch {
+		if err := runWatcher(*duration); err != nil {
+			fmt.Fprintf(os.Stderr, "失敗: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
+	socketPath := herdrc.ResolveSocketPath(os.Getenv)
 	if err := run(socketPath, *pane, *duration); err != nil {
 		fmt.Fprintf(os.Stderr, "失敗: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// runWatcher drives the package taskherd actually ships against the live herdr, so the fake
+// server used by the unit tests can be checked against the real thing.
+func runWatcher(duration time.Duration) error {
+	client := herdrc.New(herdrc.Options{Getenv: os.Getenv})
+	fmt.Printf("== herdrc.Watcher を %s 動かす（socket %s）\n", duration, client.SocketPath())
+
+	ctx, cancel := context.WithTimeout(context.Background(), duration)
+	defer cancel()
+
+	watcher := client.Watch(ctx)
+	defer watcher.Close()
+
+	count := 0
+	for update := range watcher.Updates() {
+		count++
+		if !update.Status.Available {
+			fmt.Printf("update %d: オフライン (%v)\n", count, update.Status.Err)
+			continue
+		}
+		agents := update.Snapshot.Agents
+		fmt.Printf("update %d: herdr %s protocol %d / agent pane %d 件 / focused %s\n",
+			count, update.Snapshot.Version, update.Snapshot.Protocol, len(agents), update.Snapshot.FocusedPaneID)
+		for i := range agents {
+			fmt.Printf("   %s %s %s session=%s\n",
+				agents[i].PaneID, agents[i].Agent, agents[i].AgentStatus, agents[i].SessionID())
+		}
+	}
+	fmt.Printf("== update %d 件で終了\n", count)
+	return nil
 }
 
 func run(socketPath, paneID string, duration time.Duration) error {

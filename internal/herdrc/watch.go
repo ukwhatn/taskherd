@@ -10,7 +10,7 @@ import (
 const (
 	// eventDebounce collapses a burst of events into one snapshot refetch. herdr replays the
 	// matching event history when a subscription starts, so bursts are the normal case.
-	eventDebounce = 300 * time.Millisecond
+	eventDebounce = 500 * time.Millisecond
 
 	reconnectMin = 500 * time.Millisecond
 	reconnectMax = 30 * time.Second
@@ -42,6 +42,9 @@ type Watcher struct {
 	client  *Client
 	updates chan Update
 	cancel  context.CancelFunc
+
+	// lastFingerprint is touched only by the watcher goroutine.
+	lastFingerprint string
 }
 
 // Watch starts watching herdr. The returned channel closes when ctx is done or Close is called.
@@ -71,6 +74,8 @@ func (w *Watcher) loop(ctx context.Context) {
 	for ctx.Err() == nil {
 		if snapshot == nil {
 			fetched, status := w.client.Probe(ctx)
+			// After a gap the consumer has to be told the current state even if it did not change.
+			w.lastFingerprint = fetched.Fingerprint()
 			if !w.emit(ctx, Update{Snapshot: fetched, Status: status}) {
 				return
 			}
@@ -164,8 +169,13 @@ func (w *Watcher) subscribeSession(ctx context.Context, snapshot *Snapshot) (*Sn
 			if !status.Available {
 				return nil, status.Err
 			}
-			if !w.emit(ctx, Update{Snapshot: fresh, Status: status}) {
-				return nil, ctx.Err()
+			// Most status events leave the rendered state untouched, so an unchanged snapshot
+			// is not passed on: it would only cause a redundant redraw.
+			if fingerprint := fresh.Fingerprint(); fingerprint != w.lastFingerprint {
+				w.lastFingerprint = fingerprint
+				if !w.emit(ctx, Update{Snapshot: fresh, Status: status}) {
+					return nil, ctx.Err()
+				}
 			}
 			if !sameStrings(paneIDs, fresh.AgentPaneIDs()) {
 				return fresh, nil

@@ -3,6 +3,7 @@ package herdrc
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Agent states as reported by herdr. A resumed agent that finished a turn reports "done",
@@ -144,6 +145,36 @@ func AggregateState(states []string) string {
 		return StateOffline
 	}
 	return best
+}
+
+// Fingerprint summarizes the parts of the snapshot taskherd renders.
+//
+// herdr emits status events continuously while agents work, and most of them leave the rendered
+// state untouched. Comparing fingerprints lets a watcher drop those without diffing documents.
+func (s *Snapshot) Fingerprint() string {
+	if s == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(s.FocusedWorkspaceID)
+	b.WriteByte('|')
+	b.WriteString(s.FocusedTabID)
+	b.WriteByte('|')
+	b.WriteString(s.FocusedPaneID)
+	for i := range s.Agents {
+		agent := &s.Agents[i]
+		b.WriteByte('\n')
+		b.WriteString(agent.PaneID)
+		b.WriteByte('\t')
+		b.WriteString(agent.Agent)
+		b.WriteByte('\t')
+		b.WriteString(agent.AgentStatus)
+		b.WriteByte('\t')
+		b.WriteString(agent.SessionID())
+		b.WriteByte('\t')
+		b.WriteString(agent.Cwd)
+	}
+	return b.String()
 }
 
 // decodeSnapshot reads the session.snapshot result, which nests the snapshot under "snapshot".
