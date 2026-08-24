@@ -11,10 +11,12 @@ import (
 
 func (a *app) addCmd() *cobra.Command {
 	var (
-		status string
-		due    string
-		note   string
-		links  []string
+		status  string
+		due     string
+		note    string
+		links   []string
+		session string
+		cwd     string
 	)
 
 	cmd := &cobra.Command{
@@ -45,6 +47,16 @@ func (a *app) addCmd() *cobra.Command {
 				urls = append(urls, parsed)
 			}
 
+			// The session is resolved before the store transaction so that herdr calls
+			// never happen while the write lock is held.
+			var ref sessionRef
+			if session != "" {
+				ref, err = a.resolveSession(cmd.Context(), sessionSpecFromFlag(session, cwd))
+				if err != nil {
+					return err
+				}
+			}
+
 			classifier := cfg.Classifier()
 			now := a.env.Now()
 			var created *model.Task
@@ -58,11 +70,19 @@ func (a *app) addCmd() *cobra.Command {
 						return err
 					}
 				}
+				if ref.SessionID != "" {
+					if _, err := task.AddSession(ref.SessionRef, now); err != nil {
+						return err
+					}
+				}
 				created = task
 				return nil
 			})
 			if err != nil {
 				return err
+			}
+			if ref.PaneID != "" {
+				a.stampTaskToken(cmd.Context(), ref.PaneID, created.ID)
 			}
 			return a.emitTask(created, fmt.Sprintf("#%d を作成した（%s）: %s", created.ID, created.Status, created.Title))
 		},
@@ -72,6 +92,8 @@ func (a *app) addCmd() *cobra.Command {
 	cmd.Flags().StringVar(&due, "due", "", "期日（YYYY-MM-DD）")
 	cmd.Flags().StringVar(&note, "note", "", "note の初期値")
 	cmd.Flags().StringArrayVar(&links, "link", nil, "紐づける外部リンク URL（複数指定可）")
+	cmd.Flags().StringVar(&session, "session", "", "紐づけるセッション（current または UUID）")
+	cmd.Flags().StringVar(&cwd, "cwd", "", "セッションの作業ディレクトリ（--session が UUID で herdr が解決できない場合は必須）")
 	return cmd
 }
 
@@ -97,18 +119,22 @@ func (a *app) listCmd() *cobra.Command {
 
 			tasks := filterTasks(f.Tasks, cfg.Columns, statuses, all)
 			sortTasks(tasks, cfg.Columns)
+			live := a.liveSessions(cmd.Context(), tasks)
 
 			if a.jsonOut {
 				return a.emitJSON(struct {
-					Tasks []model.Task `json:"tasks"`
-				}{Tasks: tasks})
+					Tasks         []model.Task            `json:"tasks"`
+					Herdr         *herdrStatusJSON        `json:"herdr,omitempty"`
+					SessionStates map[string]sessionState `json:"session_states,omitempty"`
+				}{Tasks: tasks, Herdr: live.statusJSON(), SessionStates: live.forTasks(tasks)})
 			}
+			live.note(a)
 			if len(tasks) == 0 {
 				fmt.Fprintln(a.env.Out, "該当するタスクがない")
 				return nil
 			}
 			for _, task := range tasks {
-				fmt.Fprintln(a.env.Out, formatTaskLine(task))
+				fmt.Fprintln(a.env.Out, formatTaskLine(task, live.badge(task)))
 			}
 			return nil
 		},
@@ -142,12 +168,16 @@ func (a *app) showCmd() *cobra.Command {
 				return err
 			}
 
+			live := a.liveSessions(cmd.Context(), []model.Task{*task})
 			if a.jsonOut {
 				return a.emitJSON(struct {
-					Task *model.Task `json:"task"`
-				}{Task: task})
+					Task          *model.Task             `json:"task"`
+					Herdr         *herdrStatusJSON        `json:"herdr,omitempty"`
+					SessionStates map[string]sessionState `json:"session_states,omitempty"`
+				}{Task: task, Herdr: live.statusJSON(), SessionStates: live.forTasks([]model.Task{*task})})
 			}
-			fmt.Fprint(a.env.Out, formatTaskDetail(task, cfg.Columns))
+			live.note(a)
+			fmt.Fprint(a.env.Out, formatTaskDetail(task, cfg.Columns, live))
 			return nil
 		},
 	}
@@ -382,16 +412,19 @@ func sortTasks(tasks []model.Task, columns model.Columns) {
 	})
 }
 
-func formatTaskLine(task model.Task) string {
+func formatTaskLine(task model.Task, badge string) string {
 	due := "-"
 	if task.Due != nil {
 		due = string(*task.Due)
 	}
 	counts := fmt.Sprintf("L%d S%d", len(task.Links), len(task.Sessions))
-	return fmt.Sprintf("#%-4d %-10s %-10s %-7s %s", task.ID, task.Status, due, counts, task.Title)
+	if badge == "" {
+		return fmt.Sprintf("#%-4d %-10s %-10s %-7s %s", task.ID, task.Status, due, counts, task.Title)
+	}
+	return fmt.Sprintf("#%-4d %-10s %-10s %-7s %-8s %s", task.ID, task.Status, due, counts, badge, task.Title)
 }
 
-func formatTaskDetail(task *model.Task, columns model.Columns) string {
+func formatTaskDetail(task *model.Task, columns model.Columns, live liveState) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#%d %s\n", task.ID, task.Title)
 
@@ -418,6 +451,13 @@ func formatTaskDetail(task *model.Task, columns model.Columns) string {
 	fmt.Fprintf(&b, "\nsessions (%d):\n", len(task.Sessions))
 	for _, session := range task.Sessions {
 		fmt.Fprintf(&b, "  - %s %s\n", session.Agent, session.SessionID)
+		if state, ok := live.states[session.SessionID]; live.available && ok {
+			fmt.Fprintf(&b, "    state: %s", state.State)
+			if state.PaneID != "" {
+				fmt.Fprintf(&b, " (pane %s)", state.PaneID)
+			}
+			fmt.Fprintln(&b)
+		}
 		fmt.Fprintf(&b, "    cwd: %s\n", session.Cwd)
 		if session.Label != "" {
 			fmt.Fprintf(&b, "    label: %s\n", session.Label)
