@@ -266,3 +266,22 @@ func TestLinkRowGHESHostIsParsed(t *testing.T) {
 		t.Errorf("Refs[0] = %q, want team/svc#7", rows[0].Refs[0])
 	}
 }
+
+// The none mode spells its marks out as words, so "CI" and the mark need a separator that the
+// glyph modes would only spend a cell on.
+func TestLinkRowNoneModeSeparatesLabelFromMark(t *testing.T) {
+	url := "https://github.com/o/r/pull/1"
+	states := map[string]fetch.LinkState{
+		url: ghState(url, fetch.GitHubData{State: "OPEN", Checks: "pass", ReviewDecision: "APPROVED"}, model.LinkKindGitHubPR),
+	}
+
+	none := BuildLinkRows(linkTask(model.Link{URL: url, Kind: model.LinkKindGitHubPR}), states, testStyle(Icons(IconNone)))
+	if got := rowText(none[0]); got != "PR o/r#1 open CI ok rv ok" {
+		t.Errorf("none = %q, want %q", got, "PR o/r#1 open CI ok rv ok")
+	}
+
+	ascii := BuildLinkRows(linkTask(model.Link{URL: url, Kind: model.LinkKindGitHubPR}), states, testStyle(testIcons))
+	if got := rowText(ascii[0]); got != "PR o/r#1 open CI+ rv+" {
+		t.Errorf("ascii = %q, want %q", got, "PR o/r#1 open CI+ rv+")
+	}
+}

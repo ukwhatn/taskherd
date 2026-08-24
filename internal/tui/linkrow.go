@@ -55,7 +55,10 @@ func BuildLinkRows(task model.Task, states map[string]fetch.LinkState, style Car
 	rows := make([]LinkRow, 0, len(task.Links))
 	for i, link := range task.Links {
 		if i == limit && len(task.Links) > limit {
+			// The summary keeps the icon column the rows above it use, so it reads as one more
+			// row of the same list rather than as text that lost its indent.
 			rows = append(rows, LinkRow{
+				Icon:     Segment{Text: style.Icons.More, Kind: SegLinkUnfetched},
 				Refs:     []string{fmt.Sprintf("他 %d 件", len(task.Links)-limit)},
 				RefKind:  SegLinkUnfetched,
 				Overflow: true,
@@ -166,13 +169,13 @@ func prStatus(data *fetch.GitHubData, icons IconSet) []Segment {
 		segments = append(segments, Segment{Text: word, Kind: kind})
 	}
 	if glyph, kind, ok := checkMark(fetch.CheckStatus(data.Checks), icons); ok {
-		segments = append(segments, Segment{Text: "CI" + glyph, Kind: kind})
+		segments = append(segments, Segment{Text: icons.tag("CI", glyph), Kind: kind})
 	}
 	switch data.ReviewDecision {
 	case "APPROVED":
-		segments = append(segments, Segment{Text: "rv" + icons.Pass, Kind: SegLinkOpen})
+		segments = append(segments, Segment{Text: icons.tag("rv", icons.Pass), Kind: SegLinkOpen})
 	case "CHANGES_REQUESTED":
-		segments = append(segments, Segment{Text: "rv" + icons.Fail, Kind: SegLinkAttention})
+		segments = append(segments, Segment{Text: icons.tag("rv", icons.Fail), Kind: SegLinkAttention})
 	}
 	return segments
 }

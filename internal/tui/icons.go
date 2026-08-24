@@ -41,6 +41,8 @@ type IconSet struct {
 	PROpen, PRDraft, PRMerged, PRClosed string
 	IssueOpen, IssueClosed              string
 	Jira, Link                          string
+	// More opens the row standing in for the links a card had no room to draw.
+	More string
 
 	Pass, Fail, Pending string
 
@@ -61,6 +63,15 @@ type IconSet struct {
 // The none mode spells the keys out, so it needs a separator the glyph modes do not.
 func (s IconSet) horizontalKeys() string { return s.arrowPair(s.ArrowLeft, s.ArrowRight) }
 func (s IconSet) verticalKeys() string   { return s.arrowPair(s.ArrowUp, s.ArrowDown) }
+
+// tag labels a state mark, as in "CI" plus a pass mark. The none mode spells its marks out as
+// words, so it needs the separator that the glyph modes would only waste a cell on.
+func (s IconSet) tag(label, mark string) string {
+	if s.Mode == IconNone {
+		return label + " " + mark
+	}
+	return label + mark
+}
 
 func (s IconSet) arrowPair(first, second string) string {
 	if s.Mode == IconNone {
@@ -96,6 +107,7 @@ const (
 	nfOctArrowRight           = "\uf432" // nf-oct-arrow_right
 	nfOctArrowDown            = "\uf433" // nf-oct-arrow_down
 	nfOctArrowLeft            = "\uf434" // nf-oct-arrow_left
+	nfOctEllipsis             = "\uf475" // nf-oct-ellipsis
 )
 
 var nerdIcons = IconSet{
@@ -110,6 +122,7 @@ var nerdIcons = IconSet{
 	IssueClosed: nfOctIssueClosed,
 	Jira:        nfFaJira,
 	Link:        nfOctLink,
+	More:        nfOctEllipsis,
 
 	Pass:    nfOctCheck,
 	Fail:    nfOctX,
@@ -148,6 +161,7 @@ var asciiIcons = IconSet{
 	IssueClosed: "IS",
 	Jira:        "JR",
 	Link:        "LN",
+	More:        "..",
 
 	Pass:    "+",
 	Fail:    "!",
@@ -183,6 +197,7 @@ var noneIcons = IconSet{
 	IssueClosed: "Issue",
 	Jira:        "Jira",
 	Link:        "link",
+	More:        "..",
 
 	Pass:    "ok",
 	Fail:    "ng",
@@ -240,7 +255,7 @@ func buildDeclaredIcons() map[rune]bool {
 func (s IconSet) all() []string {
 	return []string{
 		s.PROpen, s.PRDraft, s.PRMerged, s.PRClosed,
-		s.IssueOpen, s.IssueClosed, s.Jira, s.Link,
+		s.IssueOpen, s.IssueClosed, s.Jira, s.Link, s.More,
 		s.Pass, s.Fail, s.Pending,
 		s.SessionBlocked, s.SessionWorking, s.SessionDone, s.SessionIdle, s.SessionOffline,
 		s.Due, s.DueOverdue,
