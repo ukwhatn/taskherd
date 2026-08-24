@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/model"
+	"github.com/ukwhatn/taskherd/internal/tui"
 )
 
 func (a *app) addCmd() *cobra.Command {
@@ -169,15 +172,26 @@ func (a *app) showCmd() *cobra.Command {
 			}
 
 			live := a.liveSessions(cmd.Context(), []model.Task{*task})
+			// Link state comes from the cache only: `show` reports what is known, and `refresh`
+			// is what goes and asks the outside world.
+			links := a.cache().Load().LinkStates(
+				task.Links, a.env.Now(), time.Duration(cfg.Board.CacheTTLMinutes)*time.Minute)
+
 			if a.jsonOut {
 				return a.emitJSON(struct {
-					Task          *model.Task             `json:"task"`
-					Herdr         *herdrStatusJSON        `json:"herdr,omitempty"`
-					SessionStates map[string]sessionState `json:"session_states,omitempty"`
-				}{Task: task, Herdr: live.statusJSON(), SessionStates: live.forTasks([]model.Task{*task})})
+					Task          *model.Task                `json:"task"`
+					Herdr         *herdrStatusJSON           `json:"herdr,omitempty"`
+					SessionStates map[string]sessionState    `json:"session_states,omitempty"`
+					LinkStates    map[string]fetch.LinkState `json:"link_states,omitempty"`
+				}{
+					Task:          task,
+					Herdr:         live.statusJSON(),
+					SessionStates: live.forTasks([]model.Task{*task}),
+					LinkStates:    links,
+				})
 			}
 			live.note(a)
-			fmt.Fprint(a.env.Out, formatTaskDetail(task, cfg.Columns, live))
+			fmt.Fprint(a.env.Out, formatTaskDetail(task, cfg.Columns, live, links))
 			return nil
 		},
 	}
@@ -412,6 +426,27 @@ func sortTasks(tasks []model.Task, columns model.Columns) {
 	})
 }
 
+// formatLinkState renders one link's cached live state. The value shown is always the last
+// success; a failing refresh is reported alongside it rather than replacing it.
+func formatLinkState(state fetch.LinkState) string {
+	if !state.Fetched {
+		if state.Err != "" {
+			return "取得失敗: " + state.Err
+		}
+		return "未取得（refresh で取得する）"
+	}
+
+	line := fmt.Sprintf("%s（%s前", tui.DescribeLink(state), tui.FormatAge(state.Age))
+	if state.Stale {
+		line += " / TTL 超過"
+	}
+	line += "）"
+	if state.Err != "" {
+		line += " 最新の取得は失敗: " + state.Err
+	}
+	return line
+}
+
 func formatTaskLine(task model.Task, badge string) string {
 	due := "-"
 	if task.Due != nil {
@@ -424,7 +459,7 @@ func formatTaskLine(task model.Task, badge string) string {
 	return fmt.Sprintf("#%-4d %-10s %-10s %-7s %-8s %s", task.ID, task.Status, due, counts, badge, task.Title)
 }
 
-func formatTaskDetail(task *model.Task, columns model.Columns, live liveState) string {
+func formatTaskDetail(task *model.Task, columns model.Columns, live liveState, links map[string]fetch.LinkState) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#%d %s\n", task.ID, task.Title)
 
@@ -444,6 +479,9 @@ func formatTaskDetail(task *model.Task, columns model.Columns, live liveState) s
 		fmt.Fprintf(&b, "  - [%s] %s\n", link.Kind, link.URL)
 		if link.Note != "" {
 			fmt.Fprintf(&b, "    note: %s\n", link.Note)
+		}
+		if state, ok := links[link.URL]; ok && state.Fetchable() {
+			fmt.Fprintf(&b, "    live: %s\n", formatLinkState(state))
 		}
 		fmt.Fprintf(&b, "    added: %s\n", link.AddedAt)
 	}
