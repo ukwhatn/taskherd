@@ -18,7 +18,7 @@ func newTestFetcher(t *testing.T, runGH fakeRunFn) (*fetch.Fetcher, *fetch.Cache
 		GitHub:     &fetch.GitHubFetcher{Run: runGH},
 		Jira:       &fetch.JiraFetcher{Client: nil}, // overridden per test via JiraCreds when needed
 		Cache:      cache,
-		Classifier: model.URLClassifier{JiraSite: "dena.atlassian.net"},
+		Classifier: model.URLClassifier{JiraSite: "example.atlassian.net"},
 		Now:        func() time.Time { return time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC) },
 	}, cache
 }
@@ -102,7 +102,7 @@ func TestFetcherRefreshLinksGitHubRateLimitInterruptsRemainingGitHubLinks(t *tes
 
 func TestFetcherRefreshLinksJiraNotConfiguredRecordsFailure(t *testing.T) {
 	f, cache := newTestFetcher(t, nil)
-	const url = "https://dena.atlassian.net/browse/ABC-1"
+	const url = "https://example.atlassian.net/browse/ABC-1"
 
 	result, err := f.RefreshLinks(context.Background(), []string{url})
 	if err != nil {
@@ -127,7 +127,7 @@ func TestFetcherRefreshLinksGitHubAndJiraAreIndependentKinds(t *testing.T) {
 	}
 	f, cache := newTestFetcher(t, run)
 
-	urls := []string{"https://github.com/o/r/pull/1", "https://dena.atlassian.net/browse/ABC-1"}
+	urls := []string{"https://github.com/o/r/pull/1", "https://example.atlassian.net/browse/ABC-1"}
 	result, err := f.RefreshLinks(context.Background(), urls)
 	if err != nil {
 		t.Fatalf("RefreshLinks() error = %v", err)
@@ -136,7 +136,7 @@ func TestFetcherRefreshLinksGitHubAndJiraAreIndependentKinds(t *testing.T) {
 		t.Error("GitHubInterrupted = false, want true")
 	}
 	// Jira has its own kind-worker: GitHub's rate limit must not block it.
-	if _, ok := cache.Load().Get("https://dena.atlassian.net/browse/ABC-1"); !ok {
+	if _, ok := cache.Load().Get("https://example.atlassian.net/browse/ABC-1"); !ok {
 		t.Error("GitHub のレート制限で Jira の取得まで止まった")
 	}
 	if len(result.Outcomes) != 2 {

@@ -7,7 +7,7 @@ import (
 )
 
 func TestURLClassifierClassify(t *testing.T) {
-	const jiraSite = "dena.atlassian.net"
+	const jiraSite = "example.atlassian.net"
 
 	tests := []struct {
 		name      string
@@ -30,20 +30,20 @@ func TestURLClassifierClassify(t *testing.T) {
 		{name: "http スキームも判別する", url: "http://github.com/owner/repo/pull/9", want: model.LinkKindGitHubPR},
 		{name: "http/https 以外のスキームは other", url: "ssh://github.com/owner/repo/pull/1", want: model.LinkKindOther},
 
-		{name: "config の ghes_hosts に一致すれば github_pr", url: "https://github.dena.jp/owner/repo/pull/7", ghesHosts: []string{"github.dena.jp"}, want: model.LinkKindGitHubPR},
-		{name: "ghes_hosts の指定は大文字小文字・空白を無視する", url: "https://github.dena.jp/owner/repo/issues/7", ghesHosts: []string{" GitHub.DENA.jp "}, want: model.LinkKindGitHubIssue},
-		{name: "ghes_hosts に無い GitHub 風ホストは other", url: "https://github.example.com/owner/repo/pull/7", ghesHosts: []string{"github.dena.jp"}, want: model.LinkKindOther},
-		{name: "ポート付きホストも ghes_hosts と一致する", url: "https://github.dena.jp:8443/owner/repo/pull/1", ghesHosts: []string{"github.dena.jp"}, want: model.LinkKindGitHubPR},
+		{name: "config の ghes_hosts に一致すれば github_pr", url: "https://github.example.com/owner/repo/pull/7", ghesHosts: []string{"github.example.com"}, want: model.LinkKindGitHubPR},
+		{name: "ghes_hosts の指定は大文字小文字・空白を無視する", url: "https://github.example.com/owner/repo/issues/7", ghesHosts: []string{" GitHub.Example.COM "}, want: model.LinkKindGitHubIssue},
+		{name: "ghes_hosts に無い GitHub 風ホストは other", url: "https://github.other-host.test/owner/repo/pull/7", ghesHosts: []string{"github.example.com"}, want: model.LinkKindOther},
+		{name: "ポート付きホストも ghes_hosts と一致する", url: "https://github.example.com:8443/owner/repo/pull/1", ghesHosts: []string{"github.example.com"}, want: model.LinkKindGitHubPR},
 
-		{name: "config の jira.site の browse は jira", url: "https://dena.atlassian.net/browse/ABC-123", jiraSite: jiraSite, want: model.LinkKindJira},
-		{name: "jira.site にスキーム・末尾スラッシュが付いていても一致する", url: "https://dena.atlassian.net/browse/ABC-123", jiraSite: "https://dena.atlassian.net/", want: model.LinkKindJira},
-		{name: "小文字のプロジェクトキーも受理する", url: "https://dena.atlassian.net/browse/abc-123", jiraSite: jiraSite, want: model.LinkKindJira},
-		{name: "クエリ付きの browse URL", url: "https://dena.atlassian.net/browse/ABC-123?focusedCommentId=1", jiraSite: jiraSite, want: model.LinkKindJira},
+		{name: "config の jira.site の browse は jira", url: "https://example.atlassian.net/browse/ABC-123", jiraSite: jiraSite, want: model.LinkKindJira},
+		{name: "jira.site にスキーム・末尾スラッシュが付いていても一致する", url: "https://example.atlassian.net/browse/ABC-123", jiraSite: "https://example.atlassian.net/", want: model.LinkKindJira},
+		{name: "小文字のプロジェクトキーも受理する", url: "https://example.atlassian.net/browse/abc-123", jiraSite: jiraSite, want: model.LinkKindJira},
+		{name: "クエリ付きの browse URL", url: "https://example.atlassian.net/browse/ABC-123?focusedCommentId=1", jiraSite: jiraSite, want: model.LinkKindJira},
 		{name: "config と異なる atlassian テナントは other", url: "https://other.atlassian.net/browse/ABC-123", jiraSite: jiraSite, want: model.LinkKindOther},
-		{name: "jira.site 未設定なら atlassian.net でも other", url: "https://dena.atlassian.net/browse/ABC-123", want: model.LinkKindOther},
-		{name: "課題番号のないキーは other", url: "https://dena.atlassian.net/browse/ABC", jiraSite: jiraSite, want: model.LinkKindOther},
-		{name: "browse 以外のパスは other", url: "https://dena.atlassian.net/projects/ABC", jiraSite: jiraSite, want: model.LinkKindOther},
-		{name: "browse の後続セグメントは other", url: "https://dena.atlassian.net/browse/ABC-1/comments", jiraSite: jiraSite, want: model.LinkKindOther},
+		{name: "jira.site 未設定なら atlassian.net でも other", url: "https://example.atlassian.net/browse/ABC-123", want: model.LinkKindOther},
+		{name: "課題番号のないキーは other", url: "https://example.atlassian.net/browse/ABC", jiraSite: jiraSite, want: model.LinkKindOther},
+		{name: "browse 以外のパスは other", url: "https://example.atlassian.net/projects/ABC", jiraSite: jiraSite, want: model.LinkKindOther},
+		{name: "browse の後続セグメントは other", url: "https://example.atlassian.net/browse/ABC-1/comments", jiraSite: jiraSite, want: model.LinkKindOther},
 
 		{name: "URL でない文字列は other", url: "これは URL ではない", want: model.LinkKindOther},
 		{name: "空文字は other", url: "", want: model.LinkKindOther},
@@ -62,7 +62,7 @@ func TestURLClassifierClassify(t *testing.T) {
 }
 
 func TestURLClassifierJiraKey(t *testing.T) {
-	const jiraSite = "dena.atlassian.net"
+	const jiraSite = "example.atlassian.net"
 	c := model.URLClassifier{JiraSite: jiraSite}
 
 	tests := []struct {
@@ -71,12 +71,12 @@ func TestURLClassifierJiraKey(t *testing.T) {
 		want   string
 		wantOK bool
 	}{
-		{name: "browse URL からキーを取り出す", url: "https://dena.atlassian.net/browse/ABC-123", want: "ABC-123", wantOK: true},
-		{name: "小文字キーはそのまま返す（呼び出し側が正規化を決める）", url: "https://dena.atlassian.net/browse/abc-123", want: "abc-123", wantOK: true},
-		{name: "クエリ・フラグメント付きでもキーだけ返す", url: "https://dena.atlassian.net/browse/ABC-123?focusedCommentId=1", want: "ABC-123", wantOK: true},
+		{name: "browse URL からキーを取り出す", url: "https://example.atlassian.net/browse/ABC-123", want: "ABC-123", wantOK: true},
+		{name: "小文字キーはそのまま返す（呼び出し側が正規化を決める）", url: "https://example.atlassian.net/browse/abc-123", want: "abc-123", wantOK: true},
+		{name: "クエリ・フラグメント付きでもキーだけ返す", url: "https://example.atlassian.net/browse/ABC-123?focusedCommentId=1", want: "ABC-123", wantOK: true},
 		{name: "github の URL は対象外", url: "https://github.com/owner/repo/pull/1", want: "", wantOK: false},
 		{name: "config と異なるテナントは対象外", url: "https://other.atlassian.net/browse/ABC-123", want: "", wantOK: false},
-		{name: "browse 以外のパスは対象外", url: "https://dena.atlassian.net/projects/ABC", want: "", wantOK: false},
+		{name: "browse 以外のパスは対象外", url: "https://example.atlassian.net/projects/ABC", want: "", wantOK: false},
 		{name: "不正な URL は対象外", url: "これは URL ではない", want: "", wantOK: false},
 	}
 
@@ -91,7 +91,7 @@ func TestURLClassifierJiraKey(t *testing.T) {
 }
 
 func TestURLClassifierGitHubRef(t *testing.T) {
-	c := model.URLClassifier{GHESHosts: []string{"github.dena.jp"}}
+	c := model.URLClassifier{GHESHosts: []string{"github.example.com"}}
 
 	tests := []struct {
 		name   string
@@ -102,7 +102,7 @@ func TestURLClassifierGitHubRef(t *testing.T) {
 		{name: "PR URL", url: "https://github.com/owner/repo/pull/123", want: model.GitHubRef{Owner: "owner", Repo: "repo", Number: 123}, wantOK: true},
 		{name: "issue URL", url: "https://github.com/owner/repo/issues/45", want: model.GitHubRef{Owner: "owner", Repo: "repo", Number: 45}, wantOK: true},
 		{name: "後続セグメントは無視する", url: "https://github.com/owner/repo/pull/123/files", want: model.GitHubRef{Owner: "owner", Repo: "repo", Number: 123}, wantOK: true},
-		{name: "GHES ホスト", url: "https://github.dena.jp/team/svc/pull/7", want: model.GitHubRef{Owner: "team", Repo: "svc", Number: 7}, wantOK: true},
+		{name: "GHES ホスト", url: "https://github.example.com/team/svc/pull/7", want: model.GitHubRef{Owner: "team", Repo: "svc", Number: 7}, wantOK: true},
 		{name: "Jira URL は対象外", url: "https://x.atlassian.net/browse/ABC-1", wantOK: false},
 		{name: "リポジトリルートは対象外", url: "https://github.com/owner/repo", wantOK: false},
 		{name: "URL でない文字列は対象外", url: "これは URL ではない", wantOK: false},
