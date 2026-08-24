@@ -100,6 +100,8 @@ func (a *app) rootCmd() *cobra.Command {
 		a.configCmd(),
 		a.refreshCmd(),
 		a.boardCmd(),
+		a.pluginCmd(),
+		a.pickerCmd(),
 	)
 	return root
 }

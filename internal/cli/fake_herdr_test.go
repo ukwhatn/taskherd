@@ -109,6 +109,12 @@ func (f *fakeHerdr) Run(_ context.Context, args ...string) ([]byte, error) {
 
 	case strings.HasPrefix(joined, "pane report-metadata"):
 		return nil, nil
+
+	case strings.HasPrefix(joined, "plugin pane open"):
+		if f.unavailable {
+			return nil, errors.New("herdr に到達できない")
+		}
+		return nil, nil
 	}
 	return nil, fmt.Errorf("想定外の呼び出し: %s", joined)
 }
