@@ -79,7 +79,8 @@ hyperlinks = true   # リンク行を OSC 8 でクリック可能にする
 ghes_hosts = ["github.example.com"]
 
 [github.accounts]
-"github.com" = "your-account"
+"github.com/your-account" = "your-account"
+"github.com/some-org" = "work-account"
 "github.example.com" = "your-enterprise-account"
 
 [jira]
@@ -108,11 +109,24 @@ token_env = "TASKHERD_JIRA_TOKEN"
 
 ### gh のアカウント指定（`[github.accounts]`）
 
-複数アカウントで gh にログインしている場合、ライブ取得は既定では gh の active account に従う。`[github.accounts]` にホストごとのアカウント名を書くと、`gh auth token --hostname <host> --user <account>` で取得したトークンを gh サブプロセスの環境変数として渡し、**active account を切り替えずに**そのアカウントで取得する。
+複数アカウントで gh にログインしている場合、ライブ取得は既定では gh の active account に従う。`[github.accounts]` にアカウント名を書くと、`gh auth token --hostname <host> --user <account>` で取得したトークンを gh サブプロセスの環境変数として渡し、**active account を切り替えずに**そのアカウントで取得する。
+
+キーは `"<host>"` と `"<host>/<owner>"` の 2 形式を書ける。解決順は **owner 完全一致 → ホスト → gh の active account**（大文字小文字と前後の空白は無視）。
+
+```toml
+[github.accounts]
+"github.com/some-org" = "work-account"   # 組織のリポジトリは業務アカウントで
+"github.com/your-account" = "personal"   # 個人のリポジトリは個人アカウントで
+"github.example.com" = "enterprise"      # ホスト単位（従来の形式）
+```
+
+同一ホストに個人リポジトリと組織リポジトリが混在する場合、**ホスト単位の指定では解決できない**。片方のアカウントから見えないリポジトリを引くと GitHub の GraphQL は `Could not resolve to a Repository` を返すため、そのホストのリンクが全件取得失敗になる。owner 単位で指定すると、1 回の取得サイクルで両方のアカウントを使い分ける。
 
 - トークンは実行中のメモリにしか置かない（config・cache.json・ログ・エラーメッセージのいずれにも書かない）
+- トークンの解決は「ホスト + アカウント名」単位でキャッシュするので、同じアカウントを共有する複数 owner でも `gh auth token` は 1 回しか走らない
 - 指定したアカウントのトークンが取れない場合は active account にフォールバックし、その取得も失敗したときだけエラーにその旨を併記する
-- 未指定のホストは従来どおり gh に任せる
+- `Could not resolve to a Repository` で失敗したときは、**どのアカウントで引いたか**と owner 単位指定の案内をエラーに併記する（トークンは出さない）
+- 一致するキーがないリンクは従来どおり gh に任せる
 
 ### note を開くエディタ
 
@@ -186,11 +200,25 @@ herdr integration install claude
 ### 画面の見え方
 
 - カードは角丸ボーダーのボックスで描画し、選択中のカードは列の色でボーダーを強調する。列ヘッダは列色のラベルと件数、フォーカス中の列は反転表示
-- **リンクは 1 件 = 1 行**で `<アイコン> <repo>#<番号> <状態>` の形に描画する（例: `<PRアイコン> owner/repo#123 CI<pass> rv<pass>`）。アイコンの色が PR の状態を表す（open=緑 / draft=灰 / merged=紫 / closed=赤）。列が狭いときは `owner/repo#123` → `repo#123` → `#123` の順に落とし、番号は最後まで残す。リンクが多いカードは 3 行まで描画し、残りは `他 N 件` にまとめる
-- リンク行の repo 名と番号は URL から取り出すので、ライブ取得の前でも・オフラインでもカードは何のリンクかを示す。キャッシュ由来なのは行末の状態だけで、TTL 超過分は dim + 経過時間、未取得は `未取得`、失敗は `取得失敗` になる
+- **リンクは 1 件 = 1 行**で `<アイコン> <repo>#<番号> <状態>` の形に描画する（例: `<PRアイコン> owner/repo#123 CI<pass> rv<pass>`）。列が狭いときは `owner/repo#123` → `repo#123` → `#123` の順に落とし、番号は最後まで残す。リンクが多いカードは 3 行まで描画し、残りは `他 N 件` にまとめる
+- リンク行の repo 名と番号は URL から取り出すので、ライブ取得の前でも・オフラインでもカードは何のリンクかを示す。キャッシュ由来なのは行末の状態だけ。未取得は `未取得`（灰）になる
+- **状態は色で表す**（下表）。TTL 超過（stale）は**経過時間の表示だけを dim にし、状態そのものの色は保つ**。取得が失敗し続けている間は、最終成功値を残したまま行末に警告アイコン + 経過時間を赤で添えるので、「値は出ているが更新できていない」状態が見分けられる
 - 列に入りきらないカードは上下のオーバーフローインジケータ（`<上矢印> N件` / `<下矢印> N件`）で件数を示し、カーソルの移動に追従してスクロールする（黙って切り落とさない）
 - 詳細・追加・セレクタ・確認ダイアログは、タイトル付きのボーダーボックスとして画面中央に重ねて描画する。背後のボードはそのまま見える
 - 端末が狭いときは、列間の余白 → カードのボーダー → 表示する列数（横スクロール）の順に削る。配色は ANSI 16 色のみを使うため、端末のテーマにそのまま追従する
+
+| 対象 | 色 |
+|---|---|
+| PR state | open=緑 / draft=灰 / merged=紫 / closed=赤 |
+| CI（checks） | pass=緑 / fail=赤 / pending=黄 / 未設定=表示しない |
+| review decision | approved=緑 / changes requested=赤 / review required=黄 |
+| Issue state | open=緑 / closed=紫 |
+| Jira statusCategory | new=灰 / indeterminate=黄 / done=緑 |
+| セッション状態 | blocked=赤 / working=緑 / done=黄 / idle=灰 / offline=灰 dim |
+| 期限 | 超過=赤 / 当日・翌日=黄 / それ以降=端末の既定色 |
+| ライブ取得の失敗継続 | 赤（警告アイコン + 失敗が続いている時間） |
+| TTL 超過の経過時間 | 灰 dim（状態の色はそのまま） |
+| 列ヘッダ・選択カードのボーダー | 列の `color` |
 
 ### 詳細モーダル（`Enter`）
 

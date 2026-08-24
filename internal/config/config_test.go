@@ -454,3 +454,84 @@ func TestDefaultFileContentLeavesGitHubAccountsUnset(t *testing.T) {
 		t.Error("テンプレートに github.accounts の説明が無い")
 	}
 }
+
+func TestLoadReadsOwnerScopedGitHubAccounts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := `
+[github.accounts]
+"github.com/me" = "personal"
+"github.com/some-org" = "work-account"
+"github.example.com" = "enterprise"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("config.toml を書けない: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := map[string]string{
+		"github.com/me":       "personal",
+		"github.com/some-org": "work-account",
+		"github.example.com":  "enterprise",
+	}
+	if !reflect.DeepEqual(cfg.GitHub.Accounts, want) {
+		t.Errorf("Accounts = %+v, want %+v", cfg.GitHub.Accounts, want)
+	}
+}
+
+// A key deeper than host and owner would match no link at all, and the point of the setting is
+// that the account the user named is the one used, so it is refused rather than ignored.
+func TestLoadRejectsMalformedGitHubAccountKey(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{"repo まで書いている", `"github.com/some-org/server"`},
+		{"owner が空", `"github.com//"`},
+		{"host が空", `"/some-org"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.toml")
+			content := "[github.accounts]\n" + tc.key + " = \"acct\"\n"
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatalf("config.toml を書けない: %v", err)
+			}
+
+			_, err := config.Load(path)
+			var invalid *model.ValidationError
+			if !errors.As(err, &invalid) {
+				t.Fatalf("Load() error = %v, want ValidationError", err)
+			}
+			if invalid.Violations[0].Path != "github.accounts" {
+				t.Errorf("Path = %q, want github.accounts", invalid.Violations[0].Path)
+			}
+		})
+	}
+}
+
+// A trailing slash is the host form written loosely, and the fetcher normalizes it the same way, so
+// it is accepted rather than made an error the user has to hunt for.
+func TestLoadAcceptsTrailingSlashOnHostKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[github.accounts]\n\"github.com/\" = \"acct\"\n"), 0o600); err != nil {
+		t.Fatalf("config.toml を書けない: %v", err)
+	}
+
+	if _, err := config.Load(path); err != nil {
+		t.Errorf("Load() error = %v, want nil", err)
+	}
+}
+
+// The template has to show the owner form, because a host-only example is what leads to every link
+// on a mixed host failing with a 404.
+func TestDefaultFileContentDocumentsOwnerForm(t *testing.T) {
+	content := config.DefaultFileContent()
+	for _, want := range []string{`"<host>/<owner>"`, `# "github.com/some-org" = "work-account"`} {
+		if !strings.Contains(content, want) {
+			t.Errorf("テンプレートに %q が無い", want)
+		}
+	}
+}

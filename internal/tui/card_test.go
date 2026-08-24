@@ -34,9 +34,10 @@ func TestBuildCardMarksOverdueDue(t *testing.T) {
 		due  string
 		want SegmentKind
 	}{
-		{"過去", "2026-08-23", SegDueOverdue},
-		{"当日はまだ超過でない", "2026-08-24", SegDue},
-		{"未来", "2026-08-25", SegDue},
+		{"過去", "2026-08-23", SegAlert},
+		{"当日はまだ超過でない", "2026-08-24", SegCaution},
+		{"翌日は近い", "2026-08-25", SegCaution},
+		{"それ以降は既定色", "2026-08-26", SegPlain},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,8 +106,8 @@ func TestBuildCardOfflineSessionSegment(t *testing.T) {
 	card := BuildCard(model.Task{ID: 1, Title: "t"},
 		SessionBadge{Text: "- offline", State: herdrc.StateOffline}, nil, testStyle(testIcons), cardNow)
 
-	if card.Meta[0].Kind != SegSessionOffline {
-		t.Errorf("Kind = %v, want SegSessionOffline", card.Meta[0].Kind)
+	if card.Meta[0].Kind != SegDim {
+		t.Errorf("Kind = %v, want SegDim", card.Meta[0].Kind)
 	}
 }
 

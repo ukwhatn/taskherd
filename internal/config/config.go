@@ -43,8 +43,11 @@ type Board struct {
 // GitHub configures GitHub and GHES handling.
 type GitHub struct {
 	GHESHosts []string
-	// Accounts names the gh account to use per host, so fetching does not depend on which account
-	// gh happens to have active. The value is an account name, never a token.
+	// Accounts names the gh account to fetch with, so fetching does not depend on which account gh
+	// happens to have active. A key is either a host ("github.com") or a host and an owner
+	// ("github.com/some-org"); the owner form is what makes a host holding both personal and
+	// organization repositories resolvable, since no one account can read both. The value is an
+	// account name, never a token.
 	Accounts map[string]string
 }
 
@@ -204,11 +207,18 @@ func (c *Config) Validate() error {
 			Message: fmt.Sprintf("nerd / ascii / none のいずれかを指定する（実際: %q）", c.Board.Icons),
 		})
 	}
-	for host, account := range c.GitHub.Accounts {
-		if strings.TrimSpace(host) == "" || strings.TrimSpace(account) == "" {
+	for key, account := range c.GitHub.Accounts {
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(account) == "" {
 			violations = append(violations, model.Violation{
 				Path:    "github.accounts",
-				Message: fmt.Sprintf("ホスト名とアカウント名の両方が必要（実際: %q = %q）", host, account),
+				Message: fmt.Sprintf("ホスト名とアカウント名の両方が必要（実際: %q = %q）", key, account),
+			})
+			continue
+		}
+		if !validAccountKey(key) {
+			violations = append(violations, model.Violation{
+				Path:    "github.accounts",
+				Message: fmt.Sprintf(`キーは "<host>" または "<host>/<owner>" の形式で指定する（実際: %q）`, key),
 			})
 		}
 	}
@@ -217,6 +227,24 @@ func (c *Config) Validate() error {
 		return &model.ValidationError{Subject: "config.toml", Violations: violations}
 	}
 	return nil
+}
+
+// validAccountKey reports whether a [github.accounts] key names a host, or a host and one owner.
+//
+// A deeper path is rejected rather than ignored: a key written as "<host>/<owner>/<repo>" would
+// silently match nothing, and the whole point of the setting is that a link is fetched with the
+// account the user named for it.
+func validAccountKey(key string) bool {
+	parts := strings.Split(strings.TrimSuffix(strings.TrimSpace(key), "/"), "/")
+	if len(parts) > 2 {
+		return false
+	}
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // ResolveEditor is the command note editing opens, in the order the answer is looked for: the

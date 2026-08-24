@@ -88,7 +88,7 @@ func TestLinkStateFailureKeepsLastSuccess(t *testing.T) {
 		if err := cf.SetSuccess(url, fetch.GitHubData{State: "MERGED"}, stateNow.Add(-time.Minute)); err != nil {
 			t.Fatalf("SetSuccess: %v", err)
 		}
-		cf.SetFailure(url, errString("gh がタイムアウトした"))
+		cf.SetFailure(url, errString("gh がタイムアウトした"), stateNow.Add(-30*time.Second))
 	})
 
 	state := file.LinkState(prLink(url), stateNow, stateTTL)
@@ -109,7 +109,7 @@ func TestLinkStateFailureKeepsLastSuccess(t *testing.T) {
 func TestLinkStateNeverSucceeded(t *testing.T) {
 	url := "https://github.com/o/r/pull/1"
 	file := cacheWith(t, func(cf *fetch.CacheFile) {
-		cf.SetFailure(url, errString("認証されていない"))
+		cf.SetFailure(url, errString("認証されていない"), stateNow.Add(-time.Minute))
 	})
 
 	state := file.LinkState(prLink(url), stateNow, stateTTL)
@@ -189,3 +189,68 @@ func TestLinkStatesKeyedByURL(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// The board needs to say "failing for 26m", not just "failing", so the reading carries how long the
+// current run has lasted.
+func TestLinkStateReportsFailureDuration(t *testing.T) {
+	url := "https://github.com/o/r/pull/1"
+	failedAt := stateNow.Add(-26 * time.Minute)
+	file := cacheWith(t, func(cf *fetch.CacheFile) {
+		if err := cf.SetSuccess(url, fetch.GitHubData{State: "OPEN"}, stateNow.Add(-30*time.Minute)); err != nil {
+			t.Fatalf("SetSuccess: %v", err)
+		}
+		cf.SetFailure(url, errString("gh: Could not resolve to a Repository"), failedAt)
+	})
+
+	state := file.LinkState(prLink(url), stateNow, stateTTL)
+
+	if !state.FailingSince.Equal(failedAt) {
+		t.Errorf("FailingSince = %v, want %v", state.FailingSince, failedAt)
+	}
+	if state.FailingFor != 26*time.Minute {
+		t.Errorf("FailingFor = %v, want 26m", state.FailingFor)
+	}
+	// The last success is still there and its own age is unchanged: the two clocks are separate.
+	if !state.Fetched || state.Age != 30*time.Minute {
+		t.Errorf("state = %+v, want Fetched=true Age=30m", state)
+	}
+}
+
+// A successful fetch has no failing run, so nothing must read as one.
+func TestLinkStateSuccessHasNoFailureDuration(t *testing.T) {
+	url := "https://github.com/o/r/pull/1"
+	file := cacheWith(t, func(cf *fetch.CacheFile) {
+		if err := cf.SetSuccess(url, fetch.GitHubData{State: "OPEN"}, stateNow); err != nil {
+			t.Fatalf("SetSuccess: %v", err)
+		}
+	})
+
+	state := file.LinkState(prLink(url), stateNow, stateTTL)
+
+	if !state.FailingSince.IsZero() || state.FailingFor != 0 {
+		t.Errorf("state = %+v, want 失敗継続なし", state)
+	}
+}
+
+// An entry written before failures were timed says it is failing without saying since when, and
+// that has to stay readable rather than reporting a run that started at the zero time.
+func TestLinkStateFailureWithoutFailedSince(t *testing.T) {
+	url := "https://github.com/o/r/pull/1"
+	file := cacheWith(t, func(cf *fetch.CacheFile) {
+		if err := cf.SetSuccess(url, fetch.GitHubData{State: "OPEN"}, stateNow.Add(-time.Hour)); err != nil {
+			t.Fatalf("SetSuccess: %v", err)
+		}
+		entry, _ := cf.Get(url)
+		entry.OK, entry.Error, entry.FailedSince = false, "boom", nil
+		cf.Entries[url] = entry
+	})
+
+	state := file.LinkState(prLink(url), stateNow, stateTTL)
+
+	if state.Err != "boom" {
+		t.Errorf("Err = %q, want boom", state.Err)
+	}
+	if !state.FailingSince.IsZero() || state.FailingFor != 0 {
+		t.Errorf("state = %+v, want 開始時刻不明", state)
+	}
+}

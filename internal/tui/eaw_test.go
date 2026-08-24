@@ -44,6 +44,10 @@ func TestUnsafeWidthRunes(t *testing.T) {
 //
 // Every fixture below is ASCII, so anything the scan reports came from the board itself rather
 // than from the task data.
+// stateFailStart is when the fixture's broken link started failing, fixed so the rendered age is
+// stable across runs.
+var stateFailStart = time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
+
 func TestRenderedScreensUseOnlyWidthSafeCharacters(t *testing.T) {
 	for _, mode := range []IconMode{IconNerd, IconASCII, IconNone} {
 		t.Run(string(mode), func(t *testing.T) {
@@ -66,6 +70,7 @@ func widthSafetyScreens(t *testing.T, mode IconMode) map[string]string {
 	jiraURL := "https://x.atlassian.net/browse/ABC-123"
 	otherURL := "https://example.com/doc"
 	failURL := "https://github.com/owner/repo/pull/9"
+	staleFailURL := "https://github.com/owner/repo/pull/10"
 
 	tasks := []model.Task{
 		{ID: 1, Title: "design the board", Status: "todo", Due: due("2026-08-20"),
@@ -78,7 +83,10 @@ func widthSafetyScreens(t *testing.T, mode IconMode) map[string]string {
 			Sessions: []model.SessionRef{{Agent: "claude", SessionID: "s-1", Cwd: "/tmp/work"}},
 			Note:     "a note line"},
 		{ID: 2, Title: "implement", Status: "working",
-			Links: []model.Link{{URL: failURL, Kind: model.LinkKindGitHubPR}}},
+			Links: []model.Link{
+				{URL: failURL, Kind: model.LinkKindGitHubPR},
+				{URL: staleFailURL, Kind: model.LinkKindGitHubPR},
+			}},
 		{ID: 3, Title: "retired status", Status: "gone"},
 	}
 
@@ -98,6 +106,12 @@ func widthSafetyScreens(t *testing.T, mode IconMode) map[string]string {
 			Age: 30 * time.Minute, Jira: &fetch.JiraData{StatusName: "In Progress", StatusCategory: "indeterminate"}},
 		otherURL: {URL: otherURL, Kind: model.LinkKindOther},
 		failURL:  {URL: failURL, Kind: model.LinkKindGitHubPR, Cached: true, Err: "not authenticated"},
+		// A last-success value whose refresh keeps failing: the one row that draws the state tone,
+		// the stale age and the alert mark all at once.
+		staleFailURL: {URL: staleFailURL, Kind: model.LinkKindGitHubPR, Cached: true, Fetched: true,
+			Stale: true, Age: 26 * time.Minute, Err: "gh: Could not resolve to a Repository",
+			FailingSince: stateFailStart, FailingFor: 26 * time.Minute,
+			GitHub: &fetch.GitHubData{State: "OPEN", Checks: "fail", ReviewDecision: "REVIEW_REQUIRED"}},
 	}
 	h.dispatch(snapshotUpdate(agent("pane-1", "s-1", herdrc.StateWorking)))
 

@@ -70,16 +70,16 @@ func TestLinkRowPullRequestStates(t *testing.T) {
 		want  string
 		phase SegmentKind
 	}{
-		{"open + green ci", fetch.GitHubData{State: "OPEN", Checks: "pass"}, "PR owner/repo#1 open CI+", SegLinkOpen},
-		{"open + red ci", fetch.GitHubData{State: "OPEN", Checks: "fail"}, "PR owner/repo#1 open CI!", SegLinkOpen},
-		{"open + 進行中 ci", fetch.GitHubData{State: "OPEN", Checks: "pending"}, "PR owner/repo#1 open CI*", SegLinkOpen},
-		{"ci 未設定", fetch.GitHubData{State: "OPEN", Checks: "none"}, "PR owner/repo#1 open", SegLinkOpen},
-		{"draft", fetch.GitHubData{State: "OPEN", IsDraft: true, Checks: "none"}, "PR owner/repo#1 draft", SegLinkDraft},
-		{"merged", fetch.GitHubData{State: "MERGED", Checks: "pass"}, "PR owner/repo#1 merged CI+", SegLinkMerged},
-		{"closed", fetch.GitHubData{State: "CLOSED", Checks: "none"}, "PR owner/repo#1 closed", SegLinkClosed},
-		{"approved", fetch.GitHubData{State: "OPEN", ReviewDecision: "APPROVED", Checks: "none"}, "PR owner/repo#1 open rv+", SegLinkOpen},
-		{"変更要求", fetch.GitHubData{State: "OPEN", ReviewDecision: "CHANGES_REQUESTED", Checks: "none"}, "PR owner/repo#1 open rv!", SegLinkOpen},
-		{"レビュー待ちは表示しない", fetch.GitHubData{State: "OPEN", ReviewDecision: "REVIEW_REQUIRED", Checks: "none"}, "PR owner/repo#1 open", SegLinkOpen},
+		{"open + green ci", fetch.GitHubData{State: "OPEN", Checks: "pass"}, "PR owner/repo#1 open CI+", SegGood},
+		{"open + red ci", fetch.GitHubData{State: "OPEN", Checks: "fail"}, "PR owner/repo#1 open CI!", SegGood},
+		{"open + 進行中 ci", fetch.GitHubData{State: "OPEN", Checks: "pending"}, "PR owner/repo#1 open CI*", SegGood},
+		{"ci 未設定", fetch.GitHubData{State: "OPEN", Checks: "none"}, "PR owner/repo#1 open", SegGood},
+		{"draft", fetch.GitHubData{State: "OPEN", IsDraft: true, Checks: "none"}, "PR owner/repo#1 draft", SegMuted},
+		{"merged", fetch.GitHubData{State: "MERGED", Checks: "pass"}, "PR owner/repo#1 merged CI+", SegDone},
+		{"closed", fetch.GitHubData{State: "CLOSED", Checks: "none"}, "PR owner/repo#1 closed", SegAlert},
+		{"approved", fetch.GitHubData{State: "OPEN", ReviewDecision: "APPROVED", Checks: "none"}, "PR owner/repo#1 open rv+", SegGood},
+		{"変更要求", fetch.GitHubData{State: "OPEN", ReviewDecision: "CHANGES_REQUESTED", Checks: "none"}, "PR owner/repo#1 open rv!", SegGood},
+		{"レビュー待ちも表示する", fetch.GitHubData{State: "OPEN", ReviewDecision: "REVIEW_REQUIRED", Checks: "none"}, "PR owner/repo#1 open rv*", SegGood},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -189,16 +189,16 @@ func TestLinkRowStaleCarriesAge(t *testing.T) {
 	)
 
 	last := rows[0].Status[len(rows[0].Status)-1]
-	if last.Text != "12m" {
-		t.Errorf("末尾 = %q, want 12m", last.Text)
+	if last.Text != "12m" || last.Kind != SegDim {
+		t.Errorf("末尾 = %+v, want 12m / SegDim", last)
 	}
-	for i, segment := range rows[0].Status {
-		if segment.Kind != SegLinkStale {
-			t.Errorf("Status[%d].Kind = %v, want SegLinkStale", i, segment.Kind)
-		}
+	// Only the age is dimmed. The state keeps its own tone, which is the whole point: a dim row
+	// made a passing build and a failing one look the same.
+	if rows[0].Icon.Kind != SegGood {
+		t.Errorf("Icon.Kind = %v, want SegGood（stale でも状態色を保つ）", rows[0].Icon.Kind)
 	}
-	if rows[0].RefKind != SegLinkStale || rows[0].Icon.Kind != SegLinkStale {
-		t.Errorf("stale 行が dim になっていない: %+v", rows[0])
+	if rows[0].Status[0].Kind == SegDim {
+		t.Errorf("状態セグメントが dim になっている: %+v", rows[0].Status[0])
 	}
 }
 
@@ -211,15 +211,15 @@ func TestLinkRowUnfetchedStates(t *testing.T) {
 	pending := BuildLinkRows(linkTask(link), map[string]fetch.LinkState{
 		url: {URL: url, Kind: model.LinkKindGitHubPR},
 	}, testStyle(testIcons))
-	if pending[0].Status[0].Text != "未取得" || pending[0].Icon.Kind != SegLinkUnfetched {
-		t.Errorf("pending = %+v, want 未取得 / SegLinkUnfetched", pending[0])
+	if pending[0].Status[0].Text != "未取得" || pending[0].Icon.Kind != SegMuted {
+		t.Errorf("pending = %+v, want 未取得 / SegMuted", pending[0])
 	}
 
 	failing := BuildLinkRows(linkTask(link), map[string]fetch.LinkState{
 		url: {URL: url, Kind: model.LinkKindGitHubPR, Cached: true, Err: "認証されていない"},
 	}, testStyle(testIcons))
-	if failing[0].Status[0].Text != "取得失敗" || failing[0].Icon.Kind != SegLinkAttention {
-		t.Errorf("failing = %+v, want 取得失敗 / SegLinkAttention", failing[0])
+	if failing[0].Status[0].Text != "! 失敗" || failing[0].Icon.Kind != SegAlert {
+		t.Errorf("failing = %+v, want 失敗 / SegAlert", failing[0])
 	}
 }
 
@@ -283,5 +283,112 @@ func TestLinkRowNoneModeSeparatesLabelFromMark(t *testing.T) {
 	ascii := BuildLinkRows(linkTask(model.Link{URL: url, Kind: model.LinkKindGitHubPR}), states, testStyle(testIcons))
 	if got := rowText(ascii[0]); got != "PR o/r#1 open CI+ rv+" {
 		t.Errorf("ascii = %q, want %q", got, "PR o/r#1 open CI+ rv+")
+	}
+}
+
+// A value that is still on the card while every refresh fails is the case the board used to hide:
+// the state stayed coloured as if it were current and nothing said the fetch was broken.
+func TestLinkRowFailingRefreshKeepsStateAndSaysSoInRed(t *testing.T) {
+	url := "https://github.com/o/r/pull/1"
+	state := ghState(url, fetch.GitHubData{State: "OPEN", Checks: "pass"}, model.LinkKindGitHubPR)
+	state.Stale = true
+	state.Age = 26 * time.Minute
+	state.Err = "gh: Could not resolve to a Repository"
+	state.FailingSince = time.Now().Add(-26 * time.Minute)
+	state.FailingFor = 26 * time.Minute
+
+	rows := BuildLinkRows(
+		linkTask(model.Link{URL: url, Kind: model.LinkKindGitHubPR}),
+		map[string]fetch.LinkState{url: state},
+		testStyle(testIcons),
+	)
+
+	if got := rowText(rows[0]); got != "PR o/r#1 open CI+ 26m ! 失敗 26m" {
+		t.Errorf("row = %q, want 状態 + 経過時間 + 失敗マーク", got)
+	}
+	last := rows[0].Status[len(rows[0].Status)-1]
+	if last.Kind != SegAlert {
+		t.Errorf("失敗マークの Kind = %v, want SegAlert", last.Kind)
+	}
+	if rows[0].Status[0].Kind != SegGood {
+		t.Errorf("状態セグメントの Kind = %v, want SegGood（失敗中でも状態色は保つ）", rows[0].Status[0].Kind)
+	}
+}
+
+// The failure mark is drawn even when nothing timed the run: "failing" is the part that must not be
+// silent, and how long it has been failing is what the cache may not know.
+func TestLinkRowFailureWithoutRecordedStartStillShows(t *testing.T) {
+	url := "https://github.com/o/r/pull/1"
+	state := ghState(url, fetch.GitHubData{State: "MERGED"}, model.LinkKindGitHubPR)
+	state.Err = "gh: Not Found"
+
+	rows := BuildLinkRows(
+		linkTask(model.Link{URL: url, Kind: model.LinkKindGitHubPR}),
+		map[string]fetch.LinkState{url: state},
+		testStyle(testIcons),
+	)
+
+	last := rows[0].Status[len(rows[0].Status)-1]
+	if last.Text != "! 失敗" || last.Kind != SegAlert {
+		t.Errorf("末尾 = %+v, want \"! 失敗\" / SegAlert", last)
+	}
+	if rows[0].Icon.Kind != SegDone {
+		t.Errorf("Icon.Kind = %v, want SegDone（merged の状態色を保つ）", rows[0].Icon.Kind)
+	}
+}
+
+// Each icon mode has to be able to say "failing" with what it has: the nerd glyph alone, and a word
+// in the modes that have no such glyph.
+func TestFailureMarkPerIconMode(t *testing.T) {
+	tests := []struct {
+		mode    IconMode
+		age     string
+		want    string
+		wantEnd string
+	}{
+		{IconNerd, "26m", nfOctAlert + " 26m", "26m"},
+		{IconNerd, "", nfOctAlert, nfOctAlert},
+		{IconASCII, "26m", "! 失敗 26m", "26m"},
+		{IconASCII, "", "! 失敗", "失敗"},
+		{IconNone, "26m", "失敗 26m", "26m"},
+		{IconNone, "", "失敗", "失敗"},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.mode)+"/"+tc.age, func(t *testing.T) {
+			got := Icons(tc.mode).failureMark(tc.age)
+			if got != tc.want {
+				t.Errorf("failureMark(%q) = %q, want %q", tc.age, got, tc.want)
+			}
+			if strings.HasSuffix(got, " ") || strings.HasPrefix(got, " ") {
+				t.Errorf("failureMark(%q) = %q に余分な空白がある", tc.age, got)
+			}
+		})
+	}
+}
+
+// Jira and issue tones changed with the colour table, and the row is where they are actually read.
+func TestLinkRowIssueAndJiraTones(t *testing.T) {
+	issueURL := "https://github.com/o/r/issues/5"
+	jiraURL := "https://x.atlassian.net/browse/ABC-1"
+
+	closed := BuildLinkRows(
+		linkTask(model.Link{URL: issueURL, Kind: model.LinkKindGitHubIssue}),
+		map[string]fetch.LinkState{issueURL: ghState(issueURL, fetch.GitHubData{State: "CLOSED"}, model.LinkKindGitHubIssue)},
+		testStyle(testIcons),
+	)
+	if closed[0].Status[0].Kind != SegDone || closed[0].Icon.Kind != SegDone {
+		t.Errorf("closed issue = %+v, want SegDone（紫）", closed[0])
+	}
+
+	done := BuildLinkRows(
+		linkTask(model.Link{URL: jiraURL, Kind: model.LinkKindJira}),
+		map[string]fetch.LinkState{jiraURL: {
+			URL: jiraURL, Kind: model.LinkKindJira, Cached: true, Fetched: true,
+			Jira: &fetch.JiraData{StatusName: "Done", StatusCategory: "done"},
+		}},
+		testStyle(testIcons),
+	)
+	if done[0].Status[0].Kind != SegGood || done[0].Icon.Kind != SegGood {
+		t.Errorf("Jira done = %+v, want SegGood（緑）", done[0])
 	}
 }

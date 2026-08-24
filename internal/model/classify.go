@@ -154,3 +154,21 @@ func LinkHost(raw string) string {
 	}
 	return u.Hostname()
 }
+
+// LinkOwner is the first path segment of a URL: for a GitHub or GHES link that is the owner the
+// repository belongs to. It is empty when raw has no path.
+//
+// It reads the path directly instead of going through Classify, because the account a link has to
+// be fetched with must stay resolvable for a GHES host that ghes_hosts was never told about — that
+// is exactly the case where the fetch fails and the message has to name the account it used.
+func LinkOwner(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	segments := pathSegments(u.Path)
+	if len(segments) == 0 {
+		return ""
+	}
+	return segments[0]
+}

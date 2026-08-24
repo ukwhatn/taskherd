@@ -66,12 +66,15 @@ color = "gray"
 # GitHub Enterprise Server のホスト（リンク種別の判別に使う）
 # ghes_hosts = ["github.example.com"]
 
-# ホストごとに使う gh アカウント。gh の active account に依存せずライブ取得したい場合に指定する。
-# 指定したホストは "gh auth token --hostname <host> --user <account>" で取得したトークンを
+# ライブ取得に使う gh アカウント。gh の active account に依存せず取得したい場合に指定する。
+# キーは "<host>" または "<host>/<owner>" で、解決順は owner 完全一致 > ホスト > gh の active account。
+# 同一ホストに個人リポジトリと組織リポジトリが混在する場合、アカウントごとに見えるリポジトリが
+# 違うため、owner 単位で指定しないと片方が 404 になる。
+# 指定したキーは "gh auth token --hostname <host> --user <account>" で取得したトークンを
 # gh サブプロセスにだけ渡す（トークンは config にも cache にも保存しない）。
-# 未指定のホストは従来どおり gh の active account に従う。
 # [github.accounts]
-# "github.com" = "your-account"
+# "github.com/your-account" = "your-account"
+# "github.com/some-org" = "work-account"
 # "github.example.com" = "your-enterprise-account"
 
 [jira]
