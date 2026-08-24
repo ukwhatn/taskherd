@@ -33,7 +33,9 @@ type PickerDeps struct {
 	Tasks   PickerTaskStore
 	Herdr   PickerHerdrOps
 	Columns model.Columns
-	Now     func() time.Time
+	// Icons is the glyph vocabulary the popup draws with, shared with the board.
+	Icons IconMode
+	Now   func() time.Time
 }
 
 func (d PickerDeps) now() time.Time {
@@ -66,6 +68,7 @@ type picker struct {
 	ctx        context.Context
 	deps       PickerDeps
 	styles     styles
+	icons      IconSet
 	targetPane string
 
 	filter textinput.Model
@@ -94,6 +97,7 @@ func newPicker(ctx context.Context, deps PickerDeps, targetPane string) *picker 
 		ctx:        ctx,
 		deps:       deps,
 		styles:     newStyles(),
+		icons:      Icons(deps.Icons),
 		targetPane: targetPane,
 		filter:     filter,
 		width:      60,
@@ -353,7 +357,7 @@ func (p *picker) View() tea.View {
 		b.WriteString(p.styles.status.Render(p.status))
 	}
 	b.WriteString("\n")
-	b.WriteString(p.styles.footer.Render("↑/↓ 選択  enter 紐づけ  esc 中止"))
+	b.WriteString(p.styles.footer.Render(fmt.Sprintf("%s 選択  enter 紐づけ  esc 中止", p.icons.verticalKeys())))
 
 	return tea.NewView(b.String())
 }

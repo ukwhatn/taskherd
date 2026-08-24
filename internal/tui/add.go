@@ -241,9 +241,9 @@ func (b *Board) renderAdd() string {
 			lines = append(lines, b.styles.dim.Render(truncate("  "+padLabel("")+done, inner)))
 		}
 
-		marker := "  "
+		marker := padCell("", cursorWidth(b.icons))
 		if field == b.add.cursor {
-			marker = "▌ "
+			marker = b.icons.Cursor + " "
 		}
 		// The text field styles its own cursor, so its row is assembled from parts already the
 		// right width rather than trimmed after the fact.
@@ -251,7 +251,7 @@ func (b *Board) renderAdd() string {
 		if field == addStatus {
 			value := truncate(statusLabel, inner-lipgloss.Width(label))
 			if field == b.add.cursor {
-				value += "   " + b.styles.dim.Render("←→ で変更")
+				value += "   " + b.styles.dim.Render(b.icons.horizontalKeys()+" で変更")
 			}
 			lines = append(lines, label+value)
 			continue
@@ -281,5 +281,6 @@ func (b *Board) renderAdd() string {
 // addHelp names the key that actually inserts a line break, which depends on what the terminal
 // turned out to support.
 func (b *Board) addHelp() string {
-	return fmt.Sprintf("↑↓ 項目  ←→ ステータス  %s 改行(タイトル/note)  enter 作成  esc 取消", b.newlineKey())
+	return fmt.Sprintf("%s 項目  %s ステータス  %s 改行(タイトル/note)  enter 作成  esc 取消",
+		b.icons.verticalKeys(), b.icons.horizontalKeys(), b.newlineKey())
 }

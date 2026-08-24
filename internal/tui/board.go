@@ -48,6 +48,8 @@ type Board struct {
 	settings Settings
 	styles   styles
 
+	icons IconSet
+
 	file     *model.File
 	sessions SessionStates
 	cache    *fetch.CacheFile
@@ -119,21 +121,25 @@ func isCommandKey(msg tea.KeyPressMsg) bool {
 	return utf8.RuneCountInString(msg.Text) <= 1
 }
 
-// newlineKey names the key that inserts a line break in the modals. Shift+Enter is only
-// distinguishable from Enter when the terminal supports key disambiguation, so ctrl+j stands in
-// where it does not.
+// newlineKey names the key the footer advertises for inserting a line break.
+//
+// Shift+Enter reaches the program as its own key only where the terminal answered the
+// keyboard-enhancement query. Elsewhere a terminal configured to send ESC+CR for Shift+Enter is
+// indistinguishable from Alt+Enter, which is the truthful name to show when it is not.
 func (b *Board) newlineKey() string {
 	if b.shiftEnter {
 		return "shift+enter"
 	}
-	return "ctrl+j"
+	return "alt+enter"
 }
 
-// isNewlineKey accepts ctrl+j everywhere, so the fallback keeps working on a terminal that also
-// reports Shift+Enter.
+// isNewlineKey accepts every spelling of the newline key at once.
+//
+// alt+enter is how ESC+CR arrives, which is what a terminal mapping Shift+Enter to `text:\x1b\r`
+// sends, and ctrl+j is the fallback for a terminal that offers neither.
 func (b *Board) isNewlineKey(msg tea.KeyPressMsg) bool {
 	switch msg.String() {
-	case "ctrl+j":
+	case "ctrl+j", "alt+enter":
 		return true
 	case "shift+enter":
 		return b.shiftEnter
@@ -180,6 +186,7 @@ func New(ctx context.Context, deps Deps, settings Settings) *Board {
 		deps:     deps,
 		settings: settings,
 		styles:   newStyles(),
+		icons:    Icons(settings.Icons),
 		file:     model.NewFile(),
 		cache:    &fetch.CacheFile{Version: 1, Entries: map[string]fetch.CacheEntry{}},
 		links:    map[string]fetch.LinkState{},
@@ -193,8 +200,22 @@ func New(ctx context.Context, deps Deps, settings Settings) *Board {
 	}
 }
 
+// cardStyle is the presentation every card on this board is built with.
+func (b *Board) cardStyle() CardStyle {
+	return CardStyle{Icons: b.icons, Classifier: b.settings.Classifier}
+}
+
+// linkText wraps a link row's text in OSC 8 when hyperlinks are enabled, so a terminal that
+// understands the escape opens the URL on a click.
+func (b *Board) linkText(url, text string) string {
+	if !b.settings.Hyperlinks {
+		return text
+	}
+	return hyperlink(url, text)
+}
+
 // newFieldInput builds a text field for the modals. The suggestion bindings are cleared because
-// the modals hand ↑↓ and Tab to item navigation.
+// the modals hand item navigation the arrow keys and Tab.
 func newFieldInput() textinput.Model {
 	input := textinput.New()
 	input.Prompt = "> "

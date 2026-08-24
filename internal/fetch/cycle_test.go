@@ -27,7 +27,7 @@ type fakeRunFn = fetch.GitHubRunner
 
 func TestFetcherRefreshLinksGitHubSuccess(t *testing.T) {
 	calls := 0
-	run := func(_ context.Context, args ...string) ([]byte, []byte, error) {
+	run := func(_ context.Context, _ []string, args ...string) ([]byte, []byte, error) {
 		calls++
 		return []byte(`{"state":"OPEN","title":"t","updatedAt":"2026-08-24T09:00:00Z"}`), nil, nil
 	}
@@ -57,7 +57,7 @@ func TestFetcherRefreshLinksGitHubSuccess(t *testing.T) {
 }
 
 func TestFetcherRefreshLinksSkipsUnrecognizedKind(t *testing.T) {
-	run := func(_ context.Context, args ...string) ([]byte, []byte, error) {
+	run := func(_ context.Context, _ []string, args ...string) ([]byte, []byte, error) {
 		t.Fatal("other kind の URL で gh が呼ばれた")
 		return nil, nil, nil
 	}
@@ -74,7 +74,7 @@ func TestFetcherRefreshLinksSkipsUnrecognizedKind(t *testing.T) {
 
 func TestFetcherRefreshLinksGitHubRateLimitInterruptsRemainingGitHubLinks(t *testing.T) {
 	calls := 0
-	run := func(_ context.Context, args ...string) ([]byte, []byte, error) {
+	run := func(_ context.Context, _ []string, args ...string) ([]byte, []byte, error) {
 		calls++
 		if calls == 1 {
 			return nil, []byte("gh: API rate limit exceeded"), errors.New("exit status 1")
@@ -122,7 +122,7 @@ func TestFetcherRefreshLinksJiraNotConfiguredRecordsFailure(t *testing.T) {
 }
 
 func TestFetcherRefreshLinksGitHubAndJiraAreIndependentKinds(t *testing.T) {
-	run := func(_ context.Context, args ...string) ([]byte, []byte, error) {
+	run := func(_ context.Context, _ []string, args ...string) ([]byte, []byte, error) {
 		return nil, []byte("gh: API rate limit exceeded"), errors.New("exit status 1")
 	}
 	f, cache := newTestFetcher(t, run)

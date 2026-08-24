@@ -89,3 +89,48 @@ func TestURLClassifierJiraKey(t *testing.T) {
 		})
 	}
 }
+
+func TestURLClassifierGitHubRef(t *testing.T) {
+	c := model.URLClassifier{GHESHosts: []string{"github.dena.jp"}}
+
+	tests := []struct {
+		name   string
+		url    string
+		want   model.GitHubRef
+		wantOK bool
+	}{
+		{name: "PR URL", url: "https://github.com/owner/repo/pull/123", want: model.GitHubRef{Owner: "owner", Repo: "repo", Number: 123}, wantOK: true},
+		{name: "issue URL", url: "https://github.com/owner/repo/issues/45", want: model.GitHubRef{Owner: "owner", Repo: "repo", Number: 45}, wantOK: true},
+		{name: "後続セグメントは無視する", url: "https://github.com/owner/repo/pull/123/files", want: model.GitHubRef{Owner: "owner", Repo: "repo", Number: 123}, wantOK: true},
+		{name: "GHES ホスト", url: "https://github.dena.jp/team/svc/pull/7", want: model.GitHubRef{Owner: "team", Repo: "svc", Number: 7}, wantOK: true},
+		{name: "Jira URL は対象外", url: "https://x.atlassian.net/browse/ABC-1", wantOK: false},
+		{name: "リポジトリルートは対象外", url: "https://github.com/owner/repo", wantOK: false},
+		{name: "URL でない文字列は対象外", url: "これは URL ではない", wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := c.GitHubRef(tt.url)
+			if ok != tt.wantOK || got != tt.want {
+				t.Errorf("GitHubRef(%q) = (%+v, %v), want (%+v, %v)", tt.url, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestLinkHost(t *testing.T) {
+	tests := []struct {
+		url  string
+		want string
+	}{
+		{"https://example.com/some/page", "example.com"},
+		{"https://EXAMPLE.com:8443/x", "EXAMPLE.com"},
+		{"https://github.com/o/r/pull/1", "github.com"},
+		{"/relative/path", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := model.LinkHost(tt.url); got != tt.want {
+			t.Errorf("LinkHost(%q) = %q, want %q", tt.url, got, tt.want)
+		}
+	}
+}

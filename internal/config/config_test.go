@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ukwhatn/taskherd/internal/config"
@@ -340,5 +341,116 @@ func TestResolveEditorOrder(t *testing.T) {
 				t.Errorf("ResolveEditor() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoadReadsIconsAndHyperlinks(t *testing.T) {
+	tests := []struct {
+		name           string
+		content        string
+		wantIcons      string
+		wantHyperlinks bool
+	}{
+		{name: "既定", content: "", wantIcons: "nerd", wantHyperlinks: true},
+		{name: "ascii へ切替", content: "[board]\nicons = \"ascii\"\n", wantIcons: "ascii", wantHyperlinks: true},
+		{name: "ハイパーリンク無効", content: "[board]\nhyperlinks = false\n", wantIcons: "nerd", wantHyperlinks: false},
+		{name: "両方指定", content: "[board]\nicons = \"none\"\nhyperlinks = false\n", wantIcons: "none", wantHyperlinks: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatalf("config.toml を書けない: %v", err)
+			}
+			cfg, err := config.Load(path)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.Board.Icons != tc.wantIcons {
+				t.Errorf("Icons = %q, want %q", cfg.Board.Icons, tc.wantIcons)
+			}
+			if cfg.Board.Hyperlinks != tc.wantHyperlinks {
+				t.Errorf("Hyperlinks = %v, want %v", cfg.Board.Hyperlinks, tc.wantHyperlinks)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsUnknownIconMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[board]\nicons = \"emoji\"\n"), 0o600); err != nil {
+		t.Fatalf("config.toml を書けない: %v", err)
+	}
+
+	_, err := config.Load(path)
+	var invalid *model.ValidationError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("Load() error = %v, want ValidationError", err)
+	}
+	if invalid.Violations[0].Path != "board.icons" {
+		t.Errorf("Path = %q, want board.icons", invalid.Violations[0].Path)
+	}
+}
+
+func TestLoadReadsGitHubAccounts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := `
+[github]
+ghes_hosts = ["github.example.com"]
+
+[github.accounts]
+"github.com" = "ukwhatn"
+"github.example.com" = "work-account"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("config.toml を書けない: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := map[string]string{"github.com": "ukwhatn", "github.example.com": "work-account"}
+	if !reflect.DeepEqual(cfg.GitHub.Accounts, want) {
+		t.Errorf("Accounts = %+v, want %+v", cfg.GitHub.Accounts, want)
+	}
+	if len(cfg.GitHub.GHESHosts) != 1 {
+		t.Errorf("ghes_hosts = %+v, want 1 件（accounts と共存する）", cfg.GitHub.GHESHosts)
+	}
+}
+
+func TestLoadRejectsEmptyGitHubAccount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[github.accounts]\n\"github.com\" = \"\"\n"), 0o600); err != nil {
+		t.Fatalf("config.toml を書けない: %v", err)
+	}
+
+	_, err := config.Load(path)
+	var invalid *model.ValidationError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("Load() error = %v, want ValidationError", err)
+	}
+	if invalid.Violations[0].Path != "github.accounts" {
+		t.Errorf("Path = %q, want github.accounts", invalid.Violations[0].Path)
+	}
+}
+
+// The generated config must not carry an account: which account to use is per machine, and a
+// value copied out of a template would silently override gh's own resolution.
+func TestDefaultFileContentLeavesGitHubAccountsUnset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(config.DefaultFileContent()), 0o600); err != nil {
+		t.Fatalf("config.toml を書けない: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.GitHub.Accounts) != 0 {
+		t.Errorf("Accounts = %+v, want 空", cfg.GitHub.Accounts)
+	}
+	if !strings.Contains(config.DefaultFileContent(), "[github.accounts]") {
+		t.Error("テンプレートに github.accounts の説明が無い")
 	}
 }

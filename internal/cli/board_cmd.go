@@ -57,5 +57,7 @@ func (a *app) boardSettings(cfg *config.Config) tui.Settings {
 		Classifier:      cfg.Classifier(),
 		CacheTTL:        time.Duration(cfg.Board.CacheTTLMinutes) * time.Minute,
 		RefreshInterval: time.Duration(cfg.Board.RefreshIntervalMinutes) * time.Minute,
+		Icons:           tui.IconMode(cfg.Board.Icons),
+		Hyperlinks:      cfg.Board.Hyperlinks,
 	}
 }

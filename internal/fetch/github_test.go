@@ -67,10 +67,12 @@ type fakeRun struct {
 	stderr []byte
 	err    error
 	args   []string
+	env    []string
 }
 
-func (f *fakeRun) run(_ context.Context, args ...string) ([]byte, []byte, error) {
+func (f *fakeRun) run(_ context.Context, env []string, args ...string) ([]byte, []byte, error) {
 	f.args = args
+	f.env = env
 	return f.stdout, f.stderr, f.err
 }
 

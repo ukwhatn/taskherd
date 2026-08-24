@@ -399,10 +399,10 @@ func TestAddModalNewlineKeyFollowsTerminalSupport(t *testing.T) {
 	h := newHarness(t, Deps{Tasks: newFakeStore()}, Settings{})
 
 	h.key("a")
-	if got := h.board.newlineKey(); got != "ctrl+j" {
-		t.Fatalf("newlineKey = %q, want ctrl+j（拡張キー未対応時）", got)
+	if got := h.board.newlineKey(); got != "alt+enter" {
+		t.Fatalf("newlineKey = %q, want alt+enter（拡張キー未対応時）", got)
 	}
-	if view := h.board.render(); !strings.Contains(view, "ctrl+j 改行") {
+	if view := h.board.render(); !strings.Contains(view, "alt+enter 改行") {
 		t.Errorf("フッタが実効キーを示していない:\n%s", view)
 	}
 
@@ -500,5 +500,45 @@ func TestAddModalRendersFields(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Errorf("描画に %q が無い:\n%s", want, view)
 		}
+	}
+}
+
+// A terminal configured to send ESC+CR for Shift+Enter (ghostty's `text:\x1b\r`) never reaches the
+// keyboard-enhancement path, and the sequence arrives as Alt+Enter instead. Taking that as a
+// newline is what makes Shift+Enter work there at all.
+func TestAddModalAltEnterInsertsNewline(t *testing.T) {
+	store := newFakeStore()
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.key("a")
+	h.typeText("設計する")
+	h.dispatch(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
+	h.typeText("実装する")
+	h.key("enter")
+
+	tasks := store.snapshot().Tasks
+	if len(tasks) != 2 {
+		t.Fatalf("tasks = %+v, want 2 件（alt+enter が改行として効いていない）", tasks)
+	}
+	if tasks[0].Title != "設計する" || tasks[1].Title != "実装する" {
+		t.Errorf("titles = %q/%q, want 設計する/実装する", tasks[0].Title, tasks[1].Title)
+	}
+}
+
+// The escape reaches the program as alt+enter whether or not the terminal answered the
+// enhancement query, so the board accepts it in both states.
+func TestAddModalAltEnterWorksWithEnhancementsOn(t *testing.T) {
+	store := newFakeStore()
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+	h.dispatch(tea.KeyboardEnhancementsMsg{Flags: 1})
+
+	h.key("a")
+	h.typeText("一行目")
+	h.dispatch(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
+	h.typeText("二行目")
+	h.key("enter")
+
+	if tasks := store.snapshot().Tasks; len(tasks) != 2 {
+		t.Fatalf("tasks = %+v, want 2 件", tasks)
 	}
 }

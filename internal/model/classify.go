@@ -115,3 +115,42 @@ func isPositiveInt(s string) bool {
 	n, err := strconv.Atoi(s)
 	return err == nil && n > 0
 }
+
+// GitHubRef is the owner, repository and number a GitHub PR or issue URL points at.
+type GitHubRef struct {
+	Owner  string
+	Repo   string
+	Number int
+}
+
+// GitHubRef parses a GitHub PR or issue URL into its parts, reporting whether it was one.
+//
+// The board identifies a link by this rather than by anything it fetched, so a card can name the
+// PR it links to before — or without ever — reaching the network.
+func (c URLClassifier) GitHubRef(raw string) (GitHubRef, bool) {
+	switch c.Classify(raw) {
+	case LinkKindGitHubPR, LinkKindGitHubIssue:
+	default:
+		return GitHubRef{}, false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return GitHubRef{}, false
+	}
+	segments := pathSegments(u.Path)
+	number, err := strconv.Atoi(segments[3])
+	if err != nil {
+		return GitHubRef{}, false
+	}
+	return GitHubRef{Owner: segments[0], Repo: segments[1], Number: number}, true
+}
+
+// LinkHost is the host a URL addresses, for links whose kind carries no reference of its own.
+// It is empty when raw is not a URL with a host.
+func LinkHost(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}

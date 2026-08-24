@@ -15,6 +15,14 @@ const defaultFileContent = `# taskherd 設定ファイル
 refresh_interval_minutes = 10
 # ライブ取得キャッシュの有効期間（分）
 cache_ttl_minutes = 5
+# カード・フッタのアイコン表記
+#   "nerd"  : Nerd Font のグリフを使う（既定。端末フォントに Nerd Font が必要）
+#   "ascii" : ASCII 記号で代替する
+#   "none"  : 記号を使わず状態を単語で書く
+icons = "nerd"
+# リンク行を OSC 8 でハイパーリンクにする。対応端末ではクリックでブラウザが開く。
+# 非対応端末では通常のテキストとして表示される
+hyperlinks = true
 
 # kanban の列。配列順が表示順になる。
 # kind = "open" | "terminal"（terminal は board で折り畳み、list の既定表示から除外）
@@ -57,6 +65,14 @@ color = "gray"
 [github]
 # GitHub Enterprise Server のホスト（リンク種別の判別に使う）
 # ghes_hosts = ["github.example.com"]
+
+# ホストごとに使う gh アカウント。gh の active account に依存せずライブ取得したい場合に指定する。
+# 指定したホストは "gh auth token --hostname <host> --user <account>" で取得したトークンを
+# gh サブプロセスにだけ渡す（トークンは config にも cache にも保存しない）。
+# 未指定のホストは従来どおり gh の active account に従う。
+# [github.accounts]
+# "github.com" = "your-account"
+# "github.example.com" = "your-enterprise-account"
 
 [jira]
 # site = "your-tenant.atlassian.net"

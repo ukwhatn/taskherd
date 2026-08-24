@@ -166,7 +166,7 @@ func (a *app) cache() *fetch.Cache {
 // variable cfg.Jira.TokenEnv names, never from config.toml itself.
 func (a *app) fetcher(cfg *config.Config) *fetch.Fetcher {
 	return &fetch.Fetcher{
-		GitHub:     fetch.NewGitHubFetcher(),
+		GitHub:     fetch.NewGitHubFetcher(cfg.GitHub.Accounts),
 		Jira:       fetch.NewJiraFetcher(),
 		Cache:      a.cache(),
 		Classifier: cfg.Classifier(),
