@@ -44,9 +44,13 @@ func (a *app) noteCmd() *cobra.Command {
 				}
 			}
 
-			mode, text := noteModeSet, setText
+			var (
+				mode noteMode
+				text string
+			)
 			switch {
 			case changedSet:
+				mode, text = noteModeSet, setText
 			case changedAppend:
 				mode, text = noteModeAppend, appendText
 			default:
@@ -54,7 +58,7 @@ func (a *app) noteCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				text = edited
+				mode, text = noteModeSet, edited
 			}
 
 			now := a.env.Now()
