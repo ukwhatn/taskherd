@@ -2,10 +2,14 @@ package store_test
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/ukwhatn/taskherd/internal/store"
 )
 
 func waitForEvent(t *testing.T, events <-chan struct{}, what string) {
@@ -56,6 +60,48 @@ func TestWatchNotifiesAfterAtomicRename(t *testing.T) {
 	case err := <-w.Errors():
 		t.Fatalf("watch エラー: %v", err)
 	default:
+	}
+}
+
+func TestWatchNotifiesOnExternalProcessWrite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("プロセス起動を伴うため -short では実行しない")
+	}
+
+	bin := buildCLI(t)
+	root := t.TempDir()
+	stateHome := filepath.Join(root, "state")
+	st := store.New(filepath.Join(stateHome, "taskherd"))
+
+	w, err := st.Watch()
+	if err != nil {
+		t.Fatalf("Watch() error = %v", err)
+	}
+	defer func() {
+		if err := w.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	}()
+
+	for i, title := range []string{"外部プロセス 1 件目", "外部プロセス 2 件目"} {
+		cmd := exec.Command(bin, "add", title)
+		cmd.Env = []string{
+			"HOME=" + root,
+			"XDG_STATE_HOME=" + stateHome,
+			"TASKHERD_CONFIG=" + filepath.Join(root, "config.toml"),
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("add に失敗した: %v\n%s", err, out)
+		}
+		waitForEvent(t, w.Events(), fmt.Sprintf("外部プロセスによる %d 回目の書き込み", i+1))
+	}
+
+	f, err := st.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(f.Tasks) != 2 {
+		t.Errorf("再読込結果の tasks = %d, want 2", len(f.Tasks))
 	}
 }
 
