@@ -487,16 +487,27 @@ func (b *Board) decorateLinkRow(url string, room int) string {
 
 	if !state.Fetched {
 		if state.Err != "" {
-			return "  " + b.styles.alert.Render(truncate("取得失敗", room))
+			return "  " + b.styles.segment(SegAlert).Render(truncate(b.icons.failureMark(failingAge(state)), room))
 		}
-		return "  " + b.styles.dim.Render(truncate("未取得", room))
+		return "  " + b.styles.segment(SegMuted).Render(truncate("未取得", room))
 	}
-	summary := DescribeLink(state)
+
+	// The marks are measured before the summary is trimmed, so a long PR title gives way to them
+	// rather than pushing them off the row: how old the value is, and whether anything is still
+	// able to refresh it, outrank the title here.
+	var marks []Segment
 	if state.Stale {
-		return "  " + b.styles.linkStale.Render(truncate(
-			fmt.Sprintf("%s（%s前 / TTL 超過）", summary, FormatAge(state.Age)), room))
+		marks = append(marks, Segment{Text: fmt.Sprintf("%s前 / TTL 超過", FormatAge(state.Age)), Kind: SegDim})
 	}
-	return "  " + truncate(summary, room)
+	if state.Err != "" {
+		marks = append(marks, Segment{Text: b.icons.failureMark(failingAge(state)), Kind: SegAlert})
+	}
+	rendered, used := "", 0
+	for _, mark := range marks {
+		used += lipgloss.Width(mark.Text) + 1
+		rendered += " " + b.styles.segment(mark.Kind).Render(mark.Text)
+	}
+	return "  " + b.styles.segment(linkTone(state)).Render(truncate(DescribeLink(state), room-used)) + rendered
 }
 
 func detailEditPrompt(kind detailEditKind) string {

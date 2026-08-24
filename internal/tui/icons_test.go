@@ -77,7 +77,7 @@ func TestFallbackIconsAreASCIIOrJapanese(t *testing.T) {
 func TestLinkIconStateCoverage(t *testing.T) {
 	seen := map[string]bool{}
 	for _, phase := range []linkPhase{phaseOpen, phaseDraft, phaseMerged, phaseClosed} {
-		glyph, _ := nerdIcons.linkIcon(model.LinkKindGitHubPR, phase)
+		glyph := nerdIcons.linkGlyph(model.LinkKindGitHubPR, phase)
 		if seen[glyph] {
 			t.Errorf("PR の状態 %v が他と同じグリフ %q を使っている", phase, glyph)
 		}

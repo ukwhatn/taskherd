@@ -6,7 +6,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/ukwhatn/taskherd/internal/fetch"
-	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -17,23 +16,33 @@ import (
 // U+2026 is one of the ambiguous-width characters a Japanese font paints two cells wide.
 const truncateMark = "~"
 
-// SegmentKind tells the view how to style one piece of a card.
+// SegmentKind is the tone one piece of a card is drawn in.
+//
+// The tones are named by what they mean on a board rather than by the states that map onto them:
+// green says "nothing needs you", red says "something does", and a PR being open and its checks
+// passing are the same green. Naming them per state instead would put the same colour under a
+// dozen names and hide that the board only distinguishes this many things at a glance.
+//
+// The state to tone mapping is in tone.go and the tone to colour mapping in style.go, so a state
+// gains a colour in one place and the palette changes in another.
 type SegmentKind int
 
 const (
-	SegDue SegmentKind = iota
-	SegDueOverdue
-	SegSession
-	SegSessionOffline
-	SegLink
-	SegLinkStale
-	SegLinkAttention
-	SegLinkOpen
-	SegLinkDraft
-	SegLinkMerged
-	SegLinkClosed
-	SegLinkPending
-	SegLinkUnfetched
+	// SegPlain is the terminal's own foreground: the segment carries no state worth colouring.
+	SegPlain SegmentKind = iota
+	// SegRef is a link's reference, coloured as a link rather than as a state.
+	SegRef
+	// SegMuted is grey: a state that is real but inert (draft, idle, not fetched yet).
+	SegMuted
+	// SegDim is grey and faint: metadata about the value rather than the value (how stale it is,
+	// that herdr is offline).
+	SegDim
+	// SegGood is green, SegCaution yellow and SegAlert red, in that order of wanting attention.
+	SegGood
+	SegCaution
+	SegAlert
+	// SegDone is magenta: finished, and so neither good nor in need of attention.
+	SegDone
 )
 
 // Segment is one styled piece of a card. The card layer decides the text and what kind it is;
@@ -69,18 +78,15 @@ func BuildCard(task model.Task, session SessionBadge, links map[string]fetch.Lin
 	card := Card{TaskID: task.ID, Title: fmt.Sprintf("#%d %s", task.ID, task.Title)}
 
 	if task.Due != nil {
-		kind, glyph := SegDue, style.Icons.Due
-		if isOverdue(*task.Due, now) {
-			kind, glyph = SegDueOverdue, style.Icons.DueOverdue
+		kind := dueTone(*task.Due, now)
+		glyph := style.Icons.Due
+		if kind == SegAlert {
+			glyph = style.Icons.DueOverdue
 		}
 		card.Meta = append(card.Meta, Segment{Text: joinIcon(glyph, string(*task.Due)), Kind: kind})
 	}
 	if session.Text != "" {
-		kind := SegSession
-		if session.State == "" || session.State == herdrc.StateOffline {
-			kind = SegSessionOffline
-		}
-		card.Meta = append(card.Meta, Segment{Text: session.Text, Kind: kind})
+		card.Meta = append(card.Meta, Segment{Text: session.Text, Kind: sessionTone(session.State)})
 	}
 
 	card.Links = BuildLinkRows(task, links, style)

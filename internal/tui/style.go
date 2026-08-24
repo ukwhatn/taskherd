@@ -40,6 +40,21 @@ func columnColor(name string) (color.Color, bool) {
 	return c, ok
 }
 
+// toneColors is the palette: one ANSI color per SegmentKind, indexed by it.
+//
+// Which state gets which tone is decided in tone.go; this is the only place a tone becomes a
+// color, so the whole board can be recolored without touching a single state.
+var toneColors = [...]color.Color{
+	SegPlain:   nil,
+	SegRef:     lipgloss.Blue,
+	SegMuted:   lipgloss.BrightBlack,
+	SegDim:     lipgloss.BrightBlack,
+	SegGood:    lipgloss.Green,
+	SegCaution: lipgloss.Yellow,
+	SegAlert:   lipgloss.Red,
+	SegDone:    lipgloss.Magenta,
+}
+
 // styles holds every style the board renders with, built once per program.
 type styles struct {
 	columnHeader        lipgloss.Style
@@ -48,25 +63,15 @@ type styles struct {
 	cardTitleFocused    lipgloss.Style
 	cardTitleSelected   lipgloss.Style
 	boxTitle            lipgloss.Style
-	due                 lipgloss.Style
-	dueOverdue          lipgloss.Style
-	session             lipgloss.Style
-	sessionOffline      lipgloss.Style
-	link                lipgloss.Style
-	linkStale           lipgloss.Style
-	linkAttention       lipgloss.Style
-	linkOpen            lipgloss.Style
-	linkDraft           lipgloss.Style
-	linkMerged          lipgloss.Style
-	linkClosed          lipgloss.Style
-	linkPending         lipgloss.Style
-	linkUnfetched       lipgloss.Style
 	footer              lipgloss.Style
 	status              lipgloss.Style
 	alert               lipgloss.Style
 	prompt              lipgloss.Style
 	dim                 lipgloss.Style
 	heading             lipgloss.Style
+
+	// tones is toneColors turned into styles, indexed by SegmentKind.
+	tones []lipgloss.Style
 }
 
 func newStyles() styles {
@@ -77,56 +82,43 @@ func newStyles() styles {
 		cardTitleFocused:    lipgloss.NewStyle().Bold(true),
 		cardTitleSelected:   lipgloss.NewStyle().Reverse(true),
 		boxTitle:            lipgloss.NewStyle().Bold(true),
-		due:                 lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
-		dueOverdue:          lipgloss.NewStyle().Foreground(lipgloss.Red).Bold(true),
-		session:             lipgloss.NewStyle().Foreground(lipgloss.Cyan),
-		sessionOffline:      lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
-		link:                lipgloss.NewStyle().Foreground(lipgloss.Blue),
-		linkStale:           lipgloss.NewStyle().Foreground(lipgloss.BrightBlack).Faint(true),
-		linkAttention:       lipgloss.NewStyle().Foreground(lipgloss.Red),
-		linkOpen:            lipgloss.NewStyle().Foreground(lipgloss.Green),
-		linkDraft:           lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
-		linkMerged:          lipgloss.NewStyle().Foreground(lipgloss.Magenta),
-		linkClosed:          lipgloss.NewStyle().Foreground(lipgloss.Red),
-		linkPending:         lipgloss.NewStyle().Foreground(lipgloss.Yellow),
-		linkUnfetched:       lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
 		footer:              lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
 		status:              lipgloss.NewStyle().Foreground(lipgloss.Green),
 		alert:               lipgloss.NewStyle().Foreground(lipgloss.Red),
 		prompt:              lipgloss.NewStyle().Bold(true),
 		dim:                 lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
 		heading:             lipgloss.NewStyle().Bold(true),
+		tones:               newToneStyles(),
 	}
 }
 
-// segment styles the given card meta segment.
-func (s styles) segment(kind SegmentKind) lipgloss.Style {
-	switch kind {
-	case SegDueOverdue:
-		return s.dueOverdue
-	case SegDue:
-		return s.due
-	case SegSession:
-		return s.session
-	case SegSessionOffline:
-		return s.sessionOffline
-	case SegLinkStale:
-		return s.linkStale
-	case SegLinkAttention:
-		return s.linkAttention
-	case SegLinkOpen:
-		return s.linkOpen
-	case SegLinkDraft:
-		return s.linkDraft
-	case SegLinkMerged:
-		return s.linkMerged
-	case SegLinkClosed:
-		return s.linkClosed
-	case SegLinkPending:
-		return s.linkPending
-	case SegLinkUnfetched:
-		return s.linkUnfetched
-	default:
-		return s.link
+// newToneStyles builds one style per tone.
+//
+// Red is bold and grey-as-metadata is faint, which are the two tones that have to survive being
+// read at a glance in a terminal whose theme may render either of them close to its foreground.
+func newToneStyles() []lipgloss.Style {
+	tones := make([]lipgloss.Style, len(toneColors))
+	for kind, c := range toneColors {
+		style := lipgloss.NewStyle()
+		if c != nil {
+			style = style.Foreground(c)
+		}
+		switch SegmentKind(kind) {
+		case SegAlert:
+			style = style.Bold(true)
+		case SegDim:
+			style = style.Faint(true)
+		}
+		tones[kind] = style
 	}
+	return tones
+}
+
+// segment styles the given card segment. An out-of-range kind is drawn plain rather than panicking:
+// the board is the last thing that should crash over a color.
+func (s styles) segment(kind SegmentKind) lipgloss.Style {
+	if int(kind) < 0 || int(kind) >= len(s.tones) {
+		return lipgloss.NewStyle()
+	}
+	return s.tones[kind]
 }

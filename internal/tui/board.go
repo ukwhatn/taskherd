@@ -682,11 +682,27 @@ func (b *Board) applyRefresh(msg refreshDoneMsg) tea.Cmd {
 	case interrupted:
 		b.setStatus(fmt.Sprintf("レート制限で中断した。次回取得を %s 後に延ばす", b.refreshInterval()), true)
 	case failed > 0:
-		b.setStatus(fmt.Sprintf("%d 件取得（%d 件失敗）", len(msg.result.Outcomes)-failed, failed), true)
+		// The reason is included rather than just the count: a count alone is what let a run of
+		// wrong-account 404s look like ordinary noise for as long as it did.
+		b.setStatus(fmt.Sprintf("%d 件取得（%d 件失敗）: %s",
+			len(msg.result.Outcomes)-failed, failed, firstFailureReason(msg.result)), true)
 	case msg.manual:
 		b.setStatus(fmt.Sprintf("%d 件取得した", len(msg.result.Outcomes)), false)
 	}
 	return nil
+}
+
+// firstFailureReason is the first line of the first failure in a cycle, which is the part of a gh
+// or Jira error that says what went wrong; the rest is the guidance the CLI prints in full.
+func firstFailureReason(result *fetch.RefreshResult) string {
+	for _, outcome := range result.Outcomes {
+		if outcome.Err == nil {
+			continue
+		}
+		line, _, _ := strings.Cut(outcome.Err.Error(), "\n")
+		return strings.TrimSpace(line)
+	}
+	return ""
 }
 
 // growBackoff stretches the background interval after a rate limit. Jira's own Retry-After wins

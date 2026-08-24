@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/ukwhatn/taskherd/internal/model"
+import (
+	"strings"
+
+	"github.com/ukwhatn/taskherd/internal/model"
+)
 
 // IconMode is the glyph vocabulary the board draws with.
 type IconMode string
@@ -45,6 +49,9 @@ type IconSet struct {
 	More string
 
 	Pass, Fail, Pending string
+	// Alert marks a link whose refresh keeps failing, which is the one state that is about the
+	// board itself rather than about the thing linked to.
+	Alert string
 
 	SessionBlocked, SessionWorking, SessionDone, SessionIdle, SessionOffline string
 
@@ -127,6 +134,7 @@ var nerdIcons = IconSet{
 	Pass:    nfOctCheck,
 	Fail:    nfOctX,
 	Pending: nfOctClock,
+	Alert:   nfOctAlert,
 
 	SessionBlocked: nfOctAlert,
 	SessionWorking: nfOctDotFill,
@@ -166,6 +174,7 @@ var asciiIcons = IconSet{
 	Pass:    "+",
 	Fail:    "!",
 	Pending: "*",
+	Alert:   "!",
 
 	SessionBlocked: "!",
 	SessionWorking: "*",
@@ -202,6 +211,8 @@ var noneIcons = IconSet{
 	Pass:    "ok",
 	Fail:    "ng",
 	Pending: "run",
+	// Alert is empty here: failureMark spells the word out in this mode.
+	Alert: "",
 
 	SessionBlocked: "",
 	SessionWorking: "",
@@ -256,7 +267,7 @@ func (s IconSet) all() []string {
 	return []string{
 		s.PROpen, s.PRDraft, s.PRMerged, s.PRClosed,
 		s.IssueOpen, s.IssueClosed, s.Jira, s.Link, s.More,
-		s.Pass, s.Fail, s.Pending,
+		s.Pass, s.Fail, s.Pending, s.Alert,
 		s.SessionBlocked, s.SessionWorking, s.SessionDone, s.SessionIdle, s.SessionOffline,
 		s.Due, s.DueOverdue,
 		s.ScrollUp, s.ScrollDown, s.Cursor, s.Collapsed, s.CardEdge, s.CardEdgeFocused,
@@ -264,35 +275,46 @@ func (s IconSet) all() []string {
 	}
 }
 
-// linkIcon is the glyph that opens a link row, together with the tone it is drawn in.
-func (s IconSet) linkIcon(kind model.LinkKind, state linkPhase) (string, SegmentKind) {
+// linkGlyph is the glyph that opens a link row. The colour it is drawn in comes from linkTone, not
+// from here: a glyph and a tone answer to different things, and only the nerd set has a glyph per
+// state to answer with at all.
+func (s IconSet) linkGlyph(kind model.LinkKind, phase linkPhase) string {
 	switch kind {
 	case model.LinkKindGitHubPR:
-		switch state {
+		switch phase {
 		case phaseDraft:
-			return s.PRDraft, SegLinkDraft
+			return s.PRDraft
 		case phaseMerged:
-			return s.PRMerged, SegLinkMerged
+			return s.PRMerged
 		case phaseClosed:
-			return s.PRClosed, SegLinkClosed
+			return s.PRClosed
 		default:
-			return s.PROpen, SegLinkOpen
+			return s.PROpen
 		}
 	case model.LinkKindGitHubIssue:
-		if state == phaseClosed || state == phaseMerged {
-			return s.IssueClosed, SegLinkClosed
+		if phase == phaseClosed || phase == phaseMerged {
+			return s.IssueClosed
 		}
-		return s.IssueOpen, SegLinkOpen
+		return s.IssueOpen
 	case model.LinkKindJira:
-		switch state {
-		case phaseMerged:
-			return s.Jira, SegLinkOpen
-		case phaseDraft:
-			return s.Jira, SegLinkDraft
-		default:
-			return s.Jira, SegLink
-		}
+		return s.Jira
 	default:
-		return s.Link, SegLink
+		return s.Link
 	}
+}
+
+// failureMark says that refreshing a link is failing, and for how long. The nerd glyph carries the
+// meaning by itself; the other modes have no glyph that does, so they spell the word out.
+func (s IconSet) failureMark(age string) string {
+	parts := make([]string, 0, 3)
+	if s.Alert != "" {
+		parts = append(parts, s.Alert)
+	}
+	if s.Mode != IconNerd {
+		parts = append(parts, "失敗")
+	}
+	if age != "" {
+		parts = append(parts, age)
+	}
+	return strings.Join(parts, " ")
 }
