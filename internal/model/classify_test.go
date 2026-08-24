@@ -60,3 +60,32 @@ func TestURLClassifierClassify(t *testing.T) {
 		})
 	}
 }
+
+func TestURLClassifierJiraKey(t *testing.T) {
+	const jiraSite = "dena.atlassian.net"
+	c := model.URLClassifier{JiraSite: jiraSite}
+
+	tests := []struct {
+		name   string
+		url    string
+		want   string
+		wantOK bool
+	}{
+		{name: "browse URL からキーを取り出す", url: "https://dena.atlassian.net/browse/ABC-123", want: "ABC-123", wantOK: true},
+		{name: "小文字キーはそのまま返す（呼び出し側が正規化を決める）", url: "https://dena.atlassian.net/browse/abc-123", want: "abc-123", wantOK: true},
+		{name: "クエリ・フラグメント付きでもキーだけ返す", url: "https://dena.atlassian.net/browse/ABC-123?focusedCommentId=1", want: "ABC-123", wantOK: true},
+		{name: "github の URL は対象外", url: "https://github.com/owner/repo/pull/1", want: "", wantOK: false},
+		{name: "config と異なるテナントは対象外", url: "https://other.atlassian.net/browse/ABC-123", want: "", wantOK: false},
+		{name: "browse 以外のパスは対象外", url: "https://dena.atlassian.net/projects/ABC", want: "", wantOK: false},
+		{name: "不正な URL は対象外", url: "これは URL ではない", want: "", wantOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := c.JiraKey(tt.url)
+			if ok != tt.wantOK || got != tt.want {
+				t.Errorf("JiraKey(%q) = (%q, %v), want (%q, %v)", tt.url, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
