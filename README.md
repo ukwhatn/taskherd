@@ -6,6 +6,14 @@ herdr 内で並走する複数のコーディングエージェントセッシ�
 
 Go 製の単体 CLI/TUI であり、同時に herdr プラグインとしても動く。herdr が無くても add/list/move/note/link といったタスク管理の核はすべて動作し、herdr 連携（セッションのライブ状態・ジャンプ）は到達できたときだけ加算される。
 
+## 動作要件
+
+- macOS / Linux
+- [herdr](https://herdr.dev) 0.8.0 以上（herdr 連携機能を使う場合。単体 CLI としては不要）
+- Go 1.25 以上（ビルド時。`herdr plugin install` はインストール先の環境でビルドする）
+- Nerd Font 対応の等幅フォント（既定のアイコン表記に必要。`board.icons = "ascii"` にすれば不要）
+- GitHub のライブ状態取得には [gh CLI](https://cli.github.com/) の認証が必要（Jira は API トークン）
+
 ## インストール
 
 ### herdr プラグインとして
@@ -210,3 +218,35 @@ herdr integration install claude
 
 - **ペースト**: ブラケットペーストに対応しているので、URL やタスク一覧はターミナルからそのまま貼り付けられる
 - **日本語入力**: IME の確定文字列はコマンドキーと解釈せず常に入力欄へ入る（確定文字列が飲み込まれない）。入力欄を持たない画面（確認ダイアログ・セレクタ）でも、複数文字がまとめて確定したイベントはキー名として解釈しない
+
+## 開発
+
+```
+go build ./...          # ビルド
+go test ./...           # テスト（実ユーザーデータには触れない）
+go test -race ./...     # 競合検査つき
+gofmt -l . && go vet ./...
+```
+
+ローカルの変更を herdr で試す場合:
+
+```
+go build -o bin/taskherd ./cmd/taskherd
+herdr plugin link .     # link は build を実行しないので、先に自分でビルドする
+```
+
+`internal/` の構成:
+
+| パッケージ | 役割 |
+|---|---|
+| `model` | タスクのデータモデル・検証・URL 種別判別 |
+| `store` | tasks.json の排他（flock）・原子書き込み・変更監視 |
+| `config` | config.toml の読み込みとパス解決 |
+| `herdrc` | herdr の snapshot 取得・イベント購読・pane 操作 |
+| `fetch` | gh / Jira によるライブ状態取得と cache.json |
+| `tui` | bubbletea v2 の board / 詳細・追加モーダル / picker |
+| `cli` | cobra のコマンド定義と `--json` 出力 |
+
+## ライセンス
+
+MIT License（[LICENSE](LICENSE)）

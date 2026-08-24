@@ -150,7 +150,7 @@ type jiraIssueResponse struct {
 }
 
 // jiraIssueEndpoint builds the GET URL. site is a bare host in config.toml (e.g.
-// "dena.atlassian.net"); tests point it at an httptest server, whose URL already
+// "example.atlassian.net"); tests point it at an httptest server, whose URL already
 // carries a scheme, so an existing scheme is left as-is rather than doubled up.
 func jiraIssueEndpoint(site, key string) string {
 	if !strings.Contains(site, "://") {

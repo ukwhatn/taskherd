@@ -109,7 +109,7 @@ func TestLoadPartialConfigKeepsDefaults(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	content := `
 [jira]
-site = "dena.atlassian.net"
+site = "example.atlassian.net"
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("config.toml を書けない: %v", err)
@@ -125,7 +125,7 @@ site = "dena.atlassian.net"
 	if cfg.Board.RefreshIntervalMinutes != 10 || cfg.Board.CacheTTLMinutes != 5 {
 		t.Errorf("board = %+v, want 既定値", cfg.Board)
 	}
-	if cfg.Jira.Site != "dena.atlassian.net" {
+	if cfg.Jira.Site != "example.atlassian.net" {
 		t.Errorf("jira.site = %q", cfg.Jira.Site)
 	}
 }
@@ -269,15 +269,15 @@ func TestLoadRejectsBrokenTOML(t *testing.T) {
 
 func TestClassifierUsesConfiguredHosts(t *testing.T) {
 	cfg := config.Default()
-	cfg.GitHub.GHESHosts = []string{"github.dena.jp"}
-	cfg.Jira.Site = "dena.atlassian.net"
+	cfg.GitHub.GHESHosts = []string{"github.example.com"}
+	cfg.Jira.Site = "example.atlassian.net"
 
 	classifier := cfg.Classifier()
 
-	if got := classifier.Classify("https://github.dena.jp/o/r/pull/1"); got != model.LinkKindGitHubPR {
+	if got := classifier.Classify("https://github.example.com/o/r/pull/1"); got != model.LinkKindGitHubPR {
 		t.Errorf("GHES PR = %q, want github_pr", got)
 	}
-	if got := classifier.Classify("https://dena.atlassian.net/browse/ABC-1"); got != model.LinkKindJira {
+	if got := classifier.Classify("https://example.atlassian.net/browse/ABC-1"); got != model.LinkKindJira {
 		t.Errorf("Jira = %q, want jira", got)
 	}
 }

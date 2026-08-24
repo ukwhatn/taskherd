@@ -180,15 +180,15 @@ func TestAddWithAllAttributes(t *testing.T) {
 	h := newHarness(t)
 	h.writeConfig(t, `
 [github]
-ghes_hosts = ["github.dena.jp"]
+ghes_hosts = ["github.example.com"]
 
 [jira]
-site = "dena.atlassian.net"
+site = "example.atlassian.net"
 `)
 
 	res := h.mustRun(t, "add", "実装", "--status", "working", "--due", "2026-08-31", "--note", "メモ",
-		"--link", "https://github.dena.jp/o/r/pull/7",
-		"--link", "https://dena.atlassian.net/browse/ABC-1",
+		"--link", "https://github.example.com/o/r/pull/7",
+		"--link", "https://example.atlassian.net/browse/ABC-1",
 		"--link", "https://example.com/docs",
 		"--json")
 
