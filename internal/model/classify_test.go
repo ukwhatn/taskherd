@@ -134,3 +134,25 @@ func TestLinkHost(t *testing.T) {
 		}
 	}
 }
+
+func TestLinkOwner(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"PR", "https://github.com/some-org/server/pull/12", "some-org"},
+		{"issue", "https://github.com/me/tool/issues/3", "me"},
+		{"GHES（ghes_hosts 未登録でも取れる）", "https://github.example.com/team/repo/pull/1", "team"},
+		{"ホストのみ", "https://github.com", ""},
+		{"ホスト + スラッシュ", "https://github.com/", ""},
+		{"ホストのない文字列", "not a url", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := model.LinkOwner(tc.in); got != tc.want {
+				t.Errorf("LinkOwner(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
