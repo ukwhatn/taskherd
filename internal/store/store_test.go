@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -194,6 +195,87 @@ func TestLoadReportsRecoveryHintOnCorruptFile(t *testing.T) {
 	}
 	if corrupt.Hint() == "" {
 		t.Error("Hint() が空（.bak からの復旧手順を案内していない）")
+	}
+}
+
+func TestUpdateRefusesWriteWhenCallbackBreaksInvariants(t *testing.T) {
+	st := newStore(t)
+	for _, title := range []string{"1 件目", "2 件目"} {
+		if err := st.Update(context.Background(), addTask(title)); err != nil {
+			t.Fatalf("Update() error = %v", err)
+		}
+	}
+	tasksBefore, err := os.ReadFile(st.TasksPath())
+	if err != nil {
+		t.Fatalf("tasks.json を読めない: %v", err)
+	}
+	bakBefore, err := os.ReadFile(st.BakPath())
+	if err != nil {
+		t.Fatalf(".bak を読めない: %v", err)
+	}
+
+	err = st.Update(context.Background(), func(f *model.File) error {
+		f.Tasks[1].ID = f.Tasks[0].ID
+		return nil
+	})
+
+	var invalid *model.ValidationError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("Update() error = %v, want *ValidationError", err)
+	}
+	if len(invalid.Violations) != 1 || invalid.Violations[0].Path != "tasks[1].id" {
+		t.Errorf("違反 = %v, want tasks[1].id の 1 件", invalid.Violations)
+	}
+
+	tasksAfter, err := os.ReadFile(st.TasksPath())
+	if err != nil {
+		t.Fatalf("tasks.json を読めない: %v", err)
+	}
+	if string(tasksAfter) != string(tasksBefore) {
+		t.Errorf("不正な変更が書き込まれている:\n%s", tasksAfter)
+	}
+	bakAfter, err := os.ReadFile(st.BakPath())
+	if err != nil {
+		t.Fatalf(".bak を読めない: %v", err)
+	}
+	if string(bakAfter) != string(bakBefore) {
+		t.Error("書き込みを拒否したのに .bak が更新されている（検証は .bak 退避より前に行う）")
+	}
+}
+
+func TestLoadVersionMismatchHintDoesNotAdviseBackupRecovery(t *testing.T) {
+	st := newStore(t)
+	if err := os.MkdirAll(st.Dir(), 0o700); err != nil {
+		t.Fatalf("ディレクトリを作れない: %v", err)
+	}
+	if err := os.WriteFile(st.TasksPath(), []byte(`{"version":2,"next_id":1,"tasks":[]}`), 0o600); err != nil {
+		t.Fatalf("tasks.json を書けない: %v", err)
+	}
+
+	_, err := st.Load()
+
+	var unsupported *store.UnsupportedVersionError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("Load() error = %v, want *UnsupportedVersionError", err)
+	}
+	var corrupt *store.CorruptError
+	if errors.As(err, &corrupt) {
+		t.Error("version 不一致が CorruptError として扱われている（.bak 復旧を誤案内する）")
+	}
+	var mismatch *model.VersionMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Errorf("Unwrap で *VersionMismatchError に到達できない: %v", err)
+	}
+
+	hint := unsupported.Hint()
+	if hint == "" {
+		t.Fatal("Hint() が空")
+	}
+	if strings.Contains(hint, "tasks.json.bak") {
+		t.Errorf("hint = %q, want .bak 復旧を案内しない（新しいファイルを古いバイナリで読んでいる状況）", hint)
+	}
+	if !strings.Contains(hint, "taskherd") {
+		t.Errorf("hint = %q, want taskherd の更新・移行の案内", hint)
 	}
 }
 

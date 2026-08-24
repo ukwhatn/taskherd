@@ -576,12 +576,19 @@ func TestVersionMismatchIsRejected(t *testing.T) {
 		t.Fatalf("tasks.json を書けない: %v", err)
 	}
 
-	res := h.run(t, "add", "b")
+	res := h.run(t, "add", "b", "--json")
 
 	if res.code == 0 {
 		t.Fatal("exit = 0, want 非 0")
 	}
-	if !strings.Contains(res.stderr, "version") {
-		t.Errorf("stderr = %q, want version 不一致の説明", res.stderr)
+	payload := decodeError(t, res.stderr)
+	if !strings.Contains(payload.Error, "version") {
+		t.Errorf("error = %q, want version 不一致の説明", payload.Error)
+	}
+	if !strings.Contains(payload.Hint, "taskherd") {
+		t.Errorf("hint = %q, want taskherd の更新・移行の案内", payload.Hint)
+	}
+	if strings.Contains(payload.Hint, "tasks.json.bak") {
+		t.Errorf("hint = %q, want .bak 復旧を案内しない", payload.Hint)
 	}
 }

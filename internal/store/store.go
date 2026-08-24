@@ -47,6 +47,24 @@ func (e *CorruptError) Hint() string {
 	return fmt.Sprintf("書き込み前の内容は %s に残っている。内容を確認して手動で復旧する（taskherd は自動上書きしない）", e.BakPath)
 }
 
+// UnsupportedVersionError reports a tasks.json written for a different taskherd version.
+// It is kept apart from CorruptError because the file is intact; only this binary cannot handle it.
+type UnsupportedVersionError struct {
+	Path string
+	Err  error
+}
+
+func (e *UnsupportedVersionError) Error() string {
+	return fmt.Sprintf("%s を読み込めない: %v", e.Path, e.Err)
+}
+
+func (e *UnsupportedVersionError) Unwrap() error { return e.Err }
+
+// Hint returns how to recover.
+func (e *UnsupportedVersionError) Hint() string {
+	return "ファイルが新しい場合は taskherd を新しい version 対応のバイナリへ更新する。古い形式の場合は手動で移行する（バックアップからの復旧では解決しない）"
+}
+
 // LockError reports that waiting for the lock timed out.
 type LockError struct {
 	Path    string
@@ -122,6 +140,11 @@ func (s *Store) Update(ctx context.Context, fn func(*model.File) error) error {
 	if err := fn(f); err != nil {
 		return err
 	}
+	// The mutated result is re-validated: a buggy caller must not be able to persist
+	// duplicate ids or a stale next_id into the file every other command trusts.
+	if err := model.Validate(f); err != nil {
+		return fmt.Errorf("変更後の内容が検証を通らないため書き込みを中止した: %w", err)
+	}
 
 	data, err := model.MarshalFile(f)
 	if err != nil {
@@ -166,6 +189,10 @@ func (s *Store) read() ([]byte, *model.File, error) {
 
 	f, err := model.ParseFile(raw)
 	if err != nil {
+		var mismatch *model.VersionMismatchError
+		if errors.As(err, &mismatch) {
+			return nil, nil, &UnsupportedVersionError{Path: s.TasksPath(), Err: err}
+		}
 		return nil, nil, &CorruptError{Path: s.TasksPath(), BakPath: s.BakPath(), Err: err}
 	}
 	return raw, f, nil
