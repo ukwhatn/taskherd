@@ -59,13 +59,15 @@ type Deps struct {
 	Herdr    HerdrOps
 	Cache    CacheLoader
 	Links    LinkRefresher
-	Getenv   func(string) string
 	Now      func() time.Time
 }
 
 // Settings are the board's configuration, resolved from config.toml before the program starts.
 type Settings struct {
 	Columns model.Columns
+	// Editor is the command note editing opens, already resolved against the environment. Empty
+	// means no editor is configured anywhere, and note editing reports that rather than guessing.
+	Editor string
 	// Classifier derives a link's kind from its URL, using the configured GHES and Jira hosts.
 	Classifier model.URLClassifier
 	// CacheTTL is how long a fetched link value counts as current.
@@ -80,11 +82,4 @@ func (d Deps) now() time.Time {
 		return time.Now()
 	}
 	return d.Now()
-}
-
-func (d Deps) getenv(key string) string {
-	if d.Getenv == nil {
-		return ""
-	}
-	return d.Getenv(key)
 }

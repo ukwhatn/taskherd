@@ -363,35 +363,23 @@ func (b *Board) submitDetailEdit(kind detailEditKind, ref, value string) tea.Cmd
 
 // --- rendering ---------------------------------------------------------------
 
-func (b *Board) renderDetail(overlay string) string {
+// renderDetail draws the detail modal as one centred box. focused is false while a picker of its
+// own is open over it, which is what dims its border and hands the accent to the picker.
+func (b *Board) renderDetail(focused bool) string {
 	task := b.activeTask()
 	if task == nil {
 		b.mode = modeBoard
-		return b.renderBoard("")
+		return ""
 	}
 	items := b.detailItems(*task)
 	b.detail.clamp(len(items))
 
-	footer := overlay
-	if footer == "" {
-		if b.detail.editing {
-			footer = b.renderDetailEdit()
-		} else {
-			footer = b.styles.footer.Render(truncate(detailHelp, b.width))
-		}
-	}
-	if b.status != "" {
-		footer += "\n" + b.statusLine()
-	}
+	width := b.modalWidth(96)
+	inner := modalInner(width)
 
-	header := b.styles.heading.Render(truncate(fmt.Sprintf("#%d %s", task.ID, task.Title), b.width))
-	body := b.height - 1 - lipgloss.Height(footer)
-	if body < 1 {
-		body = 1
-	}
-
-	noteLines := b.detailNoteBlock(*task, body)
-	listHeight := body - len(noteLines)
+	prompt := b.detailPromptLines(inner)
+	noteLines := b.detailNoteBlock(*task, b.modalBody(1), inner)
+	listHeight := b.modalBody(1) - len(noteLines) - len(prompt)
 	if listHeight < 1 {
 		listHeight = 1
 	}
@@ -402,19 +390,44 @@ func (b *Board) renderDetail(overlay string) string {
 		end = len(items)
 	}
 
-	lines := []string{header}
+	lines := make([]string, 0, listHeight+len(noteLines)+len(prompt))
 	for i := b.detail.offset; i < end; i++ {
-		lines = append(lines, b.renderDetailItem(items[i], i == b.detail.cursor))
+		lines = append(lines, b.renderDetailItem(items[i], i == b.detail.cursor, inner))
 	}
 	lines = append(lines, noteLines...)
-	lines = append(lines, footer)
-	return strings.Join(lines, "\n")
+	lines = append(lines, prompt...)
+
+	help := detailHelp
+	if b.detail.editing {
+		help = "enter 確定 / esc 取消"
+	}
+	return b.renderModal(modal{
+		title:   fmt.Sprintf("#%d %s", task.ID, task.Title),
+		body:    lines,
+		help:    help,
+		width:   width,
+		focused: focused,
+	})
+}
+
+// detailPromptLines are the text field the modal opens on a row, drawn in the box under the list.
+func (b *Board) detailPromptLines(inner int) []string {
+	if !b.detail.editing {
+		return nil
+	}
+	// The field scrolls its own text rather than spilling out of the box.
+	b.detail.input.SetWidth(inner - 2)
+	return []string{
+		"",
+		b.styles.prompt.Render(truncate(detailEditPrompt(b.detail.editKind), inner)),
+		b.detail.input.View(),
+	}
 }
 
 // detailNoteBlock renders the note underneath the item list. The note is the one field with no
 // useful one-line form, so it is shown in full rather than only as a row, clipped to a third of
 // the body so it never crowds the list out.
-func (b *Board) detailNoteBlock(task model.Task, body int) []string {
+func (b *Board) detailNoteBlock(task model.Task, body, inner int) []string {
 	if task.Note == "" {
 		return nil
 	}
@@ -423,32 +436,32 @@ func (b *Board) detailNoteBlock(task model.Task, body int) []string {
 		return nil
 	}
 
-	lines := []string{b.styles.dim.Render(truncate("── note ──", b.width))}
+	lines := []string{b.styles.dim.Render(truncate("── note ──", inner))}
 	for _, line := range strings.Split(task.Note, "\n") {
 		if len(lines) >= budget {
 			lines = append(lines, b.styles.dim.Render("…"))
 			break
 		}
-		lines = append(lines, b.styles.dim.Render(truncate(line, b.width)))
+		lines = append(lines, b.styles.dim.Render(truncate(line, inner)))
 	}
 	return lines
 }
 
-func (b *Board) renderDetailItem(item detailItem, focused bool) string {
+func (b *Board) renderDetailItem(item detailItem, focused bool, inner int) string {
 	marker := "  "
 	if focused {
 		marker = "▌ "
 	}
 
-	value := item.value
+	// The live suffix is styled, so the row is trimmed to width before it is appended rather than
+	// after: trimming afterwards would cut an escape sequence in half.
+	line := truncate(marker+padLabel(item.label)+item.value, inner)
 	if item.kind == itemLink {
-		value = b.decorateLinkRow(item.ref, value)
+		line += b.decorateLinkRow(item.ref, inner-lipgloss.Width(line))
 	}
-
-	line := truncate(marker+padLabel(item.label)+value, b.width)
 	switch {
 	case focused:
-		return b.styles.cardTitleSelected.Render(line)
+		return b.styles.cardTitleSelected.Render(padCell(line, inner))
 	case item.disabled:
 		return b.styles.dim.Render(line)
 	default:
@@ -456,30 +469,28 @@ func (b *Board) renderDetailItem(item detailItem, focused bool) string {
 	}
 }
 
-// decorateLinkRow appends the cached live state to a link row, so the row says what the badge on
-// the card says without opening anything further.
-func (b *Board) decorateLinkRow(url, value string) string {
+// decorateLinkRow is the cached live state appended to a link row, so the row says what the badge
+// on the card says without opening anything further. room is what is left of the row's width; the
+// suffix is trimmed to it as plain text, before it is styled.
+func (b *Board) decorateLinkRow(url string, room int) string {
 	state, ok := b.links[url]
-	if !ok || !state.Fetchable() {
-		return value
+	if !ok || !state.Fetchable() || room < 4 {
+		return ""
 	}
+	room -= 2
+
 	if !state.Fetched {
 		if state.Err != "" {
-			return value + "  " + b.styles.alert.Render("取得失敗")
+			return "  " + b.styles.alert.Render(truncate("取得失敗", room))
 		}
-		return value + "  " + b.styles.dim.Render("未取得")
+		return "  " + b.styles.dim.Render(truncate("未取得", room))
 	}
 	summary := DescribeLink(state)
 	if state.Stale {
-		return value + "  " + b.styles.linkStale.Render(fmt.Sprintf("%s（%s前 / TTL 超過）", summary, FormatAge(state.Age)))
+		return "  " + b.styles.linkStale.Render(truncate(
+			fmt.Sprintf("%s（%s前 / TTL 超過）", summary, FormatAge(state.Age)), room))
 	}
-	return value + "  " + summary
-}
-
-func (b *Board) renderDetailEdit() string {
-	return b.styles.prompt.Render(detailEditPrompt(b.detail.editKind)) + "\n" +
-		b.detail.input.View() + "\n" +
-		b.styles.dim.Render("enter 確定 / esc 取消")
+	return "  " + truncate(summary, room)
 }
 
 func detailEditPrompt(kind detailEditKind) string {

@@ -454,14 +454,30 @@ func TestDetailClosesWhenTaskDisappears(t *testing.T) {
 
 func TestDetailNoteWithoutEditorReports(t *testing.T) {
 	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
-	h := newHarness(t, Deps{Tasks: store, Getenv: func(string) string { return "" }}, Settings{})
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
 
 	h.key("enter")
 	focusDetailItem(t, h, itemNote, "")
 	h.key("enter")
 
 	if !strings.Contains(h.board.status, "EDITOR") {
-		t.Errorf("status = %q, want $EDITOR の案内", h.board.status)
+		t.Errorf("status = %q, want エディタ設定の案内", h.board.status)
+	}
+}
+
+// The editor named in config is the one the board opens, which is what makes note editing work in
+// a herdr pane that never saw the user's environment.
+func TestDetailNoteUsesConfiguredEditor(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+	h := newHarness(t, Deps{Tasks: store}, Settings{Editor: "true"})
+
+	h.key("enter")
+	focusDetailItem(t, h, itemNote, "")
+	if cmd := h.dispatch(keyMsg("enter")); cmd == nil {
+		t.Fatal("エディタ起動コマンドが返っていない")
+	}
+	if h.board.status != "" {
+		t.Errorf("status = %q, want 空（エディタは解決できている）", h.board.status)
 	}
 }
 

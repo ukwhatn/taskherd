@@ -480,6 +480,23 @@ func TestNoteWithoutEditorEnv(t *testing.T) {
 	}
 }
 
+// config.toml の editor は環境変数より優先される（herdr の pane には環境変数が届かないことがあるため）。
+func TestNoteUsesConfiguredEditorOverEnv(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(t, "editor = \"taskherd-no-such-editor\"\n")
+	h.env["EDITOR"] = "true"
+	h.mustRun(t, "add", "a")
+
+	res := h.run(t, "note", "1")
+
+	if res.code == 0 {
+		t.Fatal("exit = 0, want 非 0（config の editor が起動を試みて失敗する）")
+	}
+	if !strings.Contains(res.stderr, "taskherd-no-such-editor") {
+		t.Errorf("stderr = %q, want config の editor 名", res.stderr)
+	}
+}
+
 func TestLinkAndUnlink(t *testing.T) {
 	h := newHarness(t)
 	h.mustRun(t, "add", "a")

@@ -24,6 +24,15 @@ var columnColors = map[string]color.Color{
 	"grey":    lipgloss.BrightBlack,
 }
 
+// accentColor marks whatever has the keyboard when nothing more specific applies: a dialog's
+// border, or the cursor in a column config gave no color to.
+//
+// dimColor is the resting state of every border and every piece of secondary text.
+var (
+	accentColor color.Color = lipgloss.Cyan
+	dimColor    color.Color = lipgloss.BrightBlack
+)
+
 // columnColor resolves a config color name, reporting whether it was known. An unknown name is
 // left uncolored rather than guessed, so a typo in config shows up as plain text.
 func columnColor(name string) (color.Color, bool) {
@@ -36,7 +45,9 @@ type styles struct {
 	columnHeader        lipgloss.Style
 	columnHeaderFocused lipgloss.Style
 	cardTitle           lipgloss.Style
+	cardTitleFocused    lipgloss.Style
 	cardTitleSelected   lipgloss.Style
+	boxTitle            lipgloss.Style
 	due                 lipgloss.Style
 	dueOverdue          lipgloss.Style
 	session             lipgloss.Style
@@ -57,7 +68,9 @@ func newStyles() styles {
 		columnHeader:        lipgloss.NewStyle().Bold(true),
 		columnHeaderFocused: lipgloss.NewStyle().Bold(true).Reverse(true),
 		cardTitle:           lipgloss.NewStyle(),
+		cardTitleFocused:    lipgloss.NewStyle().Bold(true),
 		cardTitleSelected:   lipgloss.NewStyle().Reverse(true),
+		boxTitle:            lipgloss.NewStyle().Bold(true),
 		due:                 lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
 		dueOverdue:          lipgloss.NewStyle().Foreground(lipgloss.Red).Bold(true),
 		session:             lipgloss.NewStyle().Foreground(lipgloss.Cyan),

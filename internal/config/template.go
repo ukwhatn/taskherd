@@ -5,6 +5,11 @@ package config
 const defaultFileContent = `# taskherd 設定ファイル
 # 生成: taskherd config init / パス上書き: 環境変数 TASKHERD_CONFIG
 
+# note 編集に使うエディタ。解決順は editor > $VISUAL > $EDITOR
+# herdr プラグインの pane は shell を経由せず環境変数が届かないことがあるため、
+# board から note を編集するならここで指定しておくのが確実
+# editor = "nano"
+
 [board]
 # ライブ取得の背景更新間隔（分）。0 で無効
 refresh_interval_minutes = 10

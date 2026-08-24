@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
@@ -77,17 +78,57 @@ func (b *Board) handleStatusSelectKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 }
 
 func (b *Board) renderStatusSelect() string {
-	cells := make([]string, 0, len(b.statusSel.targets))
-	for i, col := range b.statusSel.targets {
-		cell := " " + col.Label + " "
-		if i == b.statusSel.cursor {
-			cell = b.styles.cardTitleSelected.Render(cell)
-		}
-		cells = append(cells, cell)
+	labels := make([]string, 0, len(b.statusSel.targets))
+	for _, col := range b.statusSel.targets {
+		labels = append(labels, " "+col.Label+" ")
 	}
-	return b.styles.prompt.Render(fmt.Sprintf("#%d の移行先", b.statusSel.taskID)) + "\n" +
-		truncate(strings.Join(cells, " "), b.width) + "\n" +
-		b.styles.dim.Render("←→ 選択 / enter 確定 / esc 取消")
+
+	// The row is windowed as plain text before any of it is styled: trimming it afterwards would
+	// mean cutting a styled cell, and an escape sequence does not survive being cut.
+	width := b.modalWidth(lipgloss.Width(strings.Join(labels, " ")) + boxChrome)
+	cells, start := visibleCells(labels, b.statusSel.cursor, modalInner(width))
+	for i := range cells {
+		if start+i == b.statusSel.cursor {
+			cells[i] = b.styles.cardTitleSelected.Render(cells[i])
+		}
+	}
+
+	return b.renderModal(modal{
+		title:   fmt.Sprintf("#%d の移行先", b.statusSel.taskID),
+		body:    []string{strings.Join(cells, " ")},
+		help:    "←→ 選択 / enter 確定 / esc 取消",
+		width:   width,
+		focused: true,
+	})
+}
+
+// visibleCells picks the run of labels that fits across width cells, sliding the window just far
+// enough to keep the cursor's own label in it.
+func visibleCells(labels []string, cursor, width int) (cells []string, start int) {
+	if len(labels) == 0 {
+		return nil, 0
+	}
+	start = clampIndex(cursor, len(labels))
+	for start > 0 && cellsWidth(labels[start-1:cursor+1]) <= width {
+		start--
+	}
+	end := cursor + 1
+	for end < len(labels) && cellsWidth(labels[start:end+1]) <= width {
+		end++
+	}
+	return append([]string(nil), labels[start:end]...), start
+}
+
+// cellsWidth is how wide a run of labels renders, including the single space between them.
+func cellsWidth(labels []string) int {
+	total := 0
+	for i, label := range labels {
+		if i > 0 {
+			total++
+		}
+		total += lipgloss.Width(label)
+	}
+	return total
 }
 
 // sessionSelectState is the agent picker opened from the detail modal's ＋セッション紐づけ row.
@@ -165,8 +206,10 @@ func (b *Board) linkSelectedAgent() tea.Cmd {
 }
 
 func (b *Board) renderSessionSelect() string {
-	lines := []string{b.styles.prompt.Render(fmt.Sprintf("#%d に紐づけるセッション", b.sessionSel.taskID))}
+	width := b.modalWidth(76)
+	inner := modalInner(width)
 
+	var lines []string
 	switch {
 	case b.sessionSel.loading:
 		lines = append(lines, b.styles.dim.Render("herdr に問い合わせ中..."))
@@ -178,23 +221,29 @@ func (b *Board) renderSessionSelect() string {
 			if i == b.sessionSel.cursor {
 				marker = "▌ "
 			}
-			line := fmt.Sprintf("%s%-8s %-10s %s", marker, agent.Agent, shortID(agent.SessionID()), agent.Cwd)
-			if agent.SessionID() == "" {
-				line = b.styles.dim.Render(truncate(
-					fmt.Sprintf("%s%-8s %-10s %s", marker, agent.Agent, "(未検出)", agent.Cwd), b.width))
-			} else {
-				line = truncate(line, b.width)
-				if i == b.sessionSel.cursor {
-					line = b.styles.cardTitleSelected.Render(line)
-				}
+			id := shortID(agent.SessionID())
+			if id == "" {
+				id = "(未検出)"
+			}
+			line := truncate(fmt.Sprintf("%s%-8s %-10s %s", marker, agent.Agent, id, agent.Cwd), inner)
+			switch {
+			case agent.SessionID() == "":
+				line = b.styles.dim.Render(line)
+			case i == b.sessionSel.cursor:
+				line = b.styles.cardTitleSelected.Render(line)
 			}
 			lines = append(lines, line)
 		}
 	}
 
 	if b.sessionSel.err != "" {
-		lines = append(lines, b.styles.alert.Render(truncate(b.sessionSel.err, b.width)))
+		lines = append(lines, b.styles.alert.Render(truncate(b.sessionSel.err, inner)))
 	}
-	lines = append(lines, b.styles.dim.Render("↑↓ 選択 / enter 紐づけ / esc 取消"))
-	return strings.Join(lines, "\n")
+	return b.renderModal(modal{
+		title:   fmt.Sprintf("#%d に紐づけるセッション", b.sessionSel.taskID),
+		body:    lines,
+		help:    "↑↓ 選択 / enter 紐づけ / esc 取消",
+		width:   width,
+		focused: true,
+	})
 }

@@ -35,11 +35,10 @@ func (a *app) boardCmd() *cobra.Command {
 // management core has to work without herdr, and without a usable watcher.
 func (a *app) boardDeps(ctx context.Context, cfg *config.Config) tui.Deps {
 	deps := tui.Deps{
-		Tasks:  a.tasks(),
-		Cache:  a.cache(),
-		Links:  a.fetcher(cfg),
-		Getenv: a.env.Getenv,
-		Now:    a.env.Now,
+		Tasks: a.tasks(),
+		Cache: a.cache(),
+		Links: a.fetcher(cfg),
+		Now:   a.env.Now,
 	}
 
 	if watcher, err := a.tasks().Watch(); err == nil {
@@ -54,6 +53,7 @@ func (a *app) boardDeps(ctx context.Context, cfg *config.Config) tui.Deps {
 func (a *app) boardSettings(cfg *config.Config) tui.Settings {
 	return tui.Settings{
 		Columns:         cfg.Columns,
+		Editor:          cfg.ResolveEditor(a.env.Getenv),
 		Classifier:      cfg.Classifier(),
 		CacheTTL:        time.Duration(cfg.Board.CacheTTLMinutes) * time.Minute,
 		RefreshInterval: time.Duration(cfg.Board.RefreshIntervalMinutes) * time.Minute,

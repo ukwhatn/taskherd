@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -228,36 +229,53 @@ func (b *Board) renderAdd() string {
 		statusLabel = fmt.Sprintf("%s (%s)", col.Label, col.ID)
 	}
 
-	lines := []string{b.styles.heading.Render("新しいタスク")}
+	// Wide enough for the key help to land whole, which is where the modal says which key inserts
+	// a line break on this terminal.
+	width := b.modalWidth(84)
+	inner := modalInner(width)
+
+	var lines []string
 	for field := addTitle; field < addFieldCount; field++ {
 		// The finished lines sit above the field, so a multi-line entry reads as what it is.
 		for _, done := range b.add.lines[field] {
-			lines = append(lines, truncate("  "+padLabel("")+b.styles.dim.Render(done), b.width))
+			lines = append(lines, b.styles.dim.Render(truncate("  "+padLabel("")+done, inner)))
 		}
 
 		marker := "  "
 		if field == b.add.cursor {
 			marker = "▌ "
 		}
-		value := b.add.inputs[field].View()
+		// The text field styles its own cursor, so its row is assembled from parts already the
+		// right width rather than trimmed after the fact.
+		label := truncate(marker+padLabel(addFieldLabels[field]), inner)
 		if field == addStatus {
-			value = statusLabel
+			value := truncate(statusLabel, inner-lipgloss.Width(label))
 			if field == b.add.cursor {
 				value += "   " + b.styles.dim.Render("←→ で変更")
 			}
+			lines = append(lines, label+value)
+			continue
 		}
-		lines = append(lines, truncate(marker+padLabel(addFieldLabels[field])+value, b.width))
+		// The field scrolls its own text rather than spilling out of the box.
+		b.add.inputs[field].SetWidth(inner - lipgloss.Width(label) - 2)
+		lines = append(lines, label+b.add.inputs[field].View())
 	}
 
 	if titles := b.add.titles(); len(titles) > 1 {
-		lines = append(lines, b.styles.status.Render(
-			fmt.Sprintf("enter で %d 件のタスクを作成する", len(titles))))
+		lines = append(lines, b.styles.status.Render(truncate(
+			fmt.Sprintf("enter で %d 件のタスクを作成する", len(titles)), inner)))
 	}
 	if b.add.err != "" {
-		lines = append(lines, b.styles.alert.Render(truncate(b.add.err, b.width)))
+		lines = append(lines, b.styles.alert.Render(truncate(b.add.err, inner)))
 	}
-	lines = append(lines, b.styles.footer.Render(truncate(b.addHelp(), b.width)))
-	return strings.Join(lines, "\n")
+
+	return b.renderModal(modal{
+		title:   "新しいタスク",
+		body:    lines,
+		help:    b.addHelp(),
+		width:   width,
+		focused: true,
+	})
 }
 
 // addHelp names the key that actually inserts a line break, which depends on what the terminal

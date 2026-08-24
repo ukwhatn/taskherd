@@ -99,14 +99,15 @@ func (a *app) editNoteInEditor(id int) (string, error) {
 		}
 	}
 
-	editor := a.env.Getenv("VISUAL")
-	if editor == "" {
-		editor = a.env.Getenv("EDITOR")
+	cfg, err := a.config()
+	if err != nil {
+		return "", err
 	}
+	editor := cfg.ResolveEditor(a.env.Getenv)
 	if editor == "" {
 		return "", &UserError{
-			Msg:      "$EDITOR が設定されていない",
-			HintText: "EDITOR を設定するか、--set / --append で非対話に指定する",
+			Msg:      "エディタが設定されていない",
+			HintText: "config.toml の editor を設定するか $EDITOR を設定する。--set / --append なら非対話に指定できる",
 		}
 	}
 
