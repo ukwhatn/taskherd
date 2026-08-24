@@ -229,7 +229,9 @@ func (b *Board) renderAdd() string {
 		statusLabel = fmt.Sprintf("%s (%s)", col.Label, col.ID)
 	}
 
-	width := b.modalWidth(80)
+	// Wide enough for the key help to land whole, which is where the modal says which key inserts
+	// a line break on this terminal.
+	width := b.modalWidth(84)
 	inner := modalInner(width)
 
 	var lines []string
