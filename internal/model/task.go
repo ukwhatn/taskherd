@@ -107,11 +107,6 @@ func (t Timestamp) Time() (time.Time, error) {
 	return time.Parse(time.RFC3339, string(t))
 }
 
-// Time converts the Date to midnight local time.
-func (d Date) Time() (time.Time, error) {
-	return time.ParseInLocation(dateLayout, string(d), time.Local)
-}
-
 // ParseFile parses tasks.json bytes and applies the validation rules.
 func ParseFile(data []byte) (*File, error) {
 	var f File

@@ -100,14 +100,3 @@ func (cs Columns) IDs() []string {
 	}
 	return ids
 }
-
-// OpenIDs returns the ids of open columns in definition order.
-func (cs Columns) OpenIDs() []string {
-	ids := make([]string, 0, len(cs))
-	for _, col := range cs {
-		if col.Kind == ColumnKindOpen {
-			ids = append(ids, col.ID)
-		}
-	}
-	return ids
-}
