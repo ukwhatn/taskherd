@@ -12,34 +12,48 @@ import (
 // cardHeight is how many lines one card occupies: a title line and a meta line.
 const cardHeight = 2
 
+const boardHelp = "←→ 列  ↑↓ カード  tab 移行  enter 詳細  a 追加  delete 削除  g jump  r/R 取得  t 折り畳み  q 終了"
+
 // View renders the whole board. AltScreen is declared here rather than entered with a command,
-// which is how bubbletea v2 handles terminal state.
+// which is how bubbletea v2 handles terminal state. Bracketed paste stays on (the default), which
+// is what turns a paste into a single tea.PasteMsg instead of a burst of key presses.
 func (b *Board) View() tea.View {
 	view := tea.NewView(b.render())
 	view.AltScreen = true
 	return view
 }
 
+// render draws the screen that has the keyboard, with any overlay layered onto the screen it was
+// opened from.
 func (b *Board) render() string {
-	if b.mode == modeDetail {
-		return b.renderDetail()
+	overlay := ""
+	switch b.mode {
+	case modeStatusSelect, modeSessionSelect, modeJump, modeConfirm:
+		overlay = b.renderOverlay()
+	case modeAdd:
+		return b.renderAdd()
+	}
+	if b.baseMode() == modeDetail {
+		return b.renderDetail(overlay)
+	}
+	return b.renderBoard(overlay)
+}
+
+func (b *Board) renderBoard(overlay string) string {
+	overlayHeight := 0
+	if overlay != "" {
+		overlayHeight = lipgloss.Height(overlay) + 1
 	}
 
-	prompt := b.renderPrompt()
-	promptHeight := 0
-	if prompt != "" {
-		promptHeight = lipgloss.Height(prompt) + 1
-	}
-
-	// One line for the column headers, two for the footer, plus whatever the prompt needs.
-	bodyHeight := b.height - 3 - promptHeight
+	// One line for the column headers, two for the footer, plus whatever the overlay needs.
+	bodyHeight := b.height - 3 - overlayHeight
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
 
 	sections := []string{b.renderColumns(bodyHeight)}
-	if prompt != "" {
-		sections = append(sections, prompt)
+	if overlay != "" {
+		sections = append(sections, overlay)
 	}
 	sections = append(sections, b.renderFooter())
 	return strings.Join(sections, "\n")
@@ -64,7 +78,7 @@ func (b *Board) renderColumns(bodyHeight int) string {
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 	if layout.Start > 0 || layout.End() < len(b.columns) {
-		body += "\n" + b.styles.dim.Render(fmt.Sprintf("… 列 %d-%d / %d（h/l で移動）",
+		body += "\n" + b.styles.dim.Render(fmt.Sprintf("… 列 %d-%d / %d（←→ で移動）",
 			layout.Start+1, layout.End(), len(b.columns)))
 	}
 	return body
@@ -157,13 +171,15 @@ func (b *Board) renderMeta(segments []Segment, width int) string {
 	return strings.Join(parts, " ")
 }
 
-// renderPrompt draws whatever overlay has the keyboard: a text input, the session picker or a
-// confirmation. The board stays visible above it so the user keeps their context.
-func (b *Board) renderPrompt() string {
+// renderOverlay draws whichever picker or confirmation has the keyboard. The screen it was opened
+// from stays visible above it so the user keeps their context.
+func (b *Board) renderOverlay() string {
 	switch b.mode {
-	case modeInput:
-		return b.styles.prompt.Render(b.inputPrompt()) + "\n" + b.input.View() +
-			"\n" + b.styles.dim.Render("enter 確定 / esc 取消")
+	case modeStatusSelect:
+		return b.renderStatusSelect()
+
+	case modeSessionSelect:
+		return b.renderSessionSelect()
 
 	case modeJump:
 		lines := []string{b.styles.prompt.Render(fmt.Sprintf("#%d の移動先セッション", b.jump.taskID))}
@@ -182,7 +198,7 @@ func (b *Board) renderPrompt() string {
 			}
 			lines = append(lines, fmt.Sprintf("%s%s %s  %s  %s", marker, session.Agent, shortID(session.SessionID), state, label))
 		}
-		lines = append(lines, b.styles.dim.Render("j/k 選択 / enter 決定 / esc 取消"))
+		lines = append(lines, b.styles.dim.Render("↑↓ 選択 / enter 決定 / esc 取消"))
 		return strings.Join(lines, "\n")
 
 	case modeConfirm:
@@ -195,8 +211,6 @@ func (b *Board) renderPrompt() string {
 
 // renderFooter shows the key help plus when each live source was last heard from.
 func (b *Board) renderFooter() string {
-	help := "h/l 列 j/k カード H/L 移動 enter 詳細 g jump a 追加 n note x リンク r/R 取得 t 折り畳み q 終了"
-
 	sync := []string{fmt.Sprintf("herdr: %s", b.herdrFooter())}
 	if b.deps.Links != nil {
 		sync = append(sync, fmt.Sprintf("live: %s", b.fetchFooter()))
@@ -204,13 +218,18 @@ func (b *Board) renderFooter() string {
 
 	statusLine := b.styles.dim.Render(strings.Join(sync, "  "))
 	if b.status != "" {
-		style := b.styles.status
-		if b.statusIsError {
-			style = b.styles.alert
-		}
-		statusLine = style.Render(truncate(b.status, b.width)) + "  " + statusLine
+		statusLine = b.statusLine() + "  " + statusLine
 	}
-	return b.styles.footer.Render(truncate(help, b.width)) + "\n" + truncate(statusLine, b.width)
+	return b.styles.footer.Render(truncate(boardHelp, b.width)) + "\n" + truncate(statusLine, b.width)
+}
+
+// statusLine renders the last message the board reported, in the style its severity calls for.
+func (b *Board) statusLine() string {
+	style := b.styles.status
+	if b.statusIsError {
+		style = b.styles.alert
+	}
+	return style.Render(truncate(b.status, b.width))
 }
 
 func (b *Board) herdrFooter() string {

@@ -134,6 +134,17 @@ func (p *picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return p.handleKey(msg)
 
+	case tea.PasteMsg:
+		// A paste is not a key press, so it has to be routed to the filter explicitly or it is
+		// dropped on the floor.
+		if p.linking {
+			return p, nil
+		}
+		updated, cmd := p.filter.Update(msg)
+		p.filter = updated
+		p.applyFilter()
+		return p, cmd
+
 	case pickerTasksLoadedMsg:
 		if msg.err != nil {
 			p.loadErr = msg.err
@@ -161,12 +172,12 @@ func (p *picker) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "esc":
 		return p, tea.Quit
-	case "up", "ctrl+p":
+	case "up":
 		if p.cursor > 0 {
 			p.cursor--
 		}
 		return p, nil
-	case "down", "ctrl+n":
+	case "down":
 		if p.cursor < len(p.filtered)-1 {
 			p.cursor++
 		}

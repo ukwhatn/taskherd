@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
@@ -26,23 +26,18 @@ const (
 // resumeAgent is the only agent taskherd knows how to resume, matching the CLI's jump.
 const resumeAgent = "claude"
 
+// mode is the screen that has the keyboard. modeBoard, modeDetail and modeAdd are full screens;
+// the rest are overlays drawn on top of whichever of those opened them (overlayBack).
 type mode int
 
 const (
 	modeBoard mode = iota
 	modeDetail
-	modeInput
+	modeAdd
+	modeStatusSelect
+	modeSessionSelect
 	modeJump
 	modeConfirm
-)
-
-type inputKind int
-
-const (
-	inputAddTask inputKind = iota
-	inputAddLink
-	inputEditTitle
-	inputEditDue
 )
 
 // Board is the kanban board program.
@@ -74,12 +69,16 @@ type Board struct {
 	width  int
 	height int
 
-	mode      mode
-	input     textinput.Model
-	inputKind inputKind
-	detail    viewport.Model
-	jump      jumpState
-	confirm   confirmState
+	mode mode
+	// overlayBack is the screen the open overlay was launched from, and the one it returns to.
+	overlayBack mode
+
+	detail     detailState
+	add        addState
+	statusSel  statusSelectState
+	sessionSel sessionSelectState
+	jump       jumpState
+	confirm    confirmState
 
 	collapseTerminal bool
 	fetching         bool
@@ -102,20 +101,30 @@ type jumpState struct {
 	cursor   int
 }
 
-// confirmState is the yes/no prompt shown before a resume launches a new pane.
+// confirmKind is what a yes/no prompt will do when answered yes.
+type confirmKind int
+
+const (
+	confirmResume confirmKind = iota
+	confirmDeleteTask
+	confirmUnlinkLink
+	confirmUnlinkSession
+)
+
+// confirmState is the yes/no prompt shown before an irreversible or pane-creating action.
 type confirmState struct {
+	kind   confirmKind
 	prompt string
 	taskID int
-	// title labels the tab the resume creates.
+	// title labels the tab a resume creates.
 	title   string
 	session model.SessionRef
+	// ref identifies what an unlink acts on: a link URL or a session id.
+	ref string
 }
 
 // New builds a board over the given ports.
 func New(ctx context.Context, deps Deps, settings Settings) *Board {
-	input := textinput.New()
-	input.Prompt = "> "
-
 	return &Board{
 		ctx:      ctx,
 		deps:     deps,
@@ -128,12 +137,21 @@ func New(ctx context.Context, deps Deps, settings Settings) *Board {
 		cacheLoaded:      deps.Cache == nil,
 		selected:         map[string]int{},
 		offsets:          map[string]int{},
-		input:            input,
-		detail:           viewport.New(),
 		collapseTerminal: true,
 		width:            80,
 		height:           24,
 	}
+}
+
+// newFieldInput builds a text field for the modals. The suggestion bindings are cleared because
+// the modals hand ↑↓ and Tab to item navigation.
+func newFieldInput() textinput.Model {
+	input := textinput.New()
+	input.Prompt = "> "
+	input.KeyMap.NextSuggestion = key.NewBinding()
+	input.KeyMap.PrevSuggestion = key.NewBinding()
+	input.KeyMap.AcceptSuggestion = key.NewBinding()
+	return input
 }
 
 // Init loads the initial data and starts listening to every live source.
@@ -155,16 +173,18 @@ func (b *Board) Init() tea.Cmd {
 }
 
 // Update routes a message. Key handling is delegated per mode so that the board's own bindings
-// never fire while a prompt has the keyboard.
+// never fire while a modal has the keyboard.
 func (b *Board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		b.width, b.height = msg.Width, msg.Height
-		b.resizeDetail()
 		return b, nil
 
 	case tea.KeyPressMsg:
 		return b.handleKey(msg)
+
+	case tea.PasteMsg:
+		return b.handlePaste(msg)
 
 	case tasksLoadedMsg:
 		return b, b.applyTasks(msg)
@@ -199,6 +219,10 @@ func (b *Board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case editorDoneMsg:
 		return b, b.applyEditor(msg)
 
+	case agentsLoadedMsg:
+		b.applyAgents(msg)
+		return b, nil
+
 	case statusMsg:
 		b.setStatus(msg.text, msg.isError)
 		return b, nil
@@ -211,56 +235,58 @@ func (b *Board) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return b, tea.Quit
 	}
 	switch b.mode {
-	case modeInput:
-		return b.handleInputKey(msg)
+	case modeDetail:
+		return b.handleDetailKey(msg)
+	case modeAdd:
+		return b.handleAddKey(msg)
+	case modeStatusSelect:
+		return b.handleStatusSelectKey(msg)
+	case modeSessionSelect:
+		return b.handleSessionSelectKey(msg)
 	case modeJump:
 		return b.handleJumpKey(msg)
 	case modeConfirm:
 		return b.handleConfirmKey(msg)
-	case modeDetail:
-		return b.handleDetailKey(msg)
 	default:
 		return b.handleBoardKey(msg)
 	}
+}
+
+// handlePaste hands bracketed paste to whichever text field has the keyboard. A PasteMsg is not a
+// key press, so without this route it never reaches an input and the paste is silently dropped.
+func (b *Board) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	switch b.mode {
+	case modeDetail:
+		return b.pasteIntoDetail(msg)
+	case modeAdd:
+		return b.pasteIntoAdd(msg)
+	}
+	return b, nil
 }
 
 func (b *Board) handleBoardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
 		return b, tea.Quit
-	case "h", "left":
+	case "left":
 		b.moveColumn(-1)
-	case "l", "right":
+	case "right":
 		b.moveColumn(1)
-	case "j", "down":
+	case "down":
 		b.moveCard(1)
-	case "k", "up":
+	case "up":
 		b.moveCard(-1)
-	case "H":
-		return b, b.moveTaskCmd(-1)
-	case "L":
-		return b, b.moveTaskCmd(1)
+	case "tab":
+		return b, b.beginStatusSelect()
 	case "t":
 		b.collapseTerminal = !b.collapseTerminal
 		b.rebuild()
 	case "enter":
-		if b.currentTask() == nil {
-			b.setStatus("カードが選択されていない", true)
-			return b, nil
-		}
-		b.mode = modeDetail
-		b.detail.SetYOffset(0)
-		b.resizeDetail()
+		return b, b.openDetail()
 	case "a":
-		b.beginInput(inputAddTask)
-	case "x":
-		if b.currentTask() == nil {
-			b.setStatus("カードが選択されていない", true)
-			return b, nil
-		}
-		b.beginInput(inputAddLink)
-	case "n":
-		return b, b.editNoteCmd()
+		return b, b.beginAdd()
+	case "backspace", "delete":
+		return b, b.beginDeleteTask()
 	case "g":
 		return b, b.beginJump()
 	case "r":
@@ -271,98 +297,84 @@ func (b *Board) handleBoardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return b, nil
 }
 
-func (b *Board) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "q":
-		b.mode = modeBoard
-		return b, nil
-	case "e":
-		b.beginInput(inputEditTitle)
-		return b, nil
-	case "d":
-		b.beginInput(inputEditDue)
-		return b, nil
-	case "x":
-		b.beginInput(inputAddLink)
-		return b, nil
-	case "n":
-		return b, b.editNoteCmd()
-	case "g":
-		return b, b.beginJump()
-	case "r":
-		return b, b.refreshTaskCmd()
-	}
+// --- overlays ----------------------------------------------------------------
 
-	updated, cmd := b.detail.Update(msg)
-	b.detail = updated
-	return b, cmd
+// baseMode is the full screen underneath: the current screen when nothing is layered on it, and
+// the screen the overlay was opened from otherwise.
+func (b *Board) baseMode() mode {
+	switch b.mode {
+	case modeStatusSelect, modeSessionSelect, modeJump, modeConfirm:
+		return b.overlayBack
+	default:
+		return b.mode
+	}
 }
 
-func (b *Board) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		b.mode = b.inputReturnMode()
-		b.input.Blur()
-		return b, nil
-	case "enter":
-		value := strings.TrimSpace(b.input.Value())
-		kind := b.inputKind
-		b.mode = b.inputReturnMode()
-		b.input.Blur()
-		return b, b.submitInput(kind, value)
-	}
-
-	updated, cmd := b.input.Update(msg)
-	b.input = updated
-	return b, cmd
+func (b *Board) openOverlay(m mode) {
+	b.overlayBack = b.baseMode()
+	b.mode = m
 }
 
-func (b *Board) handleJumpKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "q":
-		b.mode = modeBoard
-		return b, nil
-	case "j", "down":
-		if b.jump.cursor < len(b.jump.sessions)-1 {
-			b.jump.cursor++
-		}
-		return b, nil
-	case "k", "up":
-		if b.jump.cursor > 0 {
-			b.jump.cursor--
-		}
-		return b, nil
-	case "enter":
-		target := b.jump
-		b.mode = modeBoard
-		return b, b.jumpTo(target.taskID, target.title, target.sessions[target.cursor])
-	}
-	return b, nil
+func (b *Board) closeOverlay() {
+	b.mode = b.overlayBack
+}
+
+func (b *Board) openConfirm(state confirmState) {
+	b.confirm = state
+	b.openOverlay(modeConfirm)
 }
 
 func (b *Board) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch strings.ToLower(msg.String()) {
 	case "y":
 		state := b.confirm
-		b.mode = modeBoard
-		return b, b.resumeCmd(state)
-	case "n", "esc", "q":
-		b.mode = modeBoard
+		b.closeOverlay()
+		return b, b.runConfirm(state)
+	case "n", "esc":
+		b.closeOverlay()
 		b.setStatus("中止した", false)
 		return b, nil
 	}
 	return b, nil
 }
 
-// inputReturnMode is the mode a prompt returns to: prompts opened from the detail view go back
-// to it rather than dropping the user out to the board.
-func (b *Board) inputReturnMode() mode {
-	switch b.inputKind {
-	case inputEditTitle, inputEditDue:
-		return modeDetail
-	default:
-		return modeBoard
+func (b *Board) runConfirm(state confirmState) tea.Cmd {
+	switch state.kind {
+	case confirmResume:
+		return b.resumeCmd(state)
+	case confirmDeleteTask:
+		return b.deleteTaskCmd(state.taskID)
+	case confirmUnlinkLink:
+		return b.removeLinkCmd(state.taskID, state.ref)
+	case confirmUnlinkSession:
+		return b.removeSessionCmd(state.taskID, state.ref)
 	}
+	return nil
+}
+
+// --- board actions -----------------------------------------------------------
+
+func (b *Board) openDetail() tea.Cmd {
+	task := b.currentTask()
+	if task == nil {
+		return status("カードが選択されていない", true)
+	}
+	b.mode = modeDetail
+	b.detail = newDetailState(task.ID)
+	return nil
+}
+
+func (b *Board) beginDeleteTask() tea.Cmd {
+	task := b.currentTask()
+	if task == nil {
+		return status("カードが選択されていない", true)
+	}
+	b.openConfirm(confirmState{
+		kind:   confirmDeleteTask,
+		prompt: fmt.Sprintf("#%d %s を削除する", task.ID, task.Title),
+		taskID: task.ID,
+	})
+	return nil
 }
 
 // --- selection ---------------------------------------------------------------
@@ -419,6 +431,32 @@ func (b *Board) currentTask() *model.Task {
 	return &task
 }
 
+// taskByID looks a task up in the board's current data.
+func (b *Board) taskByID(id int) *model.Task {
+	for i := range b.file.Tasks {
+		if b.file.Tasks[i].ID == id {
+			task := b.file.Tasks[i]
+			return &task
+		}
+	}
+	return nil
+}
+
+// detailOpen reports whether the detail modal is the screen in play, overlay or not.
+func (b *Board) detailOpen() bool {
+	return b.baseMode() == modeDetail
+}
+
+// activeTask is the task the keyboard acts on: the one the detail modal is pinned to while it is
+// open, and the focused card otherwise. Pinning by id keeps the modal on its own task even when
+// an edit moves that card to another column.
+func (b *Board) activeTask() *model.Task {
+	if b.detailOpen() {
+		return b.taskByID(b.detail.taskID)
+	}
+	return b.currentTask()
+}
+
 // rebuild recomputes the columns from the current data and re-anchors the selection.
 func (b *Board) rebuild() {
 	b.columns = BuildColumns(b.file.Tasks, b.settings.Columns, b.collapseTerminal)
@@ -436,19 +474,6 @@ func (b *Board) rebuild() {
 	if b.colIdx < 0 {
 		b.colIdx = 0
 	}
-}
-
-func (b *Board) resizeDetail() {
-	width := b.width - 2
-	if width < 10 {
-		width = 10
-	}
-	height := b.height - 4
-	if height < 3 {
-		height = 3
-	}
-	b.detail.SetWidth(width)
-	b.detail.SetHeight(height)
 }
 
 func (b *Board) setStatus(text string, isError bool) {
@@ -474,6 +499,12 @@ func (b *Board) applyTasks(msg tasksLoadedMsg) tea.Cmd {
 	// means re-deriving them: a link the CLI just added has to pick up its cached value.
 	b.rebuildLinks()
 	b.tasksLoaded = true
+
+	// The detail modal is pinned to a task id, so a task deleted underneath it (by the CLI, or
+	// by another session) has to close it rather than leave it on nothing.
+	if b.detailOpen() && b.taskByID(b.detail.taskID) == nil {
+		b.mode = modeBoard
+	}
 
 	// A change that may have added a link needs a fetch of its own: waiting for the next
 	// background cycle would leave the new link blank for minutes.
@@ -623,46 +654,7 @@ func (b *Board) applyEditor(msg editorDoneMsg) tea.Cmd {
 	})
 }
 
-// --- input submission --------------------------------------------------------
-
-func (b *Board) beginInput(kind inputKind) {
-	b.inputKind = kind
-	b.mode = modeInput
-	b.input.Reset()
-
-	task := b.currentTask()
-	switch kind {
-	case inputEditTitle:
-		if task != nil {
-			b.input.SetValue(task.Title)
-		}
-	case inputEditDue:
-		if task != nil && task.Due != nil {
-			b.input.SetValue(string(*task.Due))
-		}
-	}
-	b.input.CursorEnd()
-	b.input.Focus()
-}
-
-func (b *Board) inputPrompt() string {
-	switch b.inputKind {
-	case inputAddTask:
-		col, ok := b.targetColumn()
-		if !ok {
-			return "新しいタスクのタイトル"
-		}
-		return fmt.Sprintf("新しいタスクのタイトル（%s）", col.Label)
-	case inputAddLink:
-		return "追加するリンクの URL"
-	case inputEditTitle:
-		return "タイトル"
-	case inputEditDue:
-		return "期日（YYYY-MM-DD。空で削除）"
-	default:
-		return ""
-	}
-}
+// --- mutations ---------------------------------------------------------------
 
 // targetColumn is the column a new task lands in. The (unknown) column is not a status a task can
 // be created with, so the first real column stands in for it.
@@ -678,80 +670,111 @@ func (b *Board) targetColumn() (Column, bool) {
 	return Column{}, false
 }
 
-func (b *Board) submitInput(kind inputKind, value string) tea.Cmd {
-	switch kind {
-	case inputAddTask:
-		return b.addTaskCmd(value)
-	case inputAddLink:
-		return b.addLinkCmd(value)
-	case inputEditTitle:
-		return b.editTitleCmd(value)
-	case inputEditDue:
-		return b.editDueCmd(value)
+// selectableColumns are the columns a task can actually hold as a status: every built column
+// except the synthetic (unknown) one, terminal columns included.
+func selectableColumns(columns []Column) []Column {
+	targets := make([]Column, 0, len(columns))
+	for _, col := range columns {
+		if !col.Unknown {
+			targets = append(targets, col)
+		}
 	}
-	return nil
+	return targets
 }
 
-func (b *Board) addTaskCmd(title string) tea.Cmd {
-	if title == "" {
+func statusIndex(targets []Column, status string) int {
+	for i, col := range targets {
+		if col.ID == status {
+			return i
+		}
+	}
+	return -1
+}
+
+// addTasksCmd creates every title in one transaction, so a batch paste takes the store lock once
+// and either lands whole or not at all. The remaining attributes, links included, apply to all of
+// them.
+func (b *Board) addTasksCmd(titles []string, in model.TaskInput, urls []string) tea.Cmd {
+	if len(titles) == 0 {
 		return nil
 	}
-	col, ok := b.targetColumn()
-	if !ok {
-		return status("列が定義されていないためタスクを作成できない", true)
-	}
-
 	now := b.deps.now()
-	created := 0
+	var created []int
 	return b.mutateCmd(mutation{
 		apply: func(f *model.File) error {
-			task, err := f.AddTask(model.TaskInput{Title: title, Status: col.ID}, now)
-			if err != nil {
-				return err
+			created = created[:0]
+			for _, title := range titles {
+				spec := in
+				spec.Title = title
+				task, err := f.AddTask(spec, now)
+				if err != nil {
+					return err
+				}
+				for _, url := range urls {
+					if _, err := task.AddLink(url, b.settings.Classifier.Classify(url), "", now); err != nil {
+						return err
+					}
+				}
+				created = append(created, task.ID)
 			}
-			created = task.ID
 			return nil
 		},
-		note:  func() string { return fmt.Sprintf("#%d を %s に作成した", created, col.ID) },
-		focus: func() int { return created },
+		note: func() string {
+			if len(created) == 1 {
+				return fmt.Sprintf("#%d を %s に作成した", created[0], in.Status)
+			}
+			return fmt.Sprintf("%d 件のタスクを %s に作成した", len(created), in.Status)
+		},
+		focus: func() int {
+			if len(created) == 0 {
+				return 0
+			}
+			return created[0]
+		},
+		refresh: true,
 	})
 }
 
-func (b *Board) addLinkCmd(rawURL string) tea.Cmd {
-	if rawURL == "" {
+// addLinksCmd attaches a whole batch of URLs at once. A URL already on the task is skipped rather
+// than failing the batch: re-pasting a list that overlaps what is there should not be an error.
+func (b *Board) addLinksCmd(taskID int, urls []string) tea.Cmd {
+	if len(urls) == 0 {
 		return nil
 	}
-	task := b.currentTask()
-	if task == nil {
-		return status("カードが選択されていない", true)
-	}
-	if !strings.Contains(rawURL, "://") {
-		return status("URL はスキームを含めて指定する（例: https://github.com/owner/repo/pull/1）", true)
-	}
-
-	taskID := task.ID
-	kind := b.settings.Classifier.Classify(rawURL)
 	now := b.deps.now()
+	added := 0
 	return b.mutateCmd(mutation{
 		apply: func(f *model.File) error {
 			target, err := f.Task(taskID)
 			if err != nil {
 				return err
 			}
-			_, err = target.AddLink(rawURL, kind, "", now)
-			return err
+			added = 0
+			for _, url := range urls {
+				if _, exists := linkByURL(target.Links, url); exists {
+					continue
+				}
+				if _, err := target.AddLink(url, b.settings.Classifier.Classify(url), "", now); err != nil {
+					return err
+				}
+				added++
+			}
+			return nil
 		},
-		note:    func() string { return fmt.Sprintf("#%d に %s リンクを追加した", taskID, kind) },
+		note: func() string {
+			if added == len(urls) {
+				return fmt.Sprintf("#%d に %d 件のリンクを追加した", taskID, added)
+			}
+			return fmt.Sprintf("#%d に %d 件のリンクを追加した（%d 件は登録済み）", taskID, added, len(urls)-added)
+		},
 		refresh: true,
 	})
 }
 
-func (b *Board) editTitleCmd(title string) tea.Cmd {
-	task := b.currentTask()
-	if task == nil || title == "" {
-		return nil
+func (b *Board) setTitleCmd(taskID int, title string) tea.Cmd {
+	if strings.TrimSpace(title) == "" {
+		return status("タイトルは空にできない", true)
 	}
-	taskID := task.ID
 	now := b.deps.now()
 	return b.mutateCmd(mutation{
 		apply: func(f *model.File) error {
@@ -765,22 +788,16 @@ func (b *Board) editTitleCmd(title string) tea.Cmd {
 	})
 }
 
-func (b *Board) editDueCmd(raw string) tea.Cmd {
-	task := b.currentTask()
-	if task == nil {
-		return nil
-	}
-
+func (b *Board) setDueCmd(taskID int, raw string) tea.Cmd {
 	var due *model.Date
-	if raw != "" {
-		parsed, err := model.ParseDate(raw)
+	if trimmed := strings.TrimSpace(raw); trimmed != "" {
+		parsed, err := model.ParseDate(trimmed)
 		if err != nil {
 			return status(err.Error(), true)
 		}
 		due = &parsed
 	}
 
-	taskID := task.ID
 	now := b.deps.now()
 	return b.mutateCmd(mutation{
 		apply: func(f *model.File) error {
@@ -795,35 +812,93 @@ func (b *Board) editDueCmd(raw string) tea.Cmd {
 	})
 }
 
-// moveTaskCmd shifts the focused card into the neighbouring column, changing its status.
-func (b *Board) moveTaskCmd(delta int) tea.Cmd {
-	task := b.currentTask()
-	if task == nil {
-		return nil
-	}
-	target, ok := moveTarget(b.columns, b.colIdx, delta)
-	if !ok {
-		return nil
-	}
-
-	taskID := task.ID
+func (b *Board) setStatusCmd(taskID int, statusID string) tea.Cmd {
 	now := b.deps.now()
 	return b.mutateCmd(mutation{
 		apply: func(f *model.File) error {
-			moved, err := f.Task(taskID)
+			target, err := f.Task(taskID)
 			if err != nil {
 				return err
 			}
-			return moved.SetStatus(target.ID, now)
+			return target.SetStatus(statusID, now)
 		},
-		note:  func() string { return fmt.Sprintf("#%d を %s へ移動した", taskID, target.ID) },
+		note:  func() string { return fmt.Sprintf("#%d を %s へ移動した", taskID, statusID) },
 		focus: func() int { return taskID },
 	})
 }
 
-// editNoteCmd opens the focused task's note in $EDITOR, suspending the board while it runs.
+func (b *Board) setLinkNoteCmd(taskID int, url, note string) tea.Cmd {
+	now := b.deps.now()
+	return b.mutateCmd(mutation{
+		apply: func(f *model.File) error {
+			target, err := f.Task(taskID)
+			if err != nil {
+				return err
+			}
+			return target.SetLinkNote(url, note, now)
+		},
+		note: func() string { return fmt.Sprintf("#%d のリンクメモを更新した", taskID) },
+	})
+}
+
+func (b *Board) deleteTaskCmd(taskID int) tea.Cmd {
+	return b.mutateCmd(mutation{
+		apply: func(f *model.File) error {
+			_, err := f.RemoveTask(taskID)
+			return err
+		},
+		note: func() string { return fmt.Sprintf("#%d を削除した", taskID) },
+	})
+}
+
+func (b *Board) removeLinkCmd(taskID int, url string) tea.Cmd {
+	now := b.deps.now()
+	return b.mutateCmd(mutation{
+		apply: func(f *model.File) error {
+			target, err := f.Task(taskID)
+			if err != nil {
+				return err
+			}
+			_, err = target.RemoveLink(url, now)
+			return err
+		},
+		note: func() string { return fmt.Sprintf("#%d のリンクを解除した", taskID) },
+	})
+}
+
+func (b *Board) removeSessionCmd(taskID int, sessionID string) tea.Cmd {
+	now := b.deps.now()
+	return b.mutateCmd(mutation{
+		apply: func(f *model.File) error {
+			target, err := f.Task(taskID)
+			if err != nil {
+				return err
+			}
+			_, err = target.RemoveSession(sessionID, now)
+			return err
+		},
+		note: func() string { return fmt.Sprintf("#%d のセッション紐づけを解除した", taskID) },
+	})
+}
+
+func (b *Board) addSessionCmd(taskID int, ref model.SessionRef) tea.Cmd {
+	now := b.deps.now()
+	return b.mutateCmd(mutation{
+		apply: func(f *model.File) error {
+			target, err := f.Task(taskID)
+			if err != nil {
+				return err
+			}
+			_, err = target.AddSession(ref, now)
+			return err
+		},
+		note: func() string { return fmt.Sprintf("#%d に %s セッションを紐づけた", taskID, ref.Agent) },
+	})
+}
+
+// editNoteCmd opens the task's note in $EDITOR, suspending the board while it runs.
 func (b *Board) editNoteCmd() tea.Cmd {
-	task := b.currentTask()
+	task := b.activeTask()
 	if task == nil {
 		return status("カードが選択されていない", true)
 	}
@@ -864,6 +939,15 @@ func writeTempNote(id int, note string) (string, error) {
 		return "", fmt.Errorf("一時ファイルを閉じられない: %w", err)
 	}
 	return tmp.Name(), nil
+}
+
+func linkByURL(links []model.Link, url string) (model.Link, bool) {
+	for _, link := range links {
+		if link.URL == url {
+			return link, true
+		}
+	}
+	return model.Link{}, false
 }
 
 func allLinks(tasks []model.Task) []model.Link {

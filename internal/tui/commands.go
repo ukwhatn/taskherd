@@ -57,12 +57,29 @@ type (
 		err    error
 	}
 
+	// agentsLoadedMsg delivers the agents herdr currently reports, for the session picker.
+	agentsLoadedMsg struct {
+		agents []herdrc.Agent
+		err    error
+	}
+
 	// statusMsg puts a line on the footer without touching any data.
 	statusMsg struct {
 		text    string
 		isError bool
 	}
 )
+
+// fetchAgentsCmd asks herdr which agents exist right now, off the update loop.
+func (b *Board) fetchAgentsCmd() tea.Cmd {
+	return func() tea.Msg {
+		snapshot, err := b.deps.Herdr.Snapshot(b.ctx)
+		if err != nil {
+			return agentsLoadedMsg{err: err}
+		}
+		return agentsLoadedMsg{agents: snapshot.Agents}
+	}
+}
 
 func status(text string, isError bool) tea.Cmd {
 	return func() tea.Msg { return statusMsg{text: text, isError: isError} }
@@ -181,13 +198,13 @@ func (b *Board) refreshStaleCmd() tea.Cmd {
 	return b.fetchCmd(urls, false)
 }
 
-// refreshTaskCmd re-fetches the focused card's links regardless of the TTL: r is a manual
+// refreshTaskCmd re-fetches the active task's links regardless of the TTL: r is a manual
 // request, and the point of it is to bypass the cache.
 func (b *Board) refreshTaskCmd() tea.Cmd {
 	if b.deps.Links == nil {
 		return status("ライブ取得が無効になっている", true)
 	}
-	task := b.currentTask()
+	task := b.activeTask()
 	if task == nil {
 		return status("カードが選択されていない", true)
 	}

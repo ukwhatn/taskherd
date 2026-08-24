@@ -119,6 +119,9 @@ type fakeHerdr struct {
 	tokens      []tokenStamp
 	focusErr    error
 	startResult herdrc.StartResult
+	// snapshot is what Snapshot answers with; nil means an empty herdr.
+	snapshot    *herdrc.Snapshot
+	snapshotErr error
 }
 
 type tokenStamp struct {
@@ -127,6 +130,12 @@ type tokenStamp struct {
 }
 
 func (f *fakeHerdr) Snapshot(context.Context) (*herdrc.Snapshot, error) {
+	if f.snapshotErr != nil {
+		return nil, f.snapshotErr
+	}
+	if f.snapshot != nil {
+		return f.snapshot, nil
+	}
 	return &herdrc.Snapshot{}, nil
 }
 
@@ -255,6 +264,13 @@ func (h *harness) typeText(s string) {
 	}
 }
 
+// paste delivers one bracketed paste, the way a terminal does: a single PasteMsg rather than a
+// burst of key presses. As with typeText the cursor-blink command is dropped.
+func (h *harness) paste(content string) {
+	h.t.Helper()
+	h.dispatch(tea.PasteMsg{Content: content})
+}
+
 // run executes cmd and feeds every message it produces back into the board, following batches.
 // Commands whose whole purpose is to wait (the live source readers, the refresh timer) are
 // skipped: they never return on their own.
@@ -310,6 +326,10 @@ func keyMsg(name string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
 	case "backspace":
 		return tea.KeyPressMsg{Code: tea.KeyBackspace}
+	case "delete":
+		return tea.KeyPressMsg{Code: tea.KeyDelete}
+	case "tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab}
 	}
 
 	runes := []rune(name)
