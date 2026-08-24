@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"charm.land/lipgloss/v2"
@@ -130,4 +131,59 @@ func truncate(s string, width int) string {
 		total += w
 	}
 	return string(out) + truncateMark
+}
+
+// maxTitleLines is how many lines a card may spend on its title.
+//
+// One line is what made the board unreadable: a column on a split laptop screen holds under ten
+// Japanese characters per line, well short of a typical title. Two doubles that for the cost of
+// one line per card, and a third would buy less than it costs in cards per column.
+const maxTitleLines = 2
+
+// wrapTitle breaks s into at most maxLines lines of width display cells, marking the cut when the
+// text runs past the last of them.
+//
+// The break is by cell rather than by word: the titles are mostly Japanese, which has no spaces to
+// break on, and their ASCII is ids and URL fragments a word break would not help.
+func wrapTitle(s string, width, maxLines int) []string {
+	if width <= 0 || maxLines <= 0 {
+		return nil
+	}
+	runes := []rune(normalizeTitle(s))
+	if len(runes) == 0 {
+		return []string{""}
+	}
+
+	lines := make([]string, 0, maxLines)
+	for i := 0; i < len(runes); {
+		end := takeCells(runes, i, width)
+		// The last line carries whatever is left, and says so when that does not fit. So does a
+		// line too narrow for even one character, which has nothing to break on.
+		if len(lines) == maxLines-1 || end == i {
+			return append(lines, truncate(string(runes[i:]), width))
+		}
+		lines = append(lines, strings.TrimRight(string(runes[i:end]), " "))
+		for i = end; i < len(runes) && runes[i] == ' '; i++ {
+		}
+	}
+	return lines
+}
+
+// takeCells returns the end of the longest run of runes from start that fits in width cells.
+func takeCells(runes []rune, start, width int) int {
+	used, end := 0, start
+	for ; end < len(runes); end++ {
+		w := lipgloss.Width(string(runes[end]))
+		if used+w > width {
+			break
+		}
+		used += w
+	}
+	return end
+}
+
+// normalizeTitle folds a title's whitespace into single spaces, so one that arrived carrying a
+// newline is still drawn as the single heading a card treats it as.
+func normalizeTitle(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }

@@ -138,3 +138,67 @@ func TestTruncateCountsDisplayWidth(t *testing.T) {
 		})
 	}
 }
+
+func TestWrapTitleBreaksByCell(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       string
+		width    int
+		maxLines int
+		want     []string
+	}{
+		{"収まるなら 1 行", "abcdef", 6, 2, []string{"abcdef"}},
+		{"1 セル超えたら 2 行目へ", "abcdefg", 6, 2, []string{"abcdef", "g"}},
+		{"全角は 2 セルとして折る", "ab設計cd", 7, 2, []string{"ab設計c", "d"}},
+		{"最終行に入らない分は切る", "abcdefghij", 4, 2, []string{"abcd", "efg~"}},
+		{"改行と連続空白は 1 つの空白へ", "a\nb  c", 3, 2, []string{"a b", "c"}},
+		{"幅 1 でも ASCII なら折れる", "abc", 1, 2, []string{"a", "~"}},
+		{"幅 1 に全角は 1 文字も入らない", "設計", 1, 2, []string{"~"}},
+		{"幅 0", "abc", 0, 2, nil},
+		{"行数 0", "abc", 10, 0, nil},
+		{"1 行しか使えないなら切る", "abcdefg", 4, 1, []string{"abc~"}},
+		{"空のタイトルでも 1 行は返す", "   ", 10, 2, []string{""}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := wrapTitle(tc.in, tc.width, tc.maxLines)
+			if len(got) != len(tc.want) {
+				t.Fatalf("wrapTitle(%q,%d,%d) = %q, want %q", tc.in, tc.width, tc.maxLines, got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("wrapTitle(%q,%d,%d) = %q, want %q", tc.in, tc.width, tc.maxLines, got, tc.want)
+				}
+			}
+			for _, line := range got {
+				if w := lipgloss.Width(line); w > tc.width {
+					t.Errorf("行 %q の表示幅 = %d, want <= %d", line, w, tc.width)
+				}
+			}
+		})
+	}
+}
+
+// Whatever the title and the width, the wrap fits: every line inside the column and no more lines
+// than the card budgeted for.
+func TestWrapTitleStaysWithinBudget(t *testing.T) {
+	titles := []string{
+		"#12 設計する",
+		"#3 board のレイアウトを可読性から組み直す",
+		"#456 mixed 日本語 and ascii title that keeps going",
+		"#7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}
+	for _, title := range titles {
+		for width := 1; width <= 40; width++ {
+			got := wrapTitle(title, width, maxTitleLines)
+			if len(got) == 0 || len(got) > maxTitleLines {
+				t.Fatalf("wrapTitle(%q,%d) = %q, want 1..%d 行", title, width, got, maxTitleLines)
+			}
+			for _, line := range got {
+				if w := lipgloss.Width(line); w > width {
+					t.Fatalf("wrapTitle(%q,%d): 行 %q の幅 = %d", title, width, line, w)
+				}
+			}
+		}
+	}
+}

@@ -460,15 +460,19 @@ func (b *Board) beginDeleteTask() tea.Cmd {
 
 // --- selection ---------------------------------------------------------------
 
+// moveColumn walks the cursor to the next expanded column in the given direction.
+//
+// Folded columns are stepped over rather than landed on: they are drawn in the stack at the right
+// edge, hold no card to put a cursor on, and stopping the cursor on one would read as the arrow
+// keys having stuck.
 func (b *Board) moveColumn(delta int) {
-	if len(b.columns) == 0 {
+	for i := b.colIdx + delta; i >= 0 && i < len(b.columns); i += delta {
+		if b.columns[i].Collapsed {
+			continue
+		}
+		b.colIdx = i
 		return
 	}
-	next := b.colIdx + delta
-	if next < 0 || next >= len(b.columns) {
-		return
-	}
-	b.colIdx = next
 }
 
 func (b *Board) moveCard(delta int) {
@@ -549,12 +553,9 @@ func (b *Board) rebuild() {
 		}
 		b.focusTaskID = 0
 	}
-	if b.colIdx >= len(b.columns) {
-		b.colIdx = len(b.columns) - 1
-	}
-	if b.colIdx < 0 {
-		b.colIdx = 0
-	}
+	// The cursor may be pointing at a column that has just folded, or at one that has gone away
+	// with the last task that had an unknown status.
+	b.colIdx = nearestExpanded(b.columns, b.colIdx)
 }
 
 func (b *Board) setStatus(text string, isError bool) {
