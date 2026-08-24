@@ -52,6 +52,7 @@ func TestStateTones(t *testing.T) {
 
 		{"Issue open は緑", issueTone("OPEN"), SegGood},
 		{"Issue closed は紫", issueTone("CLOSED"), SegDone},
+		{"issues URL で貼った merged PR も紫", issueTone("MERGED"), SegDone},
 
 		{"Jira new は灰", jiraTone("new"), SegMuted},
 		{"Jira indeterminate は黄", jiraTone("indeterminate"), SegCaution},

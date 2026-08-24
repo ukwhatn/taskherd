@@ -63,11 +63,17 @@ func reviewTone(decision string) (SegmentKind, bool) {
 
 // issueTone colours an issue by its state. A closed issue is magenta, the same tone as a merged
 // PR, because both are the ordinary end of the thing's life; a closed PR is red because it is not.
+//
+// MERGED is answered here as well as in prStateTone: GitHub serves a pull request under an
+// /issues/ URL too, so a link written that way is classified as an issue and still comes back
+// merged. Without this it would be coloured as open, which is the one thing it is not.
 func issueTone(state string) SegmentKind {
-	if strings.EqualFold(state, "CLOSED") {
+	switch {
+	case strings.EqualFold(state, "CLOSED"), strings.EqualFold(state, "MERGED"):
 		return SegDone
+	default:
+		return SegGood
 	}
-	return SegGood
 }
 
 // jiraTone colours a Jira issue by its status category, which is the only part of a Jira status
