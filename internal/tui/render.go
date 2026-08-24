@@ -64,19 +64,19 @@ func (b *Board) renderColumns(bodyHeight int) string {
 		return b.styles.dim.Render("列が定義されていない")
 	}
 
-	density := ChooseDensity(b.columns, b.width)
+	density := ChooseDensity(b.columns, b.width, 0)
 	m := density.metrics()
-	layout := LayoutColumns(b.columns, b.colIdx, b.width-2*m.boardPad, density)
+	layout := LayoutColumns(b.columns, b.colIdx, b.width, 0, density)
 	if len(layout.Widths) == 0 {
-		return b.styles.dim.Render("端末が狭すぎて列を表示できない")
+		return b.styles.dim.Render(truncate("端末が狭すぎて列を表示できない", b.width))
 	}
 
 	// The sideways-scroll notice only appears when some column is off screen, and it costs the
 	// columns a line when it does.
 	notice := ""
 	if layout.Start > 0 || layout.End() < len(b.columns) {
-		notice = b.styles.dim.Render(fmt.Sprintf("%s 列 %d-%d / %d（%s で移動）",
-			truncateMark, layout.Start+1, layout.End(), len(b.columns), b.icons.horizontalKeys()))
+		notice = b.styles.dim.Render(truncate(fmt.Sprintf("%s 列 %d-%d / %d（%s で移動）",
+			truncateMark, layout.Start+1, layout.End(), len(b.columns), b.icons.horizontalKeys()), b.width))
 		bodyHeight--
 	}
 

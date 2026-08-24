@@ -364,3 +364,28 @@ func TestColumnWindowFollowsResize(t *testing.T) {
 		t.Errorf("リサイズ後の offset = %d, want < %d", wide, narrow)
 	}
 }
+
+// A terminal too narrow for even one readable column draws no columns at all, and says so without
+// pushing the message itself past the edge.
+func TestBoardSaysSoWhenNoColumnFits(t *testing.T) {
+	h := boardWithCards(t, 3)
+
+	for _, width := range []int{12, 16, 20, 25} {
+		t.Run(fmt.Sprintf("width%d", width), func(t *testing.T) {
+			h.board.width, h.board.height = width, 24
+			view := h.board.render()
+
+			if !strings.Contains(stripANSI(view), truncate("端末が狭すぎて列を表示できない", width)) {
+				t.Errorf("狭すぎる旨の表示が無い:\n%s", view)
+			}
+			if strings.Contains(view, "#1 ") {
+				t.Errorf("列を描けない幅なのにカードが出ている:\n%s", view)
+			}
+			for _, line := range strings.Split(view, "\n") {
+				if got := lipgloss.Width(line); got > width {
+					t.Fatalf("行幅 = %d, want <= %d: %q", got, width, line)
+				}
+			}
+		})
+	}
+}

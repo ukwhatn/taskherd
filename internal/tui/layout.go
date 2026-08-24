@@ -2,9 +2,11 @@ package tui
 
 // Density is how much decoration the board can afford at the terminal's current width.
 //
-// The board gives up decoration before it gives up columns: squeezing the gutters, then the card
-// boxes, keeps more of the board on screen than pushing a column off the edge and making the user
-// scroll sideways to reach it.
+// Every column the board draws is at least readableCardWidth cells of card text wide, whatever the
+// density: a column narrower than that cannot say enough of a title to tell one card from the next,
+// so it is worth less than the scroll it saves. What a density buys is how many such columns fit —
+// giving up the gutters, then the card boxes, frees a few cells per column — and the columns that
+// still do not fit are reached by scrolling sideways.
 type Density int
 
 const (
@@ -16,6 +18,14 @@ const (
 	// starts scrolling sideways.
 	DensityCompact
 )
+
+// readableCardWidth is the cells every drawn card keeps for its own text.
+//
+// Two lines of 24 cells carry 21 or 22 Japanese characters once `#id ` is taken out of them, which
+// is enough to tell one task from another at a glance. It is not enough for a whole title and is
+// not meant to be: the point is to hold the width at which a column stops being readable, in one
+// place, so that the board spends a scroll rather than the words.
+const readableCardWidth = 24
 
 // metrics are the cell budgets one density renders with.
 type metrics struct {
@@ -29,20 +39,47 @@ type metrics struct {
 	cardGap int
 	// boardPad is the margin at the board's left and right edge.
 	boardPad int
-	// minColumn is the narrowest an expanded column may get, collapsed the same for a folded one.
-	minColumn int
-	collapsed int
+	// minCardContentWidth is the narrowest a card's own text may get in this density.
+	minCardContentWidth int
 }
 
 func (d Density) metrics() metrics {
 	switch d {
 	case DensityTight:
-		return metrics{boxed: true, padX: 0, gap: 1, cardGap: 1, boardPad: 1, minColumn: 17, collapsed: 12}
+		return metrics{boxed: true, padX: 0, gap: 1, cardGap: 1, boardPad: 1, minCardContentWidth: readableCardWidth}
 	case DensityCompact:
-		return metrics{boxed: false, padX: 0, gap: 1, cardGap: 1, boardPad: 0, minColumn: 15, collapsed: 10}
+		return metrics{boxed: false, padX: 0, gap: 1, cardGap: 1, boardPad: 0, minCardContentWidth: readableCardWidth}
 	default:
-		return metrics{boxed: true, padX: 1, gap: 2, cardGap: 1, boardPad: 1, minColumn: 22, collapsed: 14}
+		return metrics{boxed: true, padX: 1, gap: 2, cardGap: 1, boardPad: 1, minCardContentWidth: readableCardWidth}
 	}
+}
+
+// minColumn is the narrowest a column may get: the readable card width plus whatever this density
+// spends on decoration around it. It is the inverse of cardInner.
+func (m metrics) minColumn() int {
+	if m.boxed {
+		return m.minCardContentWidth + 2 + 2*m.padX
+	}
+	return m.minCardContentWidth + 2
+}
+
+// columnViewportWidth is the cells the columns themselves have at a terminal of total width: the
+// board's own margins and the folded-column stack at the right edge come out of it first.
+//
+// Both ChooseDensity and LayoutColumns measure from here, so the width a density was chosen for
+// cannot drift from the width the columns are then laid out in.
+func columnViewportWidth(total int, m metrics, stackWidth int) int {
+	return total - 2*m.boardPad - stackWidth - collapsedStackGap(stackWidth, m)
+}
+
+// collapsedStackGap is the gutter between the rightmost column and the folded-column stack.
+// lipgloss joins blocks flush against each other, so the board spends those cells itself, and only
+// when there is a stack to separate.
+func collapsedStackGap(stackWidth int, m metrics) int {
+	if stackWidth <= 0 {
+		return 0
+	}
+	return m.gap
 }
 
 // ChooseDensity picks the decoration level for a terminal of the given width: whichever puts the
@@ -50,20 +87,20 @@ func (d Density) metrics() metrics {
 //
 // The count is always taken from the leftmost column rather than from the visible window, so that
 // scrolling sideways cannot change how the whole board is drawn under the user.
-func ChooseDensity(columns []Column, total int) Density {
+func ChooseDensity(columns []Column, total, stackWidth int) Density {
 	best := DensityRoomy
-	bestFit := densityFit(columns, total, best)
+	bestFit := densityFit(columns, total, stackWidth, best)
 	for _, d := range []Density{DensityTight, DensityCompact} {
-		if fit := densityFit(columns, total, d); fit > bestFit {
+		if fit := densityFit(columns, total, stackWidth, d); fit > bestFit {
 			best, bestFit = d, fit
 		}
 	}
 	return best
 }
 
-func densityFit(columns []Column, total int, d Density) int {
+func densityFit(columns []Column, total, stackWidth int, d Density) int {
 	m := d.metrics()
-	return fitFrom(columns, 0, total-2*m.boardPad, m)
+	return fitFrom(columns, 0, columnViewportWidth(total, m, stackWidth), m)
 }
 
 // Layout is the horizontal geometry of the board for one terminal width: which columns are on
@@ -83,31 +120,28 @@ func (l Layout) End() int { return l.Start + len(l.Widths) }
 // Visible reports whether the column at index i is on screen.
 func (l Layout) Visible(i int) bool { return i >= l.Start && i < l.End() }
 
-// LayoutColumns decides which columns fit in total width and how the space is shared.
+// LayoutColumns decides which columns fit at a terminal of total width and how the space left over
+// is shared between them. columns are the expanded ones only; stackWidth is what the folded ones
+// take at the right edge.
 //
-// When the board is wider than the terminal it scrolls sideways rather than squeezing columns
-// below a readable width: the window slides just far enough to keep the focused column visible.
-func LayoutColumns(columns []Column, focus, total int, d Density) Layout {
+// A column is never squeezed below minColumn: the ones that do not fit are reached by scrolling
+// sideways, and the window slides just far enough to keep the focused column visible. A terminal
+// too narrow for even one readable column gets no columns at all, which the caller turns into a
+// message rather than a board with a column cut in half.
+func LayoutColumns(columns []Column, focus, total, stackWidth int, d Density) Layout {
 	m := d.metrics()
-	if len(columns) == 0 || total <= 0 {
+	viewport := columnViewportWidth(total, m, stackWidth)
+	if len(columns) == 0 || viewport <= 0 {
 		return Layout{Gap: m.gap}
 	}
-	if focus < 0 {
-		focus = 0
-	}
-	if focus >= len(columns) {
-		focus = len(columns) - 1
-	}
+	focus = clampIndex(focus, len(columns))
 
 	start := 0
 	var end int
 	for {
-		end = fitFrom(columns, start, total, m)
-		// end == start means not even one column fits; showing the focused one clipped beats
-		// showing nothing at all.
+		end = fitFrom(columns, start, viewport, m)
 		if end <= start {
-			start, end = focus, focus+1
-			break
+			return Layout{Gap: m.gap}
 		}
 		if end > focus {
 			break
@@ -117,56 +151,41 @@ func LayoutColumns(columns []Column, focus, total int, d Density) Layout {
 
 	widths := make([]int, 0, end-start)
 	for i := start; i < end; i++ {
-		widths = append(widths, minWidth(columns[i], m))
+		widths = append(widths, m.minColumn())
 	}
-	distribute(columns[start:end], widths, total, m)
+	distribute(widths, viewport, m)
 	return Layout{Start: start, Widths: widths, Gap: m.gap}
 }
 
-// fitFrom returns the exclusive end index of the longest run of columns from start that fits.
+// fitFrom returns the exclusive end index of the longest run of columns from start that fits in
+// total cells with every one of them at its readable minimum.
 func fitFrom(columns []Column, start, total int, m metrics) int {
-	used := 0
 	end := start
-	for i := start; i < len(columns); i++ {
-		need := minWidth(columns[i], m)
-		if i > start {
+	for used := 0; end < len(columns); end++ {
+		need := m.minColumn()
+		if end > start {
 			need += m.gap
 		}
 		if used+need > total {
 			break
 		}
 		used += need
-		end = i + 1
 	}
 	return end
 }
 
-func minWidth(col Column, m metrics) int {
-	if col.Collapsed {
-		return m.collapsed
-	}
-	return m.minColumn
-}
-
-// distribute hands the leftover width to the expanded columns, one cell at a time so that the
-// widths stay within one cell of each other instead of piling up on the leftmost column.
-func distribute(columns []Column, widths []int, total int, m metrics) {
-	expandable := make([]int, 0, len(columns))
-	used := 0
-	for i := range widths {
-		used += widths[i]
-		if i > 0 {
-			used += m.gap
-		}
-		if !columns[i].Collapsed {
-			expandable = append(expandable, i)
-		}
-	}
-	if len(expandable) == 0 {
+// distribute hands the leftover width to the columns, one cell at a time so that the widths stay
+// within one cell of each other instead of piling up on the leftmost column.
+func distribute(widths []int, total int, m metrics) {
+	if len(widths) == 0 {
 		return
 	}
+	used := m.gap * (len(widths) - 1)
+	for _, w := range widths {
+		used += w
+	}
 	for spare := total - used; spare > 0; {
-		for _, i := range expandable {
+		for i := range widths {
 			if spare == 0 {
 				break
 			}

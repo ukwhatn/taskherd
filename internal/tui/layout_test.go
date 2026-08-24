@@ -15,26 +15,26 @@ func cols(n int, collapsed ...int) []Column {
 
 func TestLayoutColumnsFitsAllWhenWideEnough(t *testing.T) {
 	m := DensityRoomy.metrics()
-	layout := LayoutColumns(cols(3), 0, 200, DensityRoomy)
+	layout := LayoutColumns(cols(3), 0, 200, 0, DensityRoomy)
 
 	if layout.Start != 0 || len(layout.Widths) != 3 {
 		t.Fatalf("layout = %+v, want 3 列すべて", layout)
 	}
 	total := 0
 	for _, w := range layout.Widths {
-		if w < m.minColumn {
-			t.Errorf("width = %d, want >= %d", w, m.minColumn)
+		if w < m.minColumn() {
+			t.Errorf("width = %d, want >= %d", w, m.minColumn())
 		}
 		total += w
 	}
-	if total+2*m.gap != 200 {
-		t.Errorf("合計幅 = %d, want 200（余白を配分しきる）", total+2*m.gap)
+	if want := columnViewportWidth(200, m, 0); total+2*m.gap != want {
+		t.Errorf("合計幅 = %d, want %d（余白を配分しきる）", total+2*m.gap, want)
 	}
 }
 
 func TestLayoutColumnsSpreadsSpareEvenly(t *testing.T) {
 	m := DensityRoomy.metrics()
-	layout := LayoutColumns(cols(2), 0, 60+m.gap, DensityRoomy)
+	layout := LayoutColumns(cols(2), 0, 60+m.gap+2*m.boardPad, 0, DensityRoomy)
 
 	// 60 cells across two columns once the gutter is taken out: 30 each.
 	if layout.Widths[0] != 30 || layout.Widths[1] != 30 {
@@ -42,15 +42,33 @@ func TestLayoutColumnsSpreadsSpareEvenly(t *testing.T) {
 	}
 }
 
-func TestLayoutColumnsKeepsCollapsedNarrow(t *testing.T) {
-	m := DensityRoomy.metrics()
-	layout := LayoutColumns(cols(2, 1), 0, 100, DensityRoomy)
+// Every column the board draws has to be readable: the width comes from what a card needs, and
+// the columns that do not get it are scrolled to rather than squeezed.
+func TestLayoutColumnsNeverGoesBelowReadableWidth(t *testing.T) {
+	board := cols(8)
 
-	if layout.Widths[1] != m.collapsed {
-		t.Errorf("折り畳み列の幅 = %d, want %d", layout.Widths[1], m.collapsed)
-	}
-	if layout.Widths[0] <= m.collapsed {
-		t.Errorf("展開列の幅 = %d, want 余白が回っている", layout.Widths[0])
+	for width := 1; width <= 250; width++ {
+		density := ChooseDensity(board, width, 0)
+		m := density.metrics()
+		layout := LayoutColumns(board, 3, width, 0, density)
+		if len(layout.Widths) == 0 {
+			continue
+		}
+
+		used := 2 * m.boardPad
+		for i, w := range layout.Widths {
+			if got := cardInner(w, m); got < readableCardWidth {
+				t.Fatalf("width=%d density=%v: 列の内容幅 = %d, want >= %d",
+					width, density, got, readableCardWidth)
+			}
+			if i > 0 {
+				used += m.gap
+			}
+			used += w
+		}
+		if used > width {
+			t.Fatalf("width=%d density=%v: 行幅 = %d, want <= %d", width, density, used, width)
+		}
 	}
 }
 
@@ -59,7 +77,7 @@ func TestLayoutColumnsKeepsCollapsedNarrow(t *testing.T) {
 func TestLayoutColumnsWindowFollowsFocus(t *testing.T) {
 	all := cols(6)
 
-	left := LayoutColumns(all, 0, 50, DensityRoomy)
+	left := LayoutColumns(all, 0, 50, 0, DensityRoomy)
 	if left.Start != 0 || !left.Visible(0) {
 		t.Fatalf("layout = %+v, want 先頭列が見える", left)
 	}
@@ -67,7 +85,7 @@ func TestLayoutColumnsWindowFollowsFocus(t *testing.T) {
 		t.Fatalf("layout = %+v, want 一部の列だけ", left)
 	}
 
-	right := LayoutColumns(all, 5, 50, DensityRoomy)
+	right := LayoutColumns(all, 5, 50, 0, DensityRoomy)
 	if !right.Visible(5) {
 		t.Errorf("layout = %+v, want フォーカス列 5 が見える", right)
 	}
@@ -76,42 +94,49 @@ func TestLayoutColumnsWindowFollowsFocus(t *testing.T) {
 	}
 }
 
-func TestLayoutColumnsShowsFocusEvenWhenTooNarrow(t *testing.T) {
-	layout := LayoutColumns(cols(4), 2, 5, DensityRoomy)
+// A terminal too narrow for even one readable column gets no board at all: a column clipped in
+// half says less than the message the caller puts in its place.
+func TestLayoutColumnsShowsNothingWhenTooNarrow(t *testing.T) {
+	layout := LayoutColumns(cols(4), 2, 5, 0, DensityRoomy)
 
-	if len(layout.Widths) != 1 || layout.Start != 2 {
-		t.Errorf("layout = %+v, want フォーカス列のみ", layout)
+	if len(layout.Widths) != 0 {
+		t.Errorf("layout = %+v, want 0 列", layout)
 	}
 }
 
 func TestLayoutColumnsEmpty(t *testing.T) {
-	if layout := LayoutColumns(nil, 0, 100, DensityRoomy); len(layout.Widths) != 0 {
+	if layout := LayoutColumns(nil, 0, 100, 0, DensityRoomy); len(layout.Widths) != 0 {
 		t.Errorf("layout = %+v, want 空", layout)
 	}
-	if layout := LayoutColumns(cols(2), 0, 0, DensityRoomy); len(layout.Widths) != 0 {
+	if layout := LayoutColumns(cols(2), 0, 0, 0, DensityRoomy); len(layout.Widths) != 0 {
 		t.Errorf("layout = %+v, want 空", layout)
 	}
 }
 
-// The board gives up its gutters before its card boxes, and its card boxes before it starts
-// hiding columns behind a sideways scroll.
-func TestChooseDensityGivesUpDecorationBeforeColumns(t *testing.T) {
-	// The default board: four open columns with the two terminal ones folded away.
-	board := cols(6, 4, 5)
+// Decoration is what the board spends to buy columns: every column keeps the same readable width,
+// so giving up the gutters and then the boxes is only worth it when it puts one more column on
+// screen. When several densities fit the same number, the roomiest of them wins.
+func TestChooseDensityBuysColumnsWithDecoration(t *testing.T) {
+	board := cols(6)
 
 	tests := []struct {
-		name  string
-		width int
-		want  Density
+		name    string
+		width   int
+		want    Density
+		columns int
 	}{
-		{"広い端末では余白を取る", 200, DensityRoomy},
-		{"余白を詰めれば全列入る幅ではボーダーを残す", 100, DensityTight},
-		{"ボーダーを削らないと列が溢れる幅では削る", 80, DensityCompact},
+		{"全列が入る幅では余白を取る", 200, DensityRoomy, 6},
+		{"装飾を削っても列数が変わらない幅では厚い方を選ぶ", 100, DensityRoomy, 3},
+		{"ボーダーを削れば 1 列増える幅では削る", 80, DensityCompact, 3},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := ChooseDensity(board, tc.width); got != tc.want {
-				t.Errorf("ChooseDensity(_, %d) = %v, want %v", tc.width, got, tc.want)
+			got := ChooseDensity(board, tc.width, 0)
+			if got != tc.want {
+				t.Fatalf("ChooseDensity(_, %d, 0) = %v, want %v", tc.width, got, tc.want)
+			}
+			if layout := LayoutColumns(board, 0, tc.width, 0, got); len(layout.Widths) != tc.columns {
+				t.Errorf("列数 = %d, want %d", len(layout.Widths), tc.columns)
 			}
 		})
 	}
