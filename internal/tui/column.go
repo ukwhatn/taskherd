@@ -27,7 +27,8 @@ type Column struct {
 	Terminal bool
 	// Unknown marks the synthetic column. Its tasks need a `move` to a real column.
 	Unknown bool
-	// Collapsed hides this column's cards, leaving only its header.
+	// Collapsed folds this column into the stack at the board's right edge, where it shows as a
+	// label and a count and is skipped by the cursor.
 	Collapsed bool
 	Tasks     []model.Task
 }
@@ -91,6 +92,69 @@ func sortByID(tasks []model.Task) []model.Task {
 	copy(sorted, tasks)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 	return sorted
+}
+
+// expandedColumns are the columns that get a column of their own on the board, each paired with
+// its index in the whole set.
+//
+// The board's focus is an index into all the columns, folded ones included, while the layout only
+// ever sees the expanded ones. The pairing is what translates between the two, and keeping it here
+// rather than in the layout leaves the layout a pure width calculation.
+func expandedColumns(columns []Column) (cols []Column, index []int) {
+	for i, col := range columns {
+		if col.Collapsed {
+			continue
+		}
+		cols = append(cols, col)
+		index = append(index, i)
+	}
+	return cols, index
+}
+
+// collapsedColumns are the folded ones, in board order.
+func collapsedColumns(columns []Column) []Column {
+	var cols []Column
+	for _, col := range columns {
+		if col.Collapsed {
+			cols = append(cols, col)
+		}
+	}
+	return cols
+}
+
+// positionOf finds where a board index sits in an expandedColumns index, and falls back to the
+// first column when it is not among them.
+func positionOf(index []int, boardIdx int) int {
+	for i, idx := range index {
+		if idx == boardIdx {
+			return i
+		}
+	}
+	return 0
+}
+
+// nearestExpanded is the expanded column closest to idx, which is where the cursor goes when the
+// column it was on folds away under it.
+//
+// A tie goes to the left, so that the cursor ends up on the open columns rather than on the
+// synthetic (unknown) one that sits past the folded ones.
+func nearestExpanded(columns []Column, idx int) int {
+	if len(columns) == 0 {
+		return 0
+	}
+	idx = clampIndex(idx, len(columns))
+	if !columns[idx].Collapsed {
+		return idx
+	}
+	for d := 1; d < len(columns); d++ {
+		if i := idx - d; i >= 0 && !columns[i].Collapsed {
+			return i
+		}
+		if i := idx + d; i < len(columns) && !columns[i].Collapsed {
+			return i
+		}
+	}
+	return idx
 }
 
 // findTask locates a task by id across the built columns.

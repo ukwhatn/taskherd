@@ -389,3 +389,64 @@ func TestBoardSaysSoWhenNoColumnFits(t *testing.T) {
 		})
 	}
 }
+
+// The folded columns are one box at the board's right edge, and the columns beside it keep the
+// width the stack left them: nothing the stack draws may push the row past the terminal.
+func TestCollapsedStackSitsAtTheRightEdge(t *testing.T) {
+	store := newFakeStore(task(1, "todo"), task(2, "done"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	for _, width := range []int{60, 83, 120, 162, 246} {
+		t.Run(fmt.Sprintf("width%d", width), func(t *testing.T) {
+			h.board.width, h.board.height = width, 24
+			view := stripANSI(h.board.render())
+
+			if !strings.Contains(view, "Done 1") {
+				t.Errorf("スタックに折り畳み列が無い:\n%s", view)
+			}
+			// The stack is a box, and the row is inside it rather than beside the last column.
+			stack := -1
+			for _, line := range strings.Split(view, "\n") {
+				if i := strings.Index(line, "Done 1"); i >= 0 {
+					stack = i
+				}
+				if got := lipgloss.Width(line); got > width {
+					t.Fatalf("行幅 = %d, want <= %d: %q", got, width, line)
+				}
+			}
+			if stack < 0 {
+				t.Fatalf("スタックの行が見つからない:\n%s", view)
+			}
+			if header := strings.Index(view, "ToDo"); stack <= header {
+				t.Errorf("スタックの位置 = %d, want 列より右（%d）", stack, header)
+			}
+		})
+	}
+}
+
+// A folded column is drawn in the stack instead of taking a column of its own, so the board's
+// columns are the expanded ones and the sideways-scroll notice counts only those.
+func TestFoldingReturnsWidthToTheOpenColumns(t *testing.T) {
+	store := newFakeStore(task(1, "todo"), task(2, "working"), task(3, "done"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+	h.board.width, h.board.height = 100, 24
+
+	folded := h.board.render()
+	h.key("t")
+	opened := h.board.render()
+
+	if folded == opened {
+		t.Fatalf("t で折り畳みを開いても描画が変わらない")
+	}
+	if strings.Contains(stripANSI(folded), "t 展開") {
+		t.Errorf("折り畳み列がまだ列として描かれている:\n%s", folded)
+	}
+	if !strings.Contains(stripANSI(opened), "Done (1)") {
+		t.Errorf("展開した terminal 列にヘッダが無い:\n%s", opened)
+	}
+	for _, line := range strings.Split(opened, "\n") {
+		if got := lipgloss.Width(line); got > h.board.width {
+			t.Fatalf("行幅 = %d, want <= %d: %q", got, h.board.width, line)
+		}
+	}
+}

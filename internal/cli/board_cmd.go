@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/ukwhatn/taskherd/internal/config"
+	"github.com/ukwhatn/taskherd/internal/model"
 	"github.com/ukwhatn/taskherd/internal/tui"
 )
 
@@ -25,8 +26,31 @@ func (a *app) boardCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Checked before boardDeps, which is what starts the file and herdr watchers: a refusal
+			// after that point would return without the deferred Close ever being registered.
+			if err := requireOpenColumn(cfg.Columns); err != nil {
+				return err
+			}
 			return tui.Run(cmd.Context(), a.boardDeps(cmd.Context(), cfg), a.boardSettings(cfg))
 		},
+	}
+}
+
+// requireOpenColumn refuses to open a board that would have no column to put a cursor on.
+//
+// Terminal columns are folded into the stack at the board's right edge and are skipped by the
+// cursor, so a column set that is all terminal leaves the board with nothing to focus. This is a
+// rule about the board and not about the config: Columns.Validate runs for every command, and
+// list, show and add all work perfectly well with such a column set.
+func requireOpenColumn(columns model.Columns) error {
+	for _, col := range columns {
+		if col.Kind == model.ColumnKindOpen {
+			return nil
+		}
+	}
+	return &UserError{
+		Msg:      `board を開くには kind = "open" の列が最低 1 つ必要`,
+		HintText: "config.toml の [[columns]] に open の列を足す（場所は taskherd config path）",
 	}
 }
 

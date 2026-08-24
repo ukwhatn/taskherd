@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"image/color"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -63,30 +64,46 @@ func (b *Board) renderColumns(bodyHeight int) string {
 	if len(b.columns) == 0 {
 		return b.styles.dim.Render("列が定義されていない")
 	}
+	expanded, boardIndex := expandedColumns(b.columns)
+	if len(expanded) == 0 {
+		return b.styles.dim.Render(truncate("展開されている列がない（t で開く）", b.width))
+	}
+	collapsed := collapsedColumns(b.columns)
 
-	density := ChooseDensity(b.columns, b.width, 0)
+	// The stack's width does not depend on the density, so it can be taken out of the budget
+	// before the density is chosen without the two decisions chasing each other.
+	stackWidth := collapsedStackWidth(collapsed)
+	density := ChooseDensity(expanded, b.width, stackWidth)
 	m := density.metrics()
-	layout := LayoutColumns(b.columns, b.colIdx, b.width, 0, density)
+	layout := LayoutColumns(expanded, positionOf(boardIndex, b.colIdx), b.width, stackWidth, density)
 	if len(layout.Widths) == 0 {
+		// Not even one column is readable at this width. The stack is dropped with them: it can be
+		// wider than the terminal on its own, and it says nothing without a board beside it.
 		return b.styles.dim.Render(truncate("端末が狭すぎて列を表示できない", b.width))
 	}
 
 	// The sideways-scroll notice only appears when some column is off screen, and it costs the
-	// columns a line when it does.
+	// columns a line when it does. Folded columns are not scrolled to, so they are not counted.
 	notice := ""
-	if layout.Start > 0 || layout.End() < len(b.columns) {
+	if layout.Start > 0 || layout.End() < len(expanded) {
 		notice = b.styles.dim.Render(truncate(fmt.Sprintf("%s 列 %d-%d / %d（%s で移動）",
-			truncateMark, layout.Start+1, layout.End(), len(b.columns), b.icons.horizontalKeys()), b.width))
+			truncateMark, layout.Start+1, layout.End(), len(expanded), b.icons.horizontalKeys()), b.width))
 		bodyHeight--
 	}
 
-	blocks := make([]string, 0, 2*len(layout.Widths))
+	blocks := make([]string, 0, 2*len(layout.Widths)+2)
 	for i, width := range layout.Widths {
 		if i > 0 && m.gap > 0 {
 			blocks = append(blocks, strings.Repeat(" ", m.gap))
 		}
-		index := layout.Start + i
-		blocks = append(blocks, b.renderColumn(b.columns[index], index, width, bodyHeight, m))
+		pos := layout.Start + i
+		blocks = append(blocks, b.renderColumn(expanded[pos], boardIndex[pos], width, bodyHeight, m))
+	}
+	if stackWidth > 0 {
+		if gap := collapsedStackGap(stackWidth, m); gap > 0 {
+			blocks = append(blocks, strings.Repeat(" ", gap))
+		}
+		blocks = append(blocks, b.renderCollapsedColumnStack(collapsed, stackWidth))
 	}
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, blocks...)
@@ -99,19 +116,16 @@ func (b *Board) renderColumns(bodyHeight int) string {
 	return body
 }
 
-// renderColumn draws one column: its header, then whatever of its cards fits underneath.
+// renderColumn draws one expanded column: its header, then whatever of its cards fits underneath.
+// index is the column's position in the whole set, which is what the board's focus is measured in.
 func (b *Board) renderColumn(col Column, index, width, height int, m metrics) string {
 	focused := index == b.colIdx
 	lines := []string{b.renderColumnHeader(col, focused, width), strings.Repeat(" ", width)}
 
-	avail := height - headerReserve
-	switch {
-	case col.Collapsed:
-		lines = append(lines, b.renderCollapsed(width, m))
-	case len(col.Tasks) == 0:
+	if len(col.Tasks) == 0 {
 		lines = append(lines, b.renderEmptyColumn(width, m))
-	default:
-		lines = append(lines, b.renderCards(col, focused, width, avail, m)...)
+	} else {
+		lines = append(lines, b.renderCards(col, focused, width, height-headerReserve, m)...)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -154,11 +168,6 @@ func (b *Board) overflowIndicator(arrow string, count, width int) string {
 // focused column is reversed into a filled block, which is what says where the cursor is even when
 // that column holds no cards to put a cursor on.
 func (b *Board) renderColumnHeader(col Column, focused bool, width int) string {
-	label := col.Label
-	if col.Collapsed {
-		label = joinIcon(b.icons.Collapsed, label)
-	}
-
 	style := b.styles.columnHeader
 	if c, ok := columnColor(col.Color); ok {
 		style = style.Foreground(c)
@@ -166,12 +175,12 @@ func (b *Board) renderColumnHeader(col Column, focused bool, width int) string {
 	if focused {
 		style = style.Reverse(true)
 	}
-	return padCell(style.Render(headerText(label, len(col.Tasks), width)), width)
+	return padCell(style.Render(headerText(col.Label, len(col.Tasks), width)), width)
 }
 
 // headerText fits a column's label and count into width, giving up the decoration around them
-// before it gives up the label itself: a folded column is narrow enough that the padding and the
-// parentheses are the difference between reading "Wontfix" and reading a cut-off label.
+// before it gives up the label itself: at the narrowest a column reaches, the padding and the
+// parentheses are the difference between reading "Planning" and reading a cut-off label.
 func headerText(label string, count, width int) string {
 	for _, text := range []string{
 		fmt.Sprintf(" %s (%d) ", label, count),
@@ -185,9 +194,75 @@ func headerText(label string, count, width int) string {
 	return truncate(fmt.Sprintf("%s %d", label, count), width)
 }
 
-// renderCollapsed draws a folded terminal column as a narrow box holding the key that opens it.
-func (b *Board) renderCollapsed(width int, m metrics) string {
-	return b.renderNoteBox("t 展開", width, m)
+// maxCollapsedStackWidth caps the folded-column stack, so that one long label cannot take the
+// board's width with it.
+const maxCollapsedStackWidth = 12
+
+// collapsedStackWidth is the cells the folded-column stack needs at the board's right edge: its
+// widest row, plus the box around them.
+//
+// It is measured from the labels the stack actually holds rather than reserved at a fixed width,
+// because a column label has no length limit in config.
+func collapsedStackWidth(cols []Column) int {
+	if len(cols) == 0 {
+		return 0
+	}
+	widest := 0
+	for _, col := range cols {
+		if w := lipgloss.Width(collapsedStackText(col)); w > widest {
+			widest = w
+		}
+	}
+	if width := widest + 2; width < maxCollapsedStackWidth {
+		return width
+	}
+	return maxCollapsedStackWidth
+}
+
+// collapsedStackText is a folded column's row at its full length: the label and its card count.
+func collapsedStackText(col Column) string {
+	return fmt.Sprintf("%s %d", col.Label, len(col.Tasks))
+}
+
+// renderCollapsedColumnStack draws the folded columns as one box at the board's right edge, a row
+// per column, each in its own column color.
+//
+// They are off the keyboard's path while folded, so what a row has to carry is that the column is
+// there and whether anything is in it. That makes the count the part worth keeping: the label is
+// cut first, and a label cut to its first letters still says which column it is.
+func (b *Board) renderCollapsedColumnStack(cols []Column, width int) string {
+	if len(cols) == 0 || width <= 2 {
+		return ""
+	}
+	inner := width - 2
+
+	rows := make([]string, 0, len(cols))
+	for _, col := range cols {
+		style := b.styles.dim
+		if c, ok := columnColor(col.Color); ok {
+			style = lipgloss.NewStyle().Foreground(c)
+		}
+		rows = append(rows, style.Render(collapsedStackRow(col, inner)))
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(dimColor).
+		Width(width).
+		MaxWidth(width).
+		Render(strings.Join(rows, "\n"))
+}
+
+// collapsedStackRow fits one folded column into inner cells, count first.
+//
+// The label is truncated to what is left after the count rather than the whole row being cut from
+// the right, which would drop the count — the one part of the row that changes.
+func collapsedStackRow(col Column, inner int) string {
+	count := strconv.Itoa(len(col.Tasks))
+	label := truncate(col.Label, inner-1-lipgloss.Width(count))
+	if label == "" {
+		return truncate(count, inner)
+	}
+	return truncate(label+" "+count, inner)
 }
 
 // renderEmptyColumn draws the placeholder that stands in for a column with nothing in it, so the

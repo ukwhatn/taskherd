@@ -1,14 +1,17 @@
 package tui
 
-import "testing"
+import (
+	"fmt"
+	"testing"
 
-func cols(n int, collapsed ...int) []Column {
+	"charm.land/lipgloss/v2"
+	"github.com/ukwhatn/taskherd/internal/model"
+)
+
+func cols(n int) []Column {
 	built := make([]Column, n)
 	for i := range built {
 		built[i] = Column{ID: string(rune('a' + i))}
-	}
-	for _, i := range collapsed {
-		built[i].Collapsed = true
 	}
 	return built
 }
@@ -216,4 +219,133 @@ func TestScrollOffset(t *testing.T) {
 			}
 		})
 	}
+}
+
+// designColumns is the column set the board's widths were measured against: six open columns with
+// Done and Wontfix folded into the stack.
+func designColumns() []Column {
+	return append(cols(6),
+		Column{ID: "done", Label: "Done", Terminal: true, Collapsed: true},
+		Column{ID: "wontfix", Label: "Wontfix", Terminal: true, Collapsed: true})
+}
+
+// The three terminal widths the layout was designed against: a split laptop pane, a full laptop
+// screen, and a full external display. Every column is readable at all three, the spare width is
+// shared evenly, and the row uses the terminal exactly.
+func TestLayoutAtDesignWidths(t *testing.T) {
+	board := designColumns()
+	expanded, _ := expandedColumns(board)
+	stack := collapsedStackWidth(collapsedColumns(board))
+	if stack != 11 {
+		t.Fatalf("スタック幅 = %d, want 11（Wontfix 0 + ボックス）", stack)
+	}
+
+	tests := []struct {
+		width   int
+		density Density
+		columns int
+		inner   int
+	}{
+		{83, DensityRoomy, 2, 29},
+		{162, DensityTight, 5, 26},
+		{246, DensityRoomy, 6, 32},
+	}
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("width%d", tc.width), func(t *testing.T) {
+			density := ChooseDensity(expanded, tc.width, stack)
+			if density != tc.density {
+				t.Fatalf("density = %v, want %v", density, tc.density)
+			}
+			m := density.metrics()
+			layout := LayoutColumns(expanded, 0, tc.width, stack, density)
+			if len(layout.Widths) != tc.columns {
+				t.Fatalf("列数 = %d (widths=%v), want %d", len(layout.Widths), layout.Widths, tc.columns)
+			}
+
+			used := 2*m.boardPad + stack + collapsedStackGap(stack, m)
+			narrowest, widest := layout.Widths[0], layout.Widths[0]
+			for i, w := range layout.Widths {
+				if i > 0 {
+					used += m.gap
+				}
+				used += w
+				narrowest, widest = minInt(narrowest, w), maxInt(widest, w)
+			}
+			if got := cardInner(narrowest, m); got != tc.inner {
+				t.Errorf("最も狭い列の内容幅 = %d, want %d", got, tc.inner)
+			}
+			if widest-narrowest > 1 {
+				t.Errorf("列幅 = %v, want 1 セル以内に揃う", layout.Widths)
+			}
+			if used != tc.width {
+				t.Errorf("使い切った幅 = %d, want %d", used, tc.width)
+			}
+		})
+	}
+}
+
+// The stack is measured from the labels it holds: a column label has no length limit in config, so
+// nothing can be reserved for it up front, and one long label may not take the board with it.
+func TestCollapsedStackWidthFollowsLabels(t *testing.T) {
+	tests := []struct {
+		name string
+		cols []Column
+		want int
+	}{
+		{"折り畳み列が無ければ 0", nil, 0},
+		{"既定の終了列", []Column{{Label: "Done"}, {Label: "Wontfix"}}, 11},
+		{"短いラベルなら詰まる", []Column{{Label: "済"}}, 6},
+		{"長いラベルでも上限で止まる", []Column{{Label: "とても長い名前の終了列"}}, maxCollapsedStackWidth},
+		{"件数が桁上がりしても収まる", []Column{{Label: "Done", Tasks: manyTasks(120)}}, 10},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := collapsedStackWidth(tc.cols); got != tc.want {
+				t.Errorf("collapsedStackWidth = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// Whatever the label, the count survives: it is the part of a folded column's row that changes,
+// and the only thing that says whether anything is in there.
+func TestCollapsedStackRowKeepsTheCount(t *testing.T) {
+	tests := []struct {
+		name  string
+		col   Column
+		inner int
+		want  string
+	}{
+		{"収まるならそのまま", Column{Label: "Done"}, 10, "Done 0"},
+		{"長いラベルは切る", Column{Label: "Wont Fix Forever", Tasks: manyTasks(3)}, 10, "Wont Fi~ 3"},
+		{"全角ラベルも切る", Column{Label: "完了済みの一覧", Tasks: manyTasks(5)}, 10, "完了済~ 5"},
+		{"2 桁の件数のぶん先に削る", Column{Label: "Wontfixed", Tasks: manyTasks(12)}, 10, "Wontfi~ 12"},
+		{"ラベルが入らなければ件数だけ残す", Column{Label: "Done", Tasks: manyTasks(12)}, 2, "12"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := collapsedStackRow(tc.col, tc.inner)
+			if got != tc.want {
+				t.Errorf("collapsedStackRow = %q, want %q", got, tc.want)
+			}
+			if w := lipgloss.Width(got); w > tc.inner {
+				t.Errorf("表示幅 = %d, want <= %d", w, tc.inner)
+			}
+		})
+	}
+}
+
+func manyTasks(n int) []model.Task {
+	tasks := make([]model.Task, n)
+	for i := range tasks {
+		tasks[i] = model.Task{ID: i + 1, Title: "t"}
+	}
+	return tasks
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

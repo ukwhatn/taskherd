@@ -755,9 +755,9 @@ func TestBoardRendersColumnHeadersAndCards(t *testing.T) {
 			t.Errorf("描画に %q が無い:\n%s", want, view)
 		}
 	}
-	// A collapsed terminal column shows only its header and count.
-	if !strings.Contains(view, h.board.icons.Collapsed+" Done") {
-		t.Errorf("折り畳まれた terminal 列が描画されていない:\n%s", view)
+	// A collapsed terminal column is a row in the stack at the right edge: its label and count.
+	if !strings.Contains(view, "Done 0") {
+		t.Errorf("折り畳まれた terminal 列がスタックに出ていない:\n%s", view)
 	}
 }
 
@@ -809,4 +809,125 @@ func nthOf(t *testing.T, cmd tea.Cmd, n int) tea.Cmd {
 		t.Fatalf("batch は %d 件しかない（%d 番目を要求）", len(batch), n)
 	}
 	return batch[n]
+}
+
+// Folded columns are drawn in the stack at the right edge and hold no card to put a cursor on, so
+// the arrow keys step over them rather than stopping on one.
+func TestBoardArrowsSkipCollapsedColumns(t *testing.T) {
+	// testColumns builds todo / working / done, with done folded away.
+	store := newFakeStore(task(1, "todo"), task(2, "working"), task(3, "done"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.key("right")
+	if h.board.colIdx != 1 {
+		t.Fatalf("colIdx = %d, want 1（working）", h.board.colIdx)
+	}
+	h.key("right")
+	if h.board.colIdx != 1 {
+		t.Errorf("colIdx = %d, want 1（折り畳み列にフォーカスが入らない）", h.board.colIdx)
+	}
+	if h.board.columns[h.board.colIdx].Collapsed {
+		t.Errorf("折り畳み列にフォーカスがある: %+v", h.board.columns[h.board.colIdx])
+	}
+}
+
+// Folding the column the cursor was on moves the cursor to the nearest expanded one. Opening the
+// columns again leaves it there: the board does not keep the state it would take to go back.
+func TestBoardRefocusesWhenFocusedColumnFolds(t *testing.T) {
+	store := newFakeStore(task(1, "todo"), task(2, "working"), task(3, "done"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.key("t")
+	h.key("right")
+	h.key("right")
+	if h.board.colIdx != 2 {
+		t.Fatalf("colIdx = %d, want 2（展開した done）", h.board.colIdx)
+	}
+
+	h.key("t")
+	if h.board.colIdx != 1 {
+		t.Fatalf("colIdx = %d, want 1（最寄りの expanded 列）", h.board.colIdx)
+	}
+	h.key("t")
+	if h.board.colIdx != 1 {
+		t.Errorf("colIdx = %d, want 1（再展開しても元の列へは戻らない）", h.board.colIdx)
+	}
+	// The folded column's own selection is untouched, so moving back onto it finds the same card.
+	if got := h.board.selected["done"]; got != 0 {
+		t.Errorf("done 列の選択 = %d, want 0", got)
+	}
+}
+
+// A folded column with the synthetic (unknown) column behind it has an expanded column on either
+// side at the same distance. The cursor goes left, which is where the open columns are.
+func TestBoardRefocusPrefersLeftOnTie(t *testing.T) {
+	store := newFakeStore(task(1, "todo"), task(2, "working"), task(3, "done"), task(4, "retired"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.key("t")
+	h.key("right")
+	h.key("right")
+	if got := h.board.columns[h.board.colIdx].ID; got != "done" {
+		t.Fatalf("フォーカス列 = %q, want done", got)
+	}
+
+	h.key("t")
+
+	if got := h.board.columns[h.board.colIdx].ID; got != "working" {
+		t.Errorf("フォーカス列 = %q, want working（同距離なら左）", got)
+	}
+	view := h.board.render()
+	if !strings.Contains(view, unknownColumnLabel) {
+		t.Errorf("(unknown) 列が描画されていない:\n%s", view)
+	}
+	if !strings.Contains(view, "Done 1") {
+		t.Errorf("折り畳み列がスタックに出ていない:\n%s", view)
+	}
+}
+
+// Moving a card into a folded column carries the selection with it, so re-opening the column finds
+// the card where it was left. The cursor cannot follow it there, so it re-anchors instead.
+func TestBoardMovingCardIntoCollapsedColumnRefocuses(t *testing.T) {
+	store := newFakeStore(task(1, "working"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+	h.key("right")
+
+	// The picker opens on done, the column after working.
+	h.key("tab")
+	h.key("enter")
+
+	if got := store.snapshot().Tasks[0].Status; got != "done" {
+		t.Fatalf("status = %q, want done", got)
+	}
+	if h.board.columns[h.board.colIdx].Collapsed {
+		t.Errorf("折り畳み列にフォーカスが残っている: %+v", h.board.columns[h.board.colIdx])
+	}
+	if got := h.board.columns[h.board.colIdx].ID; got != "working" {
+		t.Errorf("フォーカス列 = %q, want working", got)
+	}
+	if got := h.board.selected["done"]; got != 0 {
+		t.Errorf("done 列の選択 = %d, want 0", got)
+	}
+}
+
+// The (unknown) column goes away with the last task that had a status config no longer defines,
+// which leaves the cursor pointing past the end of the board.
+func TestBoardRefocusesWhenUnknownColumnGoesAway(t *testing.T) {
+	store := newFakeStore(task(1, "todo"), task(2, "retired"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.board.colIdx = len(h.board.columns) - 1
+	if !h.board.columns[h.board.colIdx].Unknown {
+		t.Fatalf("末尾列 = %+v, want (unknown)", h.board.columns[h.board.colIdx])
+	}
+
+	h.key("delete")
+	h.key("y")
+
+	if h.board.colIdx >= len(h.board.columns) {
+		t.Fatalf("colIdx = %d, want < %d", h.board.colIdx, len(h.board.columns))
+	}
+	if got := h.board.columns[h.board.colIdx].ID; got != "working" {
+		t.Errorf("フォーカス列 = %q, want working（折り畳み列を飛ばして左へ）", got)
+	}
 }
