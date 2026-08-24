@@ -1,7 +1,117 @@
+taskherd — a local kanban task board for herdr, linking tasks to agent sessions, GitHub PRs/Issues, and Jira tickets. See below for setup (Japanese; UI text is Japanese).
+
 # taskherd
 
-Task board linked to herdr agent sessions, PRs, and Jira tickets.
+herdr 内で並走する複数のコーディングエージェントセッションを、ローカルの kanban タスク管理で束ねるツール。タスクに herdr のエージェントセッション・GitHub の PR/Issue・Jira チケットを紐づけ、それぞれのライブ状態をボードで一望できる。
 
-herdr 内で並走するコーディングエージェントセッションを「タスク」単位で束ねるローカルタスク管理 CLI/TUI。単体の Go バイナリとして動作し、herdr プラグインとしても導入できる。
+Go 製の単体 CLI/TUI であり、同時に herdr プラグインとしても動く。herdr が無くても add/list/move/note/link といったタスク管理の核はすべて動作し、herdr 連携（セッションのライブ状態・ジャンプ）は到達できたときだけ加算される。
 
-現在実装中（PR-1〜PR-5 の段階リリース）。仕様・使い方は実装の進行に合わせて追記する。
+## インストール
+
+### herdr プラグインとして
+
+```
+herdr plugin install ukwhatn/taskherd
+```
+
+プラグインの `[[build]]` が `go build` を実行するため、**Go toolchain がインストール環境に必要**（`go` が `PATH` 上にあること）。ビルドが失敗すると install 全体が中止され、プラグインは登録されない。
+
+ローカルで変更を試す場合は `plugin install` の代わりに `plugin link` を使う。`plugin link` は build を実行しないため、事前に自分でビルドしておく:
+
+```
+go build -o bin/taskherd ./cmd/taskherd
+herdr plugin link /path/to/taskherd
+```
+
+### 単体 CLI として
+
+herdr を使わない場合や、herdr 外から直接操作したい場合は通常の Go バイナリとして導入できる:
+
+```
+go install github.com/ukwhatn/taskherd/cmd/taskherd@latest
+```
+
+## keybinding の設定
+
+herdr プラグインのマニフェスト（`herdr-plugin.toml`）は action だけを宣言し、キーへの割り当てはユーザーの `~/.config/herdr/config.toml` に自分で書く。以下を追記する:
+
+```toml
+[[keys.command]]
+key = "prefix+t"
+type = "plugin_action"
+command = "taskherd.open-board"
+description = "open task board"
+
+[[keys.command]]
+key = "prefix+shift+t"
+type = "plugin_action"
+command = "taskherd.link-pane"
+description = "link pane to task"
+```
+
+- `taskherd.open-board`: kanban ボードをオーバーレイで開く
+- `taskherd.link-pane`: 今いる pane をタスクに紐づける picker をポップアップで開く
+
+`link-pane` の実体は 2 段構成になっている。action 自身は対象 pane を特定して `plugin pane open --entrypoint picker` を呼ぶだけで、実際の選択 UI は別プロセス（`taskherd picker`）が担う。これは popup 実体に `HERDR_PANE_ID` が注入されない herdr 側の制約に合わせた構成で、キー1つの体験としては変わらない。
+
+## config.toml のセットアップ
+
+```
+taskherd config init
+```
+
+`~/.config/taskherd/config.toml`（`TASKHERD_CONFIG` で上書き可）に既定設定を生成する。GitHub Enterprise Server や Jira を使う場合はコメントアウトされた項目を書き換える:
+
+```toml
+[github]
+ghes_hosts = ["github.example.com"]
+
+[jira]
+site = "your-tenant.atlassian.net"
+email = "you@example.com"
+token_env = "TASKHERD_JIRA_TOKEN"
+```
+
+`site` / `email` は自分のテナントの値に置き換える。`ghes_hosts` は GitHub.com 以外の PR/Issue リンクを `github_pr` / `github_issue` として判別させたいホストの一覧。
+
+### Jira トークンの設定
+
+Jira のトークンは config.toml に書かず、`token_env` が指す環境変数（既定 `TASKHERD_JIRA_TOKEN`）から読む:
+
+```
+export TASKHERD_JIRA_TOKEN="..."
+```
+
+トークンは https://id.atlassian.com/manage-profile/security/api-tokens で発行する。Atlassian は発行したトークンを 1 年で失効させるため、401 が返るようになったら再発行して環境変数を更新する。
+
+### herdr integration の更新
+
+セッションバッジの精度（herdr が Claude Code のエージェント状態をどこまで細かく検出できるか）は herdr 側の統合フックのバージョンに依存する。古い統合のままだと `agent_status` の精度が落ちるため、次のコマンドで最新化しておくことを推奨する:
+
+```
+herdr integration install claude
+```
+
+## 主要コマンド早見表
+
+| コマンド | 内容 |
+|---|---|
+| `taskherd add <title> [--status S] [--due D] [--note N] [--link URL]... [--session current\|<uuid>]` | タスクを作成する |
+| `taskherd list [--status S]... [--all] [--json]` | 一覧表示（既定は完了・却下列を除く） |
+| `taskherd show <id>` | 詳細（note・リンクのライブ状態・紐づくセッション） |
+| `taskherd edit <id> [--title] [--due] [--status]` | 属性を更新する |
+| `taskherd note <id> [--set TEXT\|--append TEXT]` | note を編集する（既定は `$EDITOR`） |
+| `taskherd move <id> <status>` / `taskherd done <id>` | 列を移動する |
+| `taskherd link <id> <url> [--note N]` / `taskherd unlink <id> <url>` | 外部リンクの付け外し |
+| `taskherd session link <id> [--current\|--session-id UUID\|--pane PANE_ID]` | エージェントセッションを紐づける |
+| `taskherd jump <id> [--session UUID]` | 紐づいたセッションへ移動する（消滅していれば resume 起動） |
+| `taskherd refresh [<id>] [--all]` | リンクのライブ状態を即時取得する |
+| `taskherd board` | kanban ボード（TUI）を開く |
+| `taskherd rm <id> [--yes]` | タスクを削除する |
+| `taskherd config path` / `taskherd config init` | パス確認・既定 config.toml の生成 |
+
+各コマンドは `--json` を付けると非対話・機械可読な出力になる（対話が必要な状況ではエラー終了し、`--yes` 等の代替フラグを案内する）。
+
+## board の主なキー操作
+
+`taskherd board` を起動すると kanban ボードが開く。列は config の順、`h/l` で列移動、`j/k` でカード移動、`H/L` でカードを隣の列へ（=ステータス変更）、`enter` で詳細、`a` でタスク追加、`x` でリンク追加、`n` で note 編集、`g` でジャンプ、`r`/`R` でライブ再取得、`t` で完了・却下列の折り畳み切替、`q` で終了。
