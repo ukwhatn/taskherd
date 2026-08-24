@@ -89,10 +89,46 @@ type Board struct {
 	nextBackoff      time.Duration
 	stamped          bool
 
+	// shiftEnter records that the terminal answered the keyboard-enhancement query, which is what
+	// makes Shift+Enter distinguishable from Enter. Without it the modals fall back to ctrl+j.
+	shiftEnter bool
+
 	lastHerdrSync time.Time
 	lastFetch     time.Time
 	status        string
 	statusIsError bool
+}
+
+// isTextKey reports whether the event carries literal text to insert.
+//
+// An IME commit arrives as a key event with the committed string in Text. Matching command keys
+// only on text-less events keeps such a string from matching a binding and being swallowed
+// instead of typed.
+func isTextKey(msg tea.KeyPressMsg) bool {
+	return msg.Text != ""
+}
+
+// newlineKey names the key that inserts a line break in the modals. Shift+Enter is only
+// distinguishable from Enter when the terminal supports key disambiguation, so ctrl+j stands in
+// where it does not.
+func (b *Board) newlineKey() string {
+	if b.shiftEnter {
+		return "shift+enter"
+	}
+	return "ctrl+j"
+}
+
+// isNewlineKey accepts ctrl+j everywhere, so the fallback keeps working on a terminal that also
+// reports Shift+Enter.
+func (b *Board) isNewlineKey(msg tea.KeyPressMsg) bool {
+	switch msg.String() {
+	case "ctrl+j":
+		return true
+	case "shift+enter":
+		return b.shiftEnter
+	default:
+		return false
+	}
 }
 
 // jumpState is the session picker shown when a task has several linked sessions.
@@ -188,6 +224,10 @@ func (b *Board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.PasteMsg:
 		return b.handlePaste(msg)
+
+	case tea.KeyboardEnhancementsMsg:
+		b.shiftEnter = msg.SupportsKeyDisambiguation()
+		return b, nil
 
 	case tasksLoadedMsg:
 		return b, b.applyTasks(msg)

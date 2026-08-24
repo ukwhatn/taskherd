@@ -9,8 +9,6 @@ import (
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
-const addHelp = "↑↓ 項目  ←→ ステータス  enter 作成  esc 取消"
-
 // addField is one row of the add modal.
 type addField int
 
@@ -31,6 +29,12 @@ var addFieldLabels = [addFieldCount]string{
 	addLink:   "リンク",
 }
 
+// multiline reports whether several lines mean something on this field: the title makes one task
+// per line, and a note keeps the line breaks it was written with.
+func (f addField) multiline() bool {
+	return f == addTitle || f == addNote
+}
+
 // addState is the task-creation modal.
 //
 // Unlike the detail modal every text row is live: the field under the cursor accepts typing with
@@ -38,12 +42,12 @@ var addFieldLabels = [addFieldCount]string{
 // what makes "type a title, press Enter" the shortest path through it.
 type addState struct {
 	inputs [addFieldCount]textinput.Model
+	// lines are the lines already finished on a multi-line field; the input edits the line that
+	// follows them. A single-line text field cannot hold a line break, so the breaks live here.
+	lines  [addFieldCount][]string
 	status string
 	cursor addField
-	// extraTitles are the trailing lines of a multi-line paste into the title field. Each one
-	// becomes a task of its own alongside the title still in the field.
-	extraTitles []string
-	err         string
+	err    string
 }
 
 func newAddState(statusID string) addState {
@@ -80,10 +84,27 @@ func (a *addState) value(field addField) string {
 	return a.inputs[field].Value()
 }
 
-// titles are every task the modal would create: the title field plus the extra lines a multi-line
-// paste left behind.
+// fieldLines is everything typed into a field: the finished lines plus the one being edited.
+func (a *addState) fieldLines(field addField) []string {
+	return append(append([]string(nil), a.lines[field]...), a.value(field))
+}
+
+// breakLine ends the line being edited and starts a new one.
+func (a *addState) breakLine() {
+	if !a.cursor.multiline() {
+		return
+	}
+	a.lines[a.cursor] = append(a.lines[a.cursor], a.value(a.cursor))
+	a.inputs[a.cursor].SetValue("")
+}
+
+// titles are the tasks the modal would create, one per non-blank title line.
 func (a *addState) titles() []string {
-	return append(splitTitleLines(a.value(addTitle)), a.extraTitles...)
+	return splitTitleLines(strings.Join(a.fieldLines(addTitle), "\n"))
+}
+
+func (a *addState) note() string {
+	return strings.TrimSpace(strings.Join(a.fieldLines(addNote), "\n"))
 }
 
 func (b *Board) beginAdd() tea.Cmd {
@@ -97,27 +118,36 @@ func (b *Board) beginAdd() tea.Cmd {
 }
 
 func (b *Board) handleAddKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		b.mode = modeBoard
-		return b, nil
-	case "up":
-		b.add.move(-1)
-		return b, nil
-	case "down":
-		b.add.move(1)
-		return b, nil
-	case "enter":
-		return b, b.submitAdd()
-	case "left":
-		if b.add.cursor == addStatus {
-			b.shiftAddStatus(-1)
+	// An IME commit arrives as a key event carrying text, so only text-less events are read as
+	// commands: otherwise a committed string could match a binding and be swallowed instead of
+	// typed into the field.
+	if !isTextKey(msg) {
+		if b.isNewlineKey(msg) {
+			b.add.breakLine()
 			return b, nil
 		}
-	case "right":
-		if b.add.cursor == addStatus {
-			b.shiftAddStatus(1)
+		switch msg.String() {
+		case "esc":
+			b.mode = modeBoard
 			return b, nil
+		case "up":
+			b.add.move(-1)
+			return b, nil
+		case "down":
+			b.add.move(1)
+			return b, nil
+		case "enter":
+			return b, b.submitAdd()
+		case "left":
+			if b.add.cursor == addStatus {
+				b.shiftAddStatus(-1)
+				return b, nil
+			}
+		case "right":
+			if b.add.cursor == addStatus {
+				b.shiftAddStatus(1)
+				return b, nil
+			}
 		}
 	}
 
@@ -130,19 +160,25 @@ func (b *Board) handleAddKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (b *Board) pasteIntoAdd(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
-	if b.add.cursor == addStatus {
+	field := b.add.cursor
+	if field == addStatus {
 		return b, nil
 	}
-	if b.add.cursor == addTitle {
-		// The field is single-line and would fold a multi-line paste into one string, so the
-		// trailing lines are set aside here: that is what turns them into one task per line.
-		if lines := splitTitleLines(msg.Content); len(lines) > 1 {
-			b.add.extraTitles = append(b.add.extraTitles, lines[1:]...)
-			msg.Content = lines[0]
-		}
+
+	// A text field folds a pasted line break into a space, so on a field where the breaks carry
+	// meaning the block is split here instead: the head goes in at the cursor, the middle lines
+	// are finished as they stand, and the tail is left being edited.
+	if lines := strings.Split(msg.Content, "\n"); field.multiline() && len(lines) > 1 {
+		b.add.inputs[field], _ = b.add.inputs[field].Update(tea.PasteMsg{Content: lines[0]})
+		b.add.lines[field] = append(b.add.lines[field], b.add.value(field))
+		b.add.lines[field] = append(b.add.lines[field], lines[1:len(lines)-1]...)
+		b.add.inputs[field].SetValue(lines[len(lines)-1])
+		b.add.inputs[field].CursorEnd()
+		return b, nil
 	}
-	updated, cmd := b.add.inputs[b.add.cursor].Update(msg)
-	b.add.inputs[b.add.cursor] = updated
+
+	updated, cmd := b.add.inputs[field].Update(msg)
+	b.add.inputs[field] = updated
 	return b, cmd
 }
 
@@ -181,11 +217,7 @@ func (b *Board) submitAdd() tea.Cmd {
 		due = &parsed
 	}
 
-	in := model.TaskInput{
-		Status: b.add.status,
-		Due:    due,
-		Note:   strings.TrimSpace(b.add.value(addNote)),
-	}
+	in := model.TaskInput{Status: b.add.status, Due: due, Note: b.add.note()}
 	b.mode = modeBoard
 	return b.addTasksCmd(titles, in, urls)
 }
@@ -198,6 +230,11 @@ func (b *Board) renderAdd() string {
 
 	lines := []string{b.styles.heading.Render("新しいタスク")}
 	for field := addTitle; field < addFieldCount; field++ {
+		// The finished lines sit above the field, so a multi-line entry reads as what it is.
+		for _, done := range b.add.lines[field] {
+			lines = append(lines, truncate("  "+padLabel("")+b.styles.dim.Render(done), b.width))
+		}
+
 		marker := "  "
 		if field == b.add.cursor {
 			marker = "▌ "
@@ -212,13 +249,19 @@ func (b *Board) renderAdd() string {
 		lines = append(lines, truncate(marker+padLabel(addFieldLabels[field])+value, b.width))
 	}
 
-	if len(b.add.extraTitles) > 0 {
+	if titles := b.add.titles(); len(titles) > 1 {
 		lines = append(lines, b.styles.status.Render(
-			fmt.Sprintf("複数行を貼り付け: enter で %d 件のタスクを作成する", len(b.add.titles()))))
+			fmt.Sprintf("enter で %d 件のタスクを作成する", len(titles))))
 	}
 	if b.add.err != "" {
 		lines = append(lines, b.styles.alert.Render(truncate(b.add.err, b.width)))
 	}
-	lines = append(lines, b.styles.footer.Render(truncate(addHelp, b.width)))
+	lines = append(lines, b.styles.footer.Render(truncate(b.addHelp(), b.width)))
 	return strings.Join(lines, "\n")
+}
+
+// addHelp names the key that actually inserts a line break, which depends on what the terminal
+// turned out to support.
+func (b *Board) addHelp() string {
+	return fmt.Sprintf("↑↓ 項目  ←→ ステータス  %s 改行(タイトル/note)  enter 作成  esc 取消", b.newlineKey())
 }

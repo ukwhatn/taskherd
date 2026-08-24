@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -269,6 +271,139 @@ func TestAddModalFromUnknownColumnUsesRealColumn(t *testing.T) {
 	created := store.snapshot().Tasks[1]
 	if created.Status != "todo" {
 		t.Errorf("status = %q, want todo", created.Status)
+	}
+}
+
+// An IME commit arrives as one key event carrying the whole string, and tea.Key.String() reports
+// that string. A commit that happens to read like a binding must be typed, not obeyed.
+func TestAddModalIMECommitIsTypedNotObeyed(t *testing.T) {
+	store := newFakeStore()
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.key("a")
+	h.dispatch(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "enter"})
+
+	if h.board.mode != modeAdd {
+		t.Fatalf("mode = %v, want modeAdd（確定文字列で作成が走った）", h.board.mode)
+	}
+	if got := h.board.add.value(addTitle); got != "enter" {
+		t.Errorf("タイトル = %q, want enter（確定文字列が入力される）", got)
+	}
+	if len(store.snapshot().Tasks) != 0 {
+		t.Error("確定文字列でタスクが作られた")
+	}
+}
+
+func TestDetailEditIMECommitIsTypedNotObeyed(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "旧", Status: "todo"})
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.key("enter")
+	focusDetailItem(t, h, itemTitle, "")
+	h.key("enter")
+	h.dispatch(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "esc"})
+
+	if !h.board.detail.editing {
+		t.Fatal("確定文字列 esc で編集モードを抜けた")
+	}
+	if got := h.board.detail.input.Value(); got != "旧esc" {
+		t.Errorf("入力欄 = %q, want 旧esc", got)
+	}
+}
+
+// Enter creates the task, so a line break needs its own key. Which key that is depends on what the
+// terminal reports, and the footer has to name the one that actually works.
+func TestAddModalNewlineKeyFollowsTerminalSupport(t *testing.T) {
+	h := newHarness(t, Deps{Tasks: newFakeStore()}, Settings{})
+
+	h.key("a")
+	if got := h.board.newlineKey(); got != "ctrl+j" {
+		t.Fatalf("newlineKey = %q, want ctrl+j（拡張キー未対応時）", got)
+	}
+	if view := h.board.render(); !strings.Contains(view, "ctrl+j 改行") {
+		t.Errorf("フッタが実効キーを示していない:\n%s", view)
+	}
+
+	h.dispatch(tea.KeyboardEnhancementsMsg{Flags: 1})
+	if got := h.board.newlineKey(); got != "shift+enter" {
+		t.Fatalf("newlineKey = %q, want shift+enter", got)
+	}
+	if view := h.board.render(); !strings.Contains(view, "shift+enter 改行") {
+		t.Errorf("フッタが実効キーを示していない:\n%s", view)
+	}
+}
+
+func TestAddModalShiftEnterSplitsTitleIntoTasks(t *testing.T) {
+	store := newFakeStore()
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+	h.dispatch(tea.KeyboardEnhancementsMsg{Flags: 1})
+
+	h.key("a")
+	h.typeText("設計する")
+	h.dispatch(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	h.typeText("実装する")
+	h.key("enter")
+
+	tasks := store.snapshot().Tasks
+	if len(tasks) != 2 {
+		t.Fatalf("tasks = %+v, want 2 件", tasks)
+	}
+	if tasks[0].Title != "設計する" || tasks[1].Title != "実装する" {
+		t.Errorf("titles = %q/%q, want 設計する/実装する", tasks[0].Title, tasks[1].Title)
+	}
+}
+
+// Without terminal support Shift+Enter is indistinguishable from Enter, so ctrl+j stands in — and
+// keeps working even once the terminal does report Shift+Enter.
+func TestAddModalCtrlJIsAlwaysTheFallbackNewline(t *testing.T) {
+	store := newFakeStore()
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.key("a")
+	h.typeText("題名")
+	h.key("down")
+	h.key("down")
+	h.key("down") // note
+	h.typeText("1 行目")
+	h.dispatch(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
+	h.typeText("2 行目")
+	h.key("enter")
+
+	created := store.snapshot().Tasks[0]
+	if created.Note != "1 行目\n2 行目" {
+		t.Errorf("note = %q, want 2 行の note", created.Note)
+	}
+	if created.Title != "題名" {
+		t.Errorf("title = %q, want 題名", created.Title)
+	}
+}
+
+// A terminal that never answers the query leaves Shift+Enter arriving as plain Enter, which must
+// still create the task rather than silently inserting a break.
+func TestAddModalShiftEnterInertWithoutSupport(t *testing.T) {
+	store := newFakeStore()
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.key("a")
+	h.typeText("題名")
+	h.dispatch(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+
+	if len(h.board.add.lines[addTitle]) != 0 {
+		t.Errorf("lines = %v, want 改行しない", h.board.add.lines[addTitle])
+	}
+}
+
+// Full-width text must not push a modal row past the terminal width.
+func TestAddModalRowsFitTerminalWidth(t *testing.T) {
+	h := newHarness(t, Deps{Tasks: newFakeStore()}, Settings{})
+	h.board.width = 40
+
+	h.key("a")
+	h.typeText("全角のタイトルを長めに入力しておく設計実装レビュー")
+	for _, line := range strings.Split(h.board.render(), "\n") {
+		if got := lipgloss.Width(line); got > h.board.width {
+			t.Errorf("行幅 = %d, want <= %d: %q", got, h.board.width, line)
+		}
 	}
 }
 

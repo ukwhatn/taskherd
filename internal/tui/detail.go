@@ -312,14 +312,17 @@ func (b *Board) endDetailEdit() {
 }
 
 func (b *Board) handleDetailEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		b.endDetailEdit()
-		return b, nil
-	case "enter":
-		kind, ref, value := b.detail.editKind, b.detail.editRef, b.detail.input.Value()
-		b.endDetailEdit()
-		return b, b.submitDetailEdit(kind, ref, value)
+	// Text-carrying events are always insertion, so an IME commit cannot match a binding.
+	if !isTextKey(msg) {
+		switch msg.String() {
+		case "esc":
+			b.endDetailEdit()
+			return b, nil
+		case "enter":
+			kind, ref, value := b.detail.editKind, b.detail.editRef, b.detail.input.Value()
+			b.endDetailEdit()
+			return b, b.submitDetailEdit(kind, ref, value)
+		}
 	}
 
 	updated, cmd := b.detail.input.Update(msg)
