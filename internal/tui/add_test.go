@@ -294,6 +294,88 @@ func TestAddModalIMECommitIsTypedNotObeyed(t *testing.T) {
 	}
 }
 
+// The realistic commit: herdr delivers Japanese one character per key event, each carrying its
+// own text. Every one of them belongs in the field.
+func TestAddModalAcceptsJapaneseCommit(t *testing.T) {
+	store := newFakeStore()
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.key("a")
+	h.dispatch(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "日本語"})
+	h.typeText("入力")
+	h.key("enter")
+
+	tasks := store.snapshot().Tasks
+	if len(tasks) != 1 || tasks[0].Title != "日本語入力" {
+		t.Fatalf("tasks = %+v, want 日本語入力 1 件", tasks)
+	}
+}
+
+// A screen with no text field keeps its letter bindings, so it cannot ignore everything carrying
+// text. What it must ignore is a commit of several characters at once, which String() reports
+// whole — "delete" would otherwise fire the delete binding by name.
+func TestBoardIgnoresComposedTextAsCommand(t *testing.T) {
+	store := newFakeStore(task(1, "todo"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	for _, text := range []string{"delete", "enter", "tab", "日本語"} {
+		h.dispatch(tea.KeyPressMsg{Code: tea.KeyExtended, Text: text})
+		if h.board.mode != modeBoard {
+			t.Fatalf("Text=%q でモードが変わった: %v", text, h.board.mode)
+		}
+	}
+	if len(store.snapshot().Tasks) != 1 {
+		t.Error("確定文字列でタスクが消えた")
+	}
+}
+
+// The confirmation is answered with letters, so it takes the same rule: a commit reading "esc"
+// must not cancel it, while a plain y still confirms.
+func TestConfirmIgnoresComposedTextButKeepsLetters(t *testing.T) {
+	store := newFakeStore(task(1, "todo"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.key("backspace")
+	h.dispatch(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "esc"})
+	if h.board.mode != modeConfirm {
+		t.Fatalf("mode = %v, want modeConfirm（確定文字列で取り消された）", h.board.mode)
+	}
+	h.dispatch(tea.KeyPressMsg{Code: tea.KeyExtended, Text: "ようこそ"})
+	if h.board.mode != modeConfirm {
+		t.Fatalf("mode = %v, want modeConfirm", h.board.mode)
+	}
+
+	h.key("y")
+	if len(store.snapshot().Tasks) != 0 {
+		t.Error("y で確定できていない")
+	}
+}
+
+// Full-width characters occupy two cells but one rune. The cursor has to step by runes, or an
+// edit lands in the middle of a character.
+func TestAddModalFullWidthCursorStepsByRune(t *testing.T) {
+	h := newHarness(t, Deps{Tasks: newFakeStore()}, Settings{})
+
+	h.key("a")
+	h.typeText("設計実装")
+	h.key("left")
+	h.key("left")
+	h.typeText("と")
+
+	if got := h.board.add.value(addTitle); got != "設計と実装" {
+		t.Errorf("タイトル = %q, want 設計と実装", got)
+	}
+}
+
+// Every modal row has to start its value at the same column whether its label is ASCII or not.
+func TestPadLabelAlignsFullWidthLabels(t *testing.T) {
+	for _, label := range []string{"タイトル", "ステータス", "期限", "note", "リンク", "セッション", ""} {
+		if got := lipgloss.Width(padLabel(label)); got != labelWidth {
+			t.Errorf("padLabel(%q) の幅 = %d, want %d", label, got, labelWidth)
+		}
+	}
+}
+
 func TestDetailEditIMECommitIsTypedNotObeyed(t *testing.T) {
 	store := newFakeStore(model.Task{ID: 1, Title: "旧", Status: "todo"})
 	h := newHarness(t, Deps{Tasks: store}, Settings{})

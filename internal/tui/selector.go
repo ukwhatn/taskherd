@@ -53,6 +53,9 @@ func defaultStatusTarget(targets []Column, current string) int {
 }
 
 func (b *Board) handleStatusSelectKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if !isCommandKey(msg) {
+		return b, nil
+	}
 	switch msg.String() {
 	case "esc", "tab":
 		b.closeOverlay()
@@ -121,6 +124,9 @@ func (b *Board) applyAgents(msg agentsLoadedMsg) {
 }
 
 func (b *Board) handleSessionSelectKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if !isCommandKey(msg) {
+		return b, nil
+	}
 	switch msg.String() {
 	case "esc":
 		b.closeOverlay()

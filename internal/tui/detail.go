@@ -180,6 +180,9 @@ func (b *Board) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if b.detail.editing {
 		return b.handleDetailEditKey(msg)
 	}
+	if !isCommandKey(msg) {
+		return b, nil
+	}
 
 	task := b.activeTask()
 	if task == nil {

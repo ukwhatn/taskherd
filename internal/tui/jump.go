@@ -31,6 +31,9 @@ func (b *Board) beginJump() tea.Cmd {
 }
 
 func (b *Board) handleJumpKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if !isCommandKey(msg) {
+		return b, nil
+	}
 	switch msg.String() {
 	case "esc":
 		b.closeOverlay()

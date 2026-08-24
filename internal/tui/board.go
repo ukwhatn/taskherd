@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -101,11 +102,21 @@ type Board struct {
 
 // isTextKey reports whether the event carries literal text to insert.
 //
-// An IME commit arrives as a key event with the committed string in Text. Matching command keys
-// only on text-less events keeps such a string from matching a binding and being swallowed
-// instead of typed.
+// This is the rule for a screen that owns a text field: an IME commit arrives as key events
+// carrying the committed characters, and tea.Key.String() reports that text, so a commit could
+// otherwise match a binding by name and be swallowed instead of typed.
 func isTextKey(msg tea.KeyPressMsg) bool {
 	return msg.Text != ""
+}
+
+// isCommandKey reports whether an event may be read as a command on a screen with no text field.
+//
+// Such a screen has to keep its letter bindings (y/n, a, g, q), so it cannot ignore everything
+// carrying text. What it must ignore is text committed several characters at once, which
+// String() reports whole: without this, a commit reading "delete" or "esc" would fire the binding
+// of that name.
+func isCommandKey(msg tea.KeyPressMsg) bool {
+	return utf8.RuneCountInString(msg.Text) <= 1
 }
 
 // newlineKey names the key that inserts a line break in the modals. Shift+Enter is only
@@ -308,6 +319,9 @@ func (b *Board) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 }
 
 func (b *Board) handleBoardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if !isCommandKey(msg) {
+		return b, nil
+	}
 	switch msg.String() {
 	case "q":
 		return b, tea.Quit
@@ -368,6 +382,9 @@ func (b *Board) openConfirm(state confirmState) {
 }
 
 func (b *Board) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if !isCommandKey(msg) {
+		return b, nil
+	}
 	switch strings.ToLower(msg.String()) {
 	case "y":
 		state := b.confirm
