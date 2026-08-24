@@ -209,7 +209,7 @@ func (b *Board) renderAdd() string {
 				value += "   " + b.styles.dim.Render("←→ で変更")
 			}
 		}
-		lines = append(lines, truncate(fmt.Sprintf("%s%-10s %s", marker, addFieldLabels[field], value), b.width))
+		lines = append(lines, truncate(marker+padLabel(addFieldLabels[field])+value, b.width))
 	}
 
 	if len(b.add.extraTitles) > 0 {

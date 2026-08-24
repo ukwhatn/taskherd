@@ -260,6 +260,18 @@ func (b *Board) fetchFooter() string {
 	}
 }
 
+// labelWidth is the display width the modals reserve for a row's label.
+const labelWidth = 12
+
+// padLabel pads a label to labelWidth display cells. A %-Ns verb pads by bytes, which leaves rows
+// with Japanese labels ragged against rows with ASCII ones.
+func padLabel(label string) string {
+	if pad := labelWidth - lipgloss.Width(label); pad > 0 {
+		return label + strings.Repeat(" ", pad)
+	}
+	return label
+}
+
 func shortID(id string) string {
 	if len(id) <= 8 {
 		return id

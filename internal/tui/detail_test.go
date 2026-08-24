@@ -357,6 +357,33 @@ func TestDetailLinksSessionFromSnapshot(t *testing.T) {
 	}
 }
 
+// A session linked from the board shows its live state at once. The states are derived from the
+// task list, so a list that just gained a session has to re-derive them; without that the row the
+// user just created reads "offline" until herdr happens to speak again.
+func TestDetailLinkedSessionGetsLiveStateImmediately(t *testing.T) {
+	store := newFakeStore(task(1, "todo"))
+	live := agent("pane-1", "s-1", herdrc.StateWorking)
+	herdrOps := &fakeHerdr{snapshot: &herdrc.Snapshot{Agents: []herdrc.Agent{live}}}
+	sessions := newFakeSessions(t)
+	h := newHarness(t, Deps{Tasks: store, Sessions: sessions, Herdr: herdrOps}, Settings{})
+	h.dispatch(snapshotUpdate(live))
+
+	h.key("enter")
+	focusDetailItem(t, h, itemAddSession, "")
+	h.key("enter")
+	h.key("enter")
+
+	if got := h.board.sessions.State["s-1"]; got != herdrc.StateWorking {
+		t.Errorf("state = %q, want %q", got, herdrc.StateWorking)
+	}
+	if got := h.board.sessions.Pane["s-1"]; got != "pane-1" {
+		t.Errorf("pane = %q, want pane-1", got)
+	}
+	if view := h.board.render(); !strings.Contains(view, "pane pane-1") {
+		t.Errorf("セッション行に pane が出ていない:\n%s", view)
+	}
+}
+
 // An agent herdr cannot name a session for is shown but cannot be picked: storing it would give a
 // task a session reference that no jump could ever use.
 func TestDetailSessionSelectRefusesAgentWithoutSessionID(t *testing.T) {

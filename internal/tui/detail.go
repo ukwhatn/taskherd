@@ -439,8 +439,7 @@ func (b *Board) renderDetailItem(item detailItem, focused bool) string {
 		value = b.decorateLinkRow(item.ref, value)
 	}
 
-	line := fmt.Sprintf("%s%-10s %s", marker, item.label, value)
-	line = truncate(line, b.width)
+	line := truncate(marker+padLabel(item.label)+value, b.width)
 	switch {
 	case focused:
 		return b.styles.cardTitleSelected.Render(line)

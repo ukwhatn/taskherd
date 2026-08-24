@@ -51,6 +51,9 @@ type Board struct {
 	sessions SessionStates
 	cache    *fetch.CacheFile
 	links    map[string]fetch.LinkState
+	// snapshot is the last herdr report, kept so the session states can be re-derived when the
+	// task list changes rather than only when herdr speaks again.
+	snapshot *herdrc.Snapshot
 
 	// tasksLoaded and cacheLoaded gate the startup fetch: which links are stale is only
 	// answerable once both the task list and the cache are in, and they arrive in either order.
@@ -495,9 +498,11 @@ func (b *Board) applyTasks(msg tasksLoadedMsg) tea.Cmd {
 		b.focusTaskID = msg.focus
 	}
 	b.rebuild()
-	// The link states are derived from the cache and the task list together, so a new task list
-	// means re-deriving them: a link the CLI just added has to pick up its cached value.
+	// The badge states are derived from the task list together with the cache and the last herdr
+	// report, so a new task list means re-deriving both: a link or session that was just added has
+	// to pick up its live value now rather than at the next event.
 	b.rebuildLinks()
+	b.rebuildSessions()
 	b.tasksLoaded = true
 
 	// The detail modal is pinned to a task id, so a task deleted underneath it (by the CLI, or
@@ -527,10 +532,12 @@ func (b *Board) applySessionUpdate(update herdrc.Update) tea.Cmd {
 	cmds := []tea.Cmd{waitSessionUpdate(b.deps.Sessions)}
 
 	if !update.Status.Available {
+		b.snapshot = nil
 		b.sessions = UnavailableSessions(update.Status.Err)
 		return tea.Batch(cmds...)
 	}
-	b.sessions = BuildSessionStates(update.Snapshot, b.file.Tasks)
+	b.snapshot = update.Snapshot
+	b.rebuildSessions()
 	b.lastHerdrSync = b.deps.now()
 
 	// The task id stamped onto a pane expires after 24h, so the board re-stamps the panes it
@@ -555,6 +562,16 @@ func (b *Board) applyCache(cache *fetch.CacheFile) {
 // rebuildLinks re-derives the displayed link states from the cache the board holds.
 func (b *Board) rebuildLinks() {
 	b.links = b.cache.LinkStates(allLinks(b.file.Tasks), b.deps.now(), b.settings.CacheTTL)
+}
+
+// rebuildSessions re-derives the live session states from the last herdr report. The states are
+// keyed by the sessions the tasks carry, so a task list that just gained one has to re-derive them
+// or the new row reads offline until herdr next speaks.
+func (b *Board) rebuildSessions() {
+	if b.snapshot == nil {
+		return
+	}
+	b.sessions = BuildSessionStates(b.snapshot, b.file.Tasks)
 }
 
 func (b *Board) applyRefresh(msg refreshDoneMsg) tea.Cmd {
