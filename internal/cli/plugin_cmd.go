@@ -42,11 +42,12 @@ func (a *app) pluginOpenBoardCmd() *cobra.Command {
 // pluginLinkPaneCmd is the link-pane action's entire body. It identifies the pane the action was
 // invoked against and opens the picker popup targeting it.
 //
-// The pane id is read from HERDR_PLUGIN_CONTEXT_JSON first, per herdr's documented context
-// shape for a pane-context action, falling back to HERDR_PANE_ID directly: herdr's docs also
-// list HERDR_PANE_ID among the variables injected "when available" for the same invocation, and
-// this command has no way to tell which of the two actually carries the value without running
-// against a given herdr version, so both are tried.
+// The pane id is read from HERDR_PLUGIN_CONTEXT_JSON's focused_pane_id first (confirmed against
+// real herdr 0.8.2: {"focused_pane_id":"...",...}, a flat shape undocumented in herdr's docs),
+// falling back to HERDR_PANE_ID directly, which the same real invocation also carried. Both are
+// kept because there is no guarantee a future herdr version keeps injecting both for every
+// invocation source (link-pane's contexts=["pane"] was only tested via CLI invocation, not a
+// real keybinding or link click).
 func (a *app) pluginLinkPaneCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "link-pane",

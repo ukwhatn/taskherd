@@ -50,10 +50,10 @@ func TestParsePluginContextReadsPaneID(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{name: "pane フィールドを持つ", raw: `{"pane":{"pane_id":"wS:p3"}}`, want: "wS:p3"},
+		{name: "focused_pane_id を持つ（実機 herdr 0.8.2 の実測形状）", raw: `{"workspace_id":"wS","tab_id":"wS:t1","focused_pane_id":"wS:p3","invocation_source":"cli"}`, want: "wS:p3"},
 		{name: "空文字列", raw: "", want: ""},
 		{name: "パース不能", raw: "{not json", want: ""},
-		{name: "pane フィールドが無い", raw: `{"workspace":{"workspace_id":"wS"}}`, want: ""},
+		{name: "focused_pane_id が無い", raw: `{"workspace_id":"wS"}`, want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

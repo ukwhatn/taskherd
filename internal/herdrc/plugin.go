@@ -9,13 +9,13 @@ import (
 // PluginContext is the invocation context herdr injects as HERDR_PLUGIN_CONTEXT_JSON. Only the
 // field taskherd's plugin commands need is decoded; herdr documents more (workspace, tab,
 // worktree, agent, selection, clicked URL) that this type ignores.
+//
+// The shape is flat (focused_pane_id at the top level), confirmed against a real herdr 0.8.2
+// pane-context action invocation: {"workspace_id":...,"tab_id":...,"focused_pane_id":...,
+// "focused_pane_cwd":...,"invocation_source":...}. Nothing in herdr's docs states this shape
+// explicitly, so it is worth re-checking against a newer herdr if this ever stops matching.
 type PluginContext struct {
-	Pane *PluginContextPane `json:"pane"`
-}
-
-// PluginContextPane identifies the pane an action was invoked against.
-type PluginContextPane struct {
-	PaneID string `json:"pane_id"`
+	FocusedPaneID string `json:"focused_pane_id"`
 }
 
 // ParsePluginContext decodes HERDR_PLUGIN_CONTEXT_JSON. An empty or unparsable value yields a
@@ -34,10 +34,7 @@ func ParsePluginContext(raw string) PluginContext {
 
 // PaneID returns the pane this invocation targets, or "" when none is available.
 func (c PluginContext) PaneID() string {
-	if c.Pane == nil {
-		return ""
-	}
-	return c.Pane.PaneID
+	return c.FocusedPaneID
 }
 
 // OpenPluginPane opens one of this plugin's own pane entrypoints via `herdr plugin pane open`.

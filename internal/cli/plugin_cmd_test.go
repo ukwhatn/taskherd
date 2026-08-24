@@ -19,7 +19,7 @@ func TestPluginOpenBoardExecsPaneOpenWithoutPlacement(t *testing.T) {
 func TestPluginLinkPaneReadsPaneFromContextJSON(t *testing.T) {
 	h := newHarness(t)
 	h.herdr = newFakeHerdr()
-	h.env["HERDR_PLUGIN_CONTEXT_JSON"] = `{"pane":{"pane_id":"wS:p7"}}`
+	h.env["HERDR_PLUGIN_CONTEXT_JSON"] = `{"workspace_id":"wS","tab_id":"wS:t1","focused_pane_id":"wS:p7","invocation_source":"cli"}`
 
 	h.mustRun(t, "plugin", "link-pane")
 

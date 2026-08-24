@@ -12,7 +12,7 @@ command = ["go", "build", "-o", "bin/taskherd", "./cmd/taskherd"]
 id = "board"
 title = "Taskherd board"
 placement = "overlay"
-command = ["bin/taskherd", "board"]
+command = ["./bin/taskherd", "board"]
 
 [[panes]]
 id = "picker"
@@ -20,16 +20,16 @@ title = "Link pane to task"
 placement = "popup"
 width = "60%"
 height = "60%"
-command = ["bin/taskherd", "picker"]
+command = ["./bin/taskherd", "picker"]
 
 [[actions]]
 id = "open-board"
 title = "Open Taskherd board"
 contexts = ["global"]
-command = ["bin/taskherd", "plugin", "open-board"]
+command = ["./bin/taskherd", "plugin", "open-board"]
 
 [[actions]]
 id = "link-pane"
 title = "Link this pane to a task"
 contexts = ["pane"]
-command = ["bin/taskherd", "plugin", "link-pane"]
+command = ["./bin/taskherd", "plugin", "link-pane"]
