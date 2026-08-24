@@ -99,6 +99,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.rmCmd(),
 		a.configCmd(),
 		a.refreshCmd(),
+		a.boardCmd(),
 	)
 	return root
 }
