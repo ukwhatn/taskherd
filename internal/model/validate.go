@@ -14,12 +14,17 @@ type Violation struct {
 
 // ValidationError は検証違反の集合。書き込みを拒否する根拠として全件を保持する。
 type ValidationError struct {
+	Subject    string
 	Violations []Violation
 }
 
 func (e *ValidationError) Error() string {
+	subject := e.Subject
+	if subject == "" {
+		subject = "入力"
+	}
 	lines := make([]string, 0, len(e.Violations)+1)
-	lines = append(lines, fmt.Sprintf("tasks.json の検証に失敗した（%d 件）:", len(e.Violations)))
+	lines = append(lines, fmt.Sprintf("%s の検証に失敗した（%d 件）:", subject, len(e.Violations)))
 	for _, v := range e.Violations {
 		lines = append(lines, fmt.Sprintf("  %s: %s", v.Path, v.Message))
 	}
@@ -84,7 +89,7 @@ func Validate(f *File) error {
 	}
 
 	if len(violations) > 0 {
-		return &ValidationError{Violations: violations}
+		return &ValidationError{Subject: "tasks.json", Violations: violations}
 	}
 	return nil
 }
