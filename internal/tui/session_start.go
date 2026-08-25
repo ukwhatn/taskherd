@@ -102,6 +102,15 @@ func newFieldTextarea() textarea.Model {
 }
 
 // beginSessionStart opens the launch modal for a task with no linked session yet.
+//
+// A task whose first attempt never reached the link step (it failed before AddSession ran) has no
+// SessionRef yet, so RankSessionCwds has no candidates to offer even when that attempt's pane is
+// still alive and recoverable — the same gap start_cmd.go's resolveStartCwd closes on the CLI side
+// (§4.4 update). Closing it here means one herdr snapshot first, off the update loop like every
+// other herdr call in this file: opening the modal is deferred behind probeRecoverableCwdCmd rather
+// than probed synchronously, since a herdr call blocking the update loop would freeze the whole
+// board's key handling for however long it takes (including the CLI-fallback path, which can run to
+// several seconds) — every other call in this file already runs as a tea.Cmd for that reason.
 func (b *Board) beginSessionStart(task *model.Task) tea.Cmd {
 	if b.deps.Herdr == nil {
 		return status("herdr に接続できないため起動できない", true)
@@ -109,8 +118,23 @@ func (b *Board) beginSessionStart(task *model.Task) tea.Cmd {
 	if b.launch.pending {
 		return status("起動処理中...", true)
 	}
+	if b.sessionStartProbe != 0 {
+		return status("cwd の候補を確認中...", true)
+	}
 
 	candidates := model.RankSessionCwds(*b.file)
+	if len(candidates) == 0 {
+		b.sessionStartProbe = task.ID
+		return b.probeRecoverableCwdCmd(*task)
+	}
+	b.openSessionStartModal(*task, candidates)
+	return nil
+}
+
+// openSessionStartModal builds the launch modal's state and opens it. candidates is whatever the
+// caller has already settled on: RankSessionCwds's own ranking, or — when there were none — a
+// single recovered cwd from probeRecoverableCwdCmd standing in for it.
+func (b *Board) openSessionStartModal(task model.Task, candidates []string) {
 	b.sessionStart = sessionStartState{
 		taskID:     task.ID,
 		title:      task.Title,
@@ -123,14 +147,55 @@ func (b *Board) beginSessionStart(task *model.Task) tea.Cmd {
 	// Focus/Blur takes a pointer receiver, so calling it on a local variable before that variable
 	// is copied into the struct would blur or focus the copy already inside it, not the one left
 	// behind in the local.
-	b.sessionStart.prompt.SetValue(model.RenderPrompt(b.settings.SessionStart.TemplateFor(task.Status), *task))
+	b.sessionStart.prompt.SetValue(model.RenderPrompt(b.settings.SessionStart.TemplateFor(task.Status), task))
 	if len(candidates) == 0 {
 		// No candidate row exists to land the initial cursor on, so it starts on the free-text
 		// row instead — which means that row has the keyboard from the outset.
 		b.sessionStart.cwdInput.Focus()
 	}
 	b.openOverlay(modeSessionStart)
-	return nil
+}
+
+// sessionStartProbedMsg carries probeRecoverableCwdCmd's outcome back to the update loop.
+type sessionStartProbedMsg struct {
+	task model.Task
+	// recoveredCwd is the previous attempt's agent's cwd, or empty when there is none to recover (or
+	// herdr could not be asked) — findReusableAgent decides the rest once the real launch runs.
+	recoveredCwd string
+}
+
+// probeRecoverableCwdCmd is beginSessionStart's no-candidates fallback: one snapshot read for this
+// task's own previous-attempt agent (findReusableAgent's own lookup, minus the checks that need a
+// cwd this is what supplies), so the modal can offer a leftover pane's cwd as a candidate instead of
+// asking the user to already know it.
+func (b *Board) probeRecoverableCwdCmd(task model.Task) tea.Cmd {
+	return func() tea.Msg {
+		snapshot, err := b.deps.Herdr.Snapshot(b.ctx)
+		if err != nil {
+			return sessionStartProbedMsg{task: task}
+		}
+		agent, ok := snapshot.AgentByName(fmt.Sprintf("taskherd-%d", task.ID))
+		if !ok || !agentIsUsable(agent) {
+			return sessionStartProbedMsg{task: task}
+		}
+		return sessionStartProbedMsg{task: task, recoveredCwd: agent.Cwd}
+	}
+}
+
+// applySessionStartProbe is sessionStartProbedMsg's handler (Board.Update's only call site): a
+// probe superseded by the task disappearing (applyTasks resets sessionStartProbe to 0 for exactly
+// this) or by another one starting is dropped, its payload never reaching the modal.
+func (b *Board) applySessionStartProbe(msg sessionStartProbedMsg) {
+	if b.sessionStartProbe != msg.task.ID {
+		return
+	}
+	b.sessionStartProbe = 0
+
+	var candidates []string
+	if msg.recoveredCwd != "" {
+		candidates = []string{msg.recoveredCwd}
+	}
+	b.openSessionStartModal(msg.task, candidates)
 }
 
 func (b *Board) handleSessionStartKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -360,12 +425,12 @@ func (b *Board) findReusableAgent(ctx context.Context, msg sessionStartMsg) (*he
 		return nil, nil
 	}
 
-	sessionID := agent.SessionID()
-	if sessionID == "" || agent.AgentStatus == herdrc.StateBlocked {
+	if !agentIsUsable(agent) {
 		return nil, fmt.Errorf(
 			"#%d の前回の起動が pane %s に残っている（まだ使える状態ではない）。pane を確認する",
 			msg.taskID, agent.PaneID)
 	}
+	sessionID := agent.SessionID()
 	if file, loadErr := b.deps.Tasks.Load(); loadErr == nil {
 		if task, taskErr := file.Task(msg.taskID); taskErr == nil {
 			if _, linked := task.Session(sessionID); linked {
@@ -380,6 +445,12 @@ func (b *Board) findReusableAgent(ctx context.Context, msg sessionStartMsg) (*he
 			msg.taskID, agent.Cwd, agent.PaneID, msg.taskID, msg.cwd)
 	}
 	return agent, nil
+}
+
+// agentIsUsable mirrors the CLI's own helper of the same name (internal/cli/start_cmd.go): agent has
+// a session id and is not stuck waiting for input.
+func agentIsUsable(agent *herdrc.Agent) bool {
+	return agent.SessionID() != "" && agent.AgentStatus != herdrc.StateBlocked
 }
 
 func (b *Board) startAgentCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd {

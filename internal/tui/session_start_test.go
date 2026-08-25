@@ -230,6 +230,57 @@ func TestBoardSessionStartReusesIdleUnlinkedAgentInsteadOfCreatingANewPane(t *te
 	}
 }
 
+// A task whose first attempt never reached the link step has no SessionRef yet, so RankSessionCwds
+// offers nothing — but if that attempt's pane is still alive and recoverable, the modal should offer
+// its cwd as a candidate rather than making the user already know it (mirrors the CLI's own
+// resolveStartCwd fallback, §4.4 update). One h.key("g") call must be enough: the probe this runs
+// through in between (beginSessionStart, session_start.go) is itself entirely off the update loop.
+func TestBoardSessionStartOffersRecoveredAgentCwdWhenNoCandidateExists(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+	herdrOps := &fakeHerdr{snapshot: &herdrc.Snapshot{Agents: []herdrc.Agent{
+		{PaneID: "wS:p9", Name: "taskherd-1", AgentStatus: herdrc.StateIdle, Cwd: "/repo/first-attempt",
+			Session: &herdrc.AgentSession{Agent: "claude", Kind: "id", Value: "s-prev"}},
+	}}}
+	h := newHarness(t, Deps{Tasks: store, Herdr: herdrOps}, Settings{})
+
+	h.key("g")
+
+	if h.board.mode != modeSessionStart {
+		t.Fatalf("mode = %v, want modeSessionStart", h.board.mode)
+	}
+	if got := h.board.sessionStart.candidates; len(got) != 1 || got[0] != "/repo/first-attempt" {
+		t.Fatalf("candidates = %v, want [/repo/first-attempt]", got)
+	}
+	if h.board.sessionStart.cwdCursor != 0 {
+		t.Errorf("cwdCursor = %d, want 0（回収した候補が選ばれている）", h.board.sessionStart.cwdCursor)
+	}
+}
+
+// A probe still in flight when the target task disappears must not open the modal once it lands:
+// applyTasks (board.go) resets sessionStartProbe on exactly this, which is what makes the eventual
+// result stale.
+func TestBoardSessionStartProbeDroppedWhenTargetTaskDeletedBeforeItLands(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+	herdrOps := &fakeHerdr{snapshot: &herdrc.Snapshot{Agents: []herdrc.Agent{
+		{PaneID: "wS:p9", Name: "taskherd-1", AgentStatus: herdrc.StateIdle, Cwd: "/repo/a",
+			Session: &herdrc.AgentSession{Agent: "claude", Kind: "id", Value: "s-prev"}},
+	}}}
+	h := newHarness(t, Deps{Tasks: store, Herdr: herdrOps}, Settings{})
+
+	cmd := h.dispatch(keyMsg("g")) // probe queued, not yet run
+	if h.board.mode == modeSessionStart {
+		t.Fatal("probe が完了する前にモーダルが開いている")
+	}
+
+	h.dispatch(tasksLoadedMsg{file: model.NewFile()}) // task #1 gone while the probe is still in flight
+
+	h.run(cmd) // the probe lands now, its taskID no longer matching sessionStartProbe
+
+	if h.board.mode == modeSessionStart {
+		t.Error("消えたタスクのモーダルが開いている")
+	}
+}
+
 // g itself only opens the launch modal for a task with zero linked sessions (beginJump), so the
 // only way this branch is reachable is a session landing on the same task through another path
 // (picker, CLI) between opening the modal and submitting it.
@@ -322,6 +373,10 @@ func TestBoardSessionStartRefusesWhenExistingAgentIsInADifferentCwd(t *testing.T
 	h := newHarness(t, Deps{Tasks: store, Herdr: herdrOps}, Settings{})
 
 	h.key("g")
+	// The task has no SessionRef yet, so the modal's one candidate row is the recovered agent's own
+	// cwd (/repo/a) — moving off it onto the free-text row is what lets this test type a
+	// deliberately different one.
+	h.key("down")
 	h.board.sessionStart.cwdInput.SetValue("/repo/b")
 	h.key("enter")
 
