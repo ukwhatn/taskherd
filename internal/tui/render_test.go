@@ -499,6 +499,80 @@ func TestCollapsedStackSitsAtTheRightEdge(t *testing.T) {
 	}
 }
 
+// Regression for §2.7: renderColumns used to clip the joined body to bodyHeight only inside the
+// caller (renderBoard), *after* the notice had already been appended, so a body that ran over —
+// a card FitCards had to return oversized, or a folded-column stack taller than the columns beside
+// it — pushed the notice past the outer cut and dropped it from the screen entirely.
+func TestNoticeSurvivesWhenCardsOverflowTheColumn(t *testing.T) {
+	links := make([]model.Link, 8)
+	for i := range links {
+		links[i] = model.Link{URL: fmt.Sprintf("https://example.com/x%d", i), Kind: model.LinkKindOther}
+	}
+	store := newFakeStore(
+		model.Task{ID: 1, Title: "too many links to fit in the column's own height", Status: "todo", Links: links},
+		model.Task{ID: 2, Title: "working", Status: "working"},
+	)
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+	// Narrow enough that only one column is on screen (the notice appears), short enough that #1's
+	// card cannot fit in the column's own budget (FitCards still returns it whole).
+	h.board.width, h.board.height = 40, 11
+
+	view := stripANSI(h.board.render())
+	if !strings.Contains(view, "で移動") {
+		t.Fatalf("横スクロールの notice が出ていない:\n%s", view)
+	}
+	rows := strings.Split(view, "\n")
+	noticeRow := -1
+	for i, row := range rows {
+		if strings.Contains(row, "で移動") {
+			noticeRow = i
+		}
+	}
+	if noticeRow < 0 || noticeRow >= h.board.height-footerReserve {
+		t.Fatalf("notice の行 = %d, want 本文の最終行以内（footer の手前）: \n%s", noticeRow, view)
+	}
+}
+
+// Same regression, forced through the folded-column stack rather than an oversized card: the stack
+// is a box with one row per folded column regardless of the columns' own height budget, so enough
+// of them make it taller than the notice-adjusted body all on their own.
+func TestNoticeSurvivesWhenCollapsedStackIsTallerThanTheColumns(t *testing.T) {
+	tasks := []model.Task{task(1, "todo"), task(2, "working")}
+	columns := model.Columns{
+		{ID: "todo", Label: "ToDo", Kind: model.ColumnKindOpen},
+		{ID: "working", Label: "Working", Kind: model.ColumnKindOpen},
+	}
+	for i := 0; i < 6; i++ {
+		columns = append(columns, model.Column{
+			ID: fmt.Sprintf("done%d", i), Label: fmt.Sprintf("Done%d", i), Kind: model.ColumnKindTerminal,
+		})
+	}
+	h := newHarness(t, Deps{Tasks: newFakeStore(tasks...)}, Settings{Columns: columns})
+	// Narrow enough for one open column plus the stack (the notice appears), short enough that the
+	// stack's 6 rows plus its border do not fit in the notice-adjusted body height.
+	h.board.width, h.board.height = 45, 10
+
+	view := stripANSI(h.board.render())
+	if !strings.Contains(view, "で移動") {
+		t.Fatalf("横スクロールの notice が出ていない:\n%s", view)
+	}
+}
+
+// The bodyHeight==1 edge case named in §2.7: subtracting the notice's line brings the columns'
+// budget to zero, and padLines(body, 0) is "" — appending "\n"+notice to that unconditionally would
+// leave a blank line ahead of the notice for the outer clip to keep instead.
+func TestNoticeAloneFillsABodyHeightOfOne(t *testing.T) {
+	store := newFakeStore(task(1, "todo"), task(2, "working"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+	h.board.width, h.board.height = 40, 4 // height - footerReserve(3) == 1
+
+	view := stripANSI(h.board.render())
+	rows := strings.Split(view, "\n")
+	if len(rows) == 0 || !strings.Contains(rows[0], "で移動") {
+		t.Fatalf("bodyHeight=1 の本文行に notice が無い: %q\n全体:\n%s", rows[0], view)
+	}
+}
+
 // A folded column is drawn in the stack instead of taking a column of its own, so the board's
 // columns are the expanded ones and the sideways-scroll notice counts only those.
 func TestFoldingReturnsWidthToTheOpenColumns(t *testing.T) {

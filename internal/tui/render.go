@@ -110,10 +110,21 @@ func (b *Board) renderColumns(bodyHeight int) string {
 	if m.boardPad > 0 {
 		body = lipgloss.NewStyle().PaddingLeft(m.boardPad).Render(body)
 	}
-	if notice != "" {
-		body += "\n" + notice
+	// Clipped here, on the joined body, rather than left to the caller: a column whose card would
+	// not fit (FitCards still returns one) or a folded-column stack taller than the columns beside
+	// it can make this taller than bodyHeight, and cutting only the piece that ran over would leave
+	// the notice's reserved line with nothing in it while a row of real content still hung below.
+	body = padLines(body, bodyHeight)
+	if notice == "" {
+		return body
 	}
-	return body
+	if body == "" {
+		// padLines(body, 0): bodyHeight was 1 before the notice took its line. Prepending "\n" here
+		// would leave a blank first line that the caller's own clip (back to the original height)
+		// then keeps instead of the notice.
+		return notice
+	}
+	return body + "\n" + notice
 }
 
 // renderColumn draws one expanded column: its header, then whatever of its cards fits underneath.
@@ -133,6 +144,12 @@ func (b *Board) renderColumn(col Column, index, width, height int, m metrics) st
 // renderCards draws the run of cards that fits, with an indicator on either side reporting the
 // cards that did not: a column that runs out of room says so rather than cutting cards off.
 func (b *Board) renderCards(col Column, focused bool, width, avail int, m metrics) []string {
+	// avail is height-headerReserve, and height can be 0 (the notice took the terminal's one
+	// remaining line, §2.7): floor it here rather than at every caller, so make() below never sees
+	// a negative capacity.
+	if avail < 0 {
+		avail = 0
+	}
 	cards := make([]Card, len(col.Tasks))
 	heights := make([]int, len(col.Tasks))
 	for i, task := range col.Tasks {
