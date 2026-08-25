@@ -200,11 +200,18 @@ func snapshotJSON(agents ...string) string {
 }
 
 func agentJSON(paneID, sessionID, status, cwd string) string {
+	return agentJSONNamed("", paneID, sessionID, status, cwd)
+}
+
+// agentJSONNamed is agentJSON plus the identifier `agent start` registered the agent under,
+// which is what AgentByName resolves.
+func agentJSONNamed(name, paneID, sessionID, status, cwd string) string {
 	session := "null"
 	if sessionID != "" {
 		session = `{"agent":"claude","kind":"id","source":"herdr:claude","value":"` + sessionID + `"}`
 	}
 	return `{"pane_id":"` + paneID + `","tab_id":"wS:t1","workspace_id":"wS","agent":"claude",` +
+		`"name":"` + name + `",` +
 		`"agent_status":"` + status + `","cwd":"` + cwd + `","agent_session":` + session +
 		`,"terminal_title_stripped":"作業中"}`
 }

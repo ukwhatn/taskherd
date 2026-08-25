@@ -89,6 +89,32 @@ func TestSnapshotDecodesAgentsAndSessions(t *testing.T) {
 	}
 }
 
+// AgentByName resolves the identifier `agent start` registered the agent under (the TARGET for
+// agent focus etc.), which is a different string from the display name pane report-metadata sets
+// and is never itself decoded onto Agent.
+func TestAgentByNameFindsAgentByIdentifierNotDisplayName(t *testing.T) {
+	fake := newFakeHerdr(t, snapshotJSON(
+		agentJSONNamed("taskherd-43", "wS:p2", "s-43", "idle", "/repo"),
+	))
+	client := newClient(t, fake, nil)
+
+	snapshot, err := client.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	agent, ok := snapshot.AgentByName("taskherd-43")
+	if !ok || agent.PaneID != "wS:p2" {
+		t.Fatalf("AgentByName = %+v (ok=%v), want wS:p2", agent, ok)
+	}
+	if _, ok := snapshot.AgentByName("taskherd-99"); ok {
+		t.Error("登録されていない名前が一致した")
+	}
+	if _, ok := snapshot.AgentByName(""); ok {
+		t.Error("空の名前が一致した")
+	}
+}
+
 // Each request needs its own connection: the real server closes the connection after answering.
 func TestSnapshotWorksAcrossSuccessiveCalls(t *testing.T) {
 	fake := newFakeHerdr(t, snapshotJSON(agentJSON("wS:p1", "s-1", "idle", "/repo")))
