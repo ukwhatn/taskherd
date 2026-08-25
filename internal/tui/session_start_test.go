@@ -339,6 +339,29 @@ func TestBoardSessionStartRefusesWhenExistingAgentIsInADifferentCwd(t *testing.T
 	}
 }
 
+// The recovery check itself is only a snapshot read: when herdr cannot answer it, the launch must
+// still attempt a fresh start rather than failing outright — CreateTab/StartAgent right after are
+// what actually report herdr being unreachable, if it really is (mirrors the CLI's own
+// findReusableAgent fallback).
+func TestBoardSessionStartProceedsFreshWhenRecoveryCheckCannotReachHerdr(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+	herdrOps := waitingHerdr("s-new")
+	herdrOps.snapshotErr = errUnavailable
+	h := newHarness(t, Deps{Tasks: store, Herdr: herdrOps}, Settings{})
+
+	h.key("g")
+	h.board.sessionStart.cwdInput.SetValue("/repo/work")
+	h.key("enter")
+
+	if len(herdrOps.tabs) != 1 {
+		t.Fatalf("tabs = %+v, want 1 件（回収チェック失敗時は新規起動へフォールバック）", herdrOps.tabs)
+	}
+	task := store.snapshot().Tasks[0]
+	if len(task.Sessions) != 1 || task.Sessions[0].SessionID != "s-new" {
+		t.Errorf("sessions = %+v", task.Sessions)
+	}
+}
+
 // blocked is what an untrusted cwd's agent settles into (herdr's own trust-folder gate), and it
 // never carries a session id — the single most common way a wait ends without one. The status
 // message must name that instead of the generic "herdr がセッション id を報告しなかった".
