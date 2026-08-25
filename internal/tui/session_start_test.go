@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/ukwhatn/taskherd/internal/config"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
@@ -33,6 +34,48 @@ func TestBoardGOpensLaunchModalForTaskWithoutSession(t *testing.T) {
 	}
 	if h.board.sessionStart.taskID != 1 {
 		t.Errorf("taskID = %d, want 1", h.board.sessionStart.taskID)
+	}
+}
+
+// The modal's initial prompt is settings.SessionStart.TemplateFor(task.Status), not the built-in
+// default: a column with its own Templates entry must see that entry rendered from the outset.
+// The task sits in "todo", the first of testColumns(), so it is the one already selected when g
+// is pressed with nothing else to navigate to first.
+func TestBoardSessionStartInitialPromptUsesColumnTemplate(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "設計する", Status: "todo"})
+	settings := Settings{
+		SessionStart: config.SessionStart{
+			PromptTemplate: "デフォルト: #{{id}} {{title}}",
+			Templates:      map[string]string{"todo": "todo専用: #{{id}} {{title}}"},
+		},
+	}
+	h := newHarness(t, Deps{Tasks: store, Herdr: &fakeHerdr{}}, settings)
+
+	h.key("g")
+
+	want := "todo専用: #1 設計する"
+	if got := h.board.sessionStart.prompt.Value(); got != want {
+		t.Errorf("prompt = %q, want %q", got, want)
+	}
+}
+
+// An explicit empty-string override in Templates means "launch without a prompt" for that column
+// (config.SessionStart.TemplateFor's own contract), and the modal's initial value must reflect
+// that rather than falling back to PromptTemplate.
+func TestBoardSessionStartInitialPromptEmptyColumnTemplateSuppressesPrompt(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+	settings := Settings{
+		SessionStart: config.SessionStart{
+			PromptTemplate: "デフォルト: #{{id}} {{title}}",
+			Templates:      map[string]string{"todo": ""},
+		},
+	}
+	h := newHarness(t, Deps{Tasks: store, Herdr: &fakeHerdr{}}, settings)
+
+	h.key("g")
+
+	if got := h.board.sessionStart.prompt.Value(); got != "" {
+		t.Errorf("prompt = %q, want 空（明示的な空テンプレート）", got)
 	}
 }
 
@@ -273,6 +316,32 @@ func TestBoardSessionStartAltEnterInsertsNewlineInPrompt(t *testing.T) {
 
 	if got := h.board.sessionStart.prompt.Value(); !strings.Contains(got, "1\n2") {
 		t.Errorf("prompt = %q, want 改行で 2 行", got)
+	}
+}
+
+// Shift+Enter must behave like Alt+Enter/Ctrl+J in the prompt field — a newline, not a submit —
+// once the terminal has answered the keyboard-enhancement query (Board.shiftEnter), the same rule
+// isNewlineKey already applies to the add modal.
+func TestBoardSessionStartShiftEnterInsertsNewlineInPrompt(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+	herdrOps := &fakeHerdr{}
+	h := newHarness(t, Deps{Tasks: store, Herdr: herdrOps}, Settings{})
+	h.dispatch(tea.KeyboardEnhancementsMsg{Flags: 1})
+
+	h.key("g")
+	h.key("tab") // cwd -> prompt
+	h.board.sessionStart.prompt.SetValue("1")
+	h.dispatch(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	h.typeText("2")
+
+	if got := h.board.sessionStart.prompt.Value(); !strings.Contains(got, "1\n2") {
+		t.Errorf("prompt = %q, want 改行で 2 行", got)
+	}
+	if h.board.mode != modeSessionStart {
+		t.Errorf("mode = %v, want モーダルを維持したまま（submit していない）", h.board.mode)
+	}
+	if len(herdrOps.tabs) != 0 {
+		t.Error("shift+enter で起動が走った")
 	}
 }
 
