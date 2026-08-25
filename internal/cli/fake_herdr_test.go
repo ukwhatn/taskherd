@@ -52,6 +52,8 @@ type promptCall struct {
 type fakeAgent struct {
 	PaneID string
 	Agent  string
+	// Name is the identifier `agent start` registered the agent under, which AgentByName resolves.
+	Name   string
 	Status string
 	Cwd    string
 }
@@ -181,8 +183,8 @@ func (f *fakeHerdr) snapshotJSON() string {
 			session = fmt.Sprintf(`{"agent":%q,"kind":"id","source":"herdr:claude","value":%q}`, agent.Agent, sessionID)
 		}
 		entries = append(entries, fmt.Sprintf(
-			`{"pane_id":%q,"tab_id":"wS:t1","workspace_id":"wS","agent":%q,"agent_status":%q,"cwd":%q,"agent_session":%s}`,
-			agent.PaneID, agent.Agent, agent.Status, agent.Cwd, session))
+			`{"pane_id":%q,"tab_id":"wS:t1","workspace_id":"wS","agent":%q,"name":%q,"agent_status":%q,"cwd":%q,"agent_session":%s}`,
+			agent.PaneID, agent.Agent, agent.Name, agent.Status, agent.Cwd, session))
 	}
 	return `{"version":"0.8.2","protocol":20,"focused_workspace_id":"wS","focused_tab_id":"wS:t1",` +
 		`"focused_pane_id":"wS:p1","panes":[],"agents":[` + strings.Join(entries, ",") + `]}`
