@@ -5,17 +5,13 @@ import (
 	"testing"
 )
 
-// Regression: opening a task's detail directly (the pane's session is already linked) must not
-// require an open column the way `board` itself does. requireOpenColumn is a rule about a board
-// the cursor has to move around on, not about opening one task's detail by id, and
-// Columns.Validate accepts a terminal-only config — so before the fix, picker refused this whole
-// scenario outright with requireOpenColumn's own UserError, leaving neither a detail nor a picker
-// fallback for a config board itself never rejects unless someone tries to open one.
+// Regression for the requireOpenColumn skip in picker_cmd.go: a terminal-only column config must
+// not stop the detail-direct-launch path.
 //
-// The test cannot observe the board actually opening (there is no TTY in a test run, so
-// tui.Run fails at that point regardless), but that failure is itself the signal: it only reaches
+// The test cannot observe the board actually opening (there is no TTY in a test run, so tui.Run
+// fails at that point regardless), but that failure is itself the signal: it only reaches
 // tui.Run — and its distinct "could not open TTY" error — once requireOpenColumn has been skipped.
-// Reintroducing the check in this branch makes this test fail (verified below the fix).
+// Reintroducing the check in that branch makes this test fail on the "open" text below instead.
 func TestPickerOpensDetailEvenWithoutAnOpenColumn(t *testing.T) {
 	h := newHarness(t)
 	h.mustRun(t, "add", "task with a linked session")
@@ -28,12 +24,6 @@ id = "done"
 label = "Done"
 kind = "terminal"
 color = "purple"
-
-[[columns]]
-id = "wontfix"
-label = "Wontfix"
-kind = "terminal"
-color = "gray"
 `)
 	h.env["TASKHERD_TARGET_PANE"] = "wS:p1"
 

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"maps"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -167,7 +168,7 @@ func TestMouseIgnoredOutsideBoardMode(t *testing.T) {
 			}
 
 			colBefore := h.board.colIdx
-			selBefore := cloneSelected(h.board.selected)
+			selBefore := maps.Clone(h.board.selected)
 
 			h.dispatch(tea.MouseClickMsg{X: region.x, Y: region.y, Button: tea.MouseLeft})
 			h.dispatch(tea.MouseWheelMsg{X: region.x, Y: region.y, Button: tea.MouseWheelDown})
@@ -179,7 +180,7 @@ func TestMouseIgnoredOutsideBoardMode(t *testing.T) {
 			if h.board.colIdx != colBefore {
 				t.Errorf("colIdx が動いた: %d -> %d", colBefore, h.board.colIdx)
 			}
-			if !selectedEqual(h.board.selected, selBefore) {
+			if !maps.Equal(h.board.selected, selBefore) {
 				t.Errorf("selected が動いた: %v -> %v", selBefore, h.board.selected)
 			}
 		})
@@ -224,24 +225,4 @@ func TestMouseWheelMatchesKeyMovement(t *testing.T) {
 	if got, want := left.board.colIdx, leftKey.board.colIdx; got != want {
 		t.Errorf("wheel left の colIdx = %d, want %d（key left と同じ）", got, want)
 	}
-}
-
-func cloneSelected(m map[string]int) map[string]int {
-	out := make(map[string]int, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
-}
-
-func selectedEqual(a, b map[string]int) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if b[k] != v {
-			return false
-		}
-	}
-	return true
 }

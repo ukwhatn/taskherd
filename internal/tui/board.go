@@ -72,9 +72,8 @@ type Board struct {
 	// focusTaskID pulls the selection onto a specific task after the next rebuild, so a card
 	// stays under the cursor after it moves to another column.
 	focusTaskID int
-	// cardRegions are the on-screen rectangles the last renderColumns pass drew the cards in,
-	// rebuilt on every render. A mouse click maps a screen cell back to a task through this rather
-	// than through a second, independent layout computation.
+	// cardRegions are the on-screen rectangles the last renderColumns pass drew the cards in
+	// (cardRegion, hit.go), rebuilt on every render.
 	cardRegions []cardRegion
 	// pendingDetailTaskID is Settings.DetailTaskID, consumed the first time applyTasks runs with the
 	// task list actually in hand: the initial View() can land before that (bubbletea v2 calls it
@@ -441,26 +440,20 @@ func (b *Board) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return b, nil
 	}
-	b.selectCard(region.columnIndex, region.taskID)
+	b.selectCard(region.taskID)
 	return b, b.openDetail()
 }
 
-// selectCard moves the cursor onto the given task within the given column, the two identifiers a
-// cardRegion carries: the column comes from where the card was drawn rather than a fresh lookup by
-// task id, so a click lands where it was clicked even if the task moved column between the render
-// and the click reaching Update.
-func (b *Board) selectCard(columnIndex, taskID int) {
-	if columnIndex < 0 || columnIndex >= len(b.columns) {
+// selectCard moves the cursor onto the given task, looked up fresh in the board's current columns
+// (findTask) rather than trusted from where the click's region was recorded: a card can change
+// column between the render that placed it and the click reaching Update.
+func (b *Board) selectCard(taskID int) {
+	col, row, ok := findTask(b.columns, taskID)
+	if !ok {
 		return
 	}
-	col := b.columns[columnIndex]
-	for i, task := range col.Tasks {
-		if task.ID == taskID {
-			b.colIdx = columnIndex
-			b.selected[col.Key()] = i
-			return
-		}
-	}
+	b.colIdx = col
+	b.selected[b.columns[col].Key()] = row
 }
 
 // handleMouseWheel drives the same cursor movement the arrow keys do: vertical scroll steps the

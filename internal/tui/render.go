@@ -123,18 +123,16 @@ func (b *Board) renderColumns(bodyHeight int) string {
 	if m.boardPad > 0 {
 		body = lipgloss.NewStyle().PaddingLeft(m.boardPad).Render(body)
 	}
-	// Clipped here, on the joined body, rather than left to the caller: a column whose card would
-	// not fit (FitCards still returns one) or a folded-column stack taller than the columns beside
-	// it can make this taller than bodyHeight, and cutting only the piece that ran over would leave
-	// the notice's reserved line with nothing in it while a row of real content still hung below.
+	// Clipped here, on the joined body, rather than left to the caller: only this point sees the
+	// combined height of every block (columns and stack alike), which is what an oversized card or
+	// stack can push past bodyHeight.
 	body = padLines(body, bodyHeight)
 	if notice == "" {
 		return body
 	}
 	if body == "" {
-		// padLines(body, 0): bodyHeight was 1 before the notice took its line. Prepending "\n" here
-		// would leave a blank first line that the caller's own clip (back to the original height)
-		// then keeps instead of the notice.
+		// padLines(body, 0) is "": appending unconditionally would add a blank line the outer clip
+		// keeps instead of the notice.
 		return notice
 	}
 	return body + "\n" + notice
@@ -152,7 +150,7 @@ func (b *Board) renderColumn(col Column, index, x, width, height int, m metrics)
 	if len(col.Tasks) == 0 {
 		lines = append(lines, b.renderEmptyColumn(width, m))
 	} else {
-		lines = append(lines, b.renderCards(col, index, focused, x, width, height-headerReserve, height, m)...)
+		lines = append(lines, b.renderCards(col, focused, x, width, height-headerReserve, height, m)...)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -164,7 +162,7 @@ func (b *Board) renderColumn(col Column, index, x, width, height int, m metrics)
 // row a card's first line lands on within this column is also its row in the final screen: that is
 // what lets clipHeight — the same bound renderColumns clips the whole joined body to — double as
 // the cutoff for how much of this card's rectangle is actually visible.
-func (b *Board) renderCards(col Column, index int, focused bool, x, width, avail, clipHeight int, m metrics) []string {
+func (b *Board) renderCards(col Column, focused bool, x, width, avail, clipHeight int, m metrics) []string {
 	// avail is height-headerReserve, and height can be 0 (the notice took the terminal's one
 	// remaining line, §2.7): floor it here rather than at every caller, so make() below never sees
 	// a negative capacity.
@@ -203,7 +201,7 @@ func (b *Board) renderCards(col Column, index int, focused bool, x, width, avail
 			h = visible
 		}
 		if h > 0 {
-			b.cardRegions = append(b.cardRegions, cardRegion{columnIndex: index, taskID: cards[i].TaskID, x: x, y: top, w: width, h: h})
+			b.cardRegions = append(b.cardRegions, cardRegion{taskID: cards[i].TaskID, x: x, y: top, w: width, h: h})
 		}
 		y += heights[i]
 	}

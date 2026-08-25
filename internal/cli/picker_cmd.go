@@ -35,13 +35,9 @@ func (a *app) pickerCmd() *cobra.Command {
 			}
 
 			if taskID, ok := a.resolvePaneDetailTask(cmd.Context(), targetPane); ok {
-				// requireOpenColumn is not checked here on purpose: it is boardCmd's own rule
-				// ("This is a rule about the board and not about the config" — its own doc comment),
-				// about a board the cursor has to move around on. Opening one task's detail by id
-				// needs no column to put a cursor on, and Columns.Validate accepts a terminal-only
-				// config, so requiring an open column here would refuse this whole feature outright
-				// — no detail and no picker fallback — for a config board itself never rejects
-				// unless someone actually tries to open it.
+				// requireOpenColumn is deliberately not checked here: it guards a board the cursor
+				// moves around on, not one task's detail opened by id, and Columns.Validate allows a
+				// terminal-only config that would otherwise refuse this whole feature outright.
 				settings := a.boardSettings(cfg)
 				settings.DetailTaskID = taskID
 				return tui.Run(cmd.Context(), a.boardDeps(cmd.Context(), cfg), settings)

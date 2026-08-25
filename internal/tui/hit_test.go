@@ -1,11 +1,9 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ukwhatn/taskherd/internal/model"
 )
@@ -30,8 +28,8 @@ func TestCardRegionContains(t *testing.T) {
 
 func TestHitCard(t *testing.T) {
 	regions := []cardRegion{
-		{columnIndex: 0, taskID: 1, x: 0, y: 0, w: 5, h: 2},
-		{columnIndex: 1, taskID: 2, x: 10, y: 0, w: 5, h: 2},
+		{taskID: 1, x: 0, y: 0, w: 5, h: 2},
+		{taskID: 2, x: 10, y: 0, w: 5, h: 2},
 	}
 
 	if got, ok := hitCard(regions, 2, 1); !ok || got.taskID != 1 {
@@ -60,22 +58,12 @@ func assertRegionMatchesScreen(t *testing.T, h *harness, screen string, region c
 	t.Helper()
 	rows := strings.Split(screen, "\n")
 
-	if region.columnIndex < 0 || region.columnIndex >= len(h.board.columns) {
-		t.Fatalf("region.columnIndex = %d は範囲外（列数 %d）", region.columnIndex, len(h.board.columns))
+	colIdx, rowIdx, ok := findTask(h.board.columns, region.taskID)
+	if !ok {
+		t.Fatalf("region の taskID #%d がどの列にも見つからない", region.taskID)
 	}
-	col := h.board.columns[region.columnIndex]
-
-	var task model.Task
-	rowIdx := -1
-	for i, tk := range col.Tasks {
-		if tk.ID == region.taskID {
-			task, rowIdx = tk, i
-			break
-		}
-	}
-	if rowIdx < 0 {
-		t.Fatalf("region の taskID #%d が列 %d（%s）に見つからない", region.taskID, region.columnIndex, col.Label)
-	}
+	col := h.board.columns[colIdx]
+	task := col.Tasks[rowIdx]
 
 	// Density and metrics are shared, already independently tested pure functions
 	// (ChooseDensity/layout_test.go) — reusing them is not the position arithmetic the docstring
@@ -86,7 +74,7 @@ func assertRegionMatchesScreen(t *testing.T, h *harness, screen string, region c
 	m := ChooseDensity(expanded, h.board.width, stackWidth).metrics()
 
 	card := BuildCard(task, BuildSessionBadge(task, h.board.sessions, h.board.icons), h.board.links, h.board.cardStyle(), h.board.deps.now())
-	focused := region.columnIndex == h.board.colIdx && rowIdx == h.board.selectedIndex(col)
+	focused := colIdx == h.board.colIdx && rowIdx == h.board.selectedIndex(col)
 	want := strings.Split(stripANSI(h.board.renderCard(card, col, region.w, focused, m)), "\n")
 
 	visible := 0
@@ -140,8 +128,9 @@ func TestCardRegionsMatchRenderedScreenSingleColumn(t *testing.T) {
 	}
 }
 
-// A second column, one of them focused, checks that columnIndex is recorded in board-wide
-// coordinates and that only the truly focused card's region is built from a focused render.
+// A second column, one of them focused, checks that a region's task resolves to the right column
+// board-wide (findTask, the same lookup a click resolves through) and that only the truly focused
+// card's region is built from a focused render.
 func TestCardRegionsMatchAcrossColumnsWithFocus(t *testing.T) {
 	tasks := append(asciiTasks(2, "todo"), model.Task{ID: 3, Title: "working card", Status: "working"})
 	h := newHarness(t, Deps{Tasks: newFakeStore(tasks...)}, Settings{})
@@ -156,12 +145,12 @@ func TestCardRegionsMatchAcrossColumnsWithFocus(t *testing.T) {
 		assertRegionMatchesScreen(t, h, screen, region)
 	}
 
-	region, ok := findRegion(h.board.cardRegions, 3)
-	if !ok {
+	if _, ok := findRegion(h.board.cardRegions, 3); !ok {
 		t.Fatal("working 列のカードの矩形が無い")
 	}
-	if col := h.board.columns[region.columnIndex]; col.ID != "working" {
-		t.Errorf("columnIndex = %d (%s), want working 列", region.columnIndex, col.ID)
+	colIdx, _, ok := findTask(h.board.columns, 3)
+	if !ok || h.board.columns[colIdx].ID != "working" {
+		t.Errorf("findTask(3) の列 = %d, want working 列", colIdx)
 	}
 }
 
@@ -202,9 +191,7 @@ func TestCardRegionsWithScrollOffset(t *testing.T) {
 	}
 }
 
-// A narrow board that only fits one of several columns draws the sideways-scroll notice, which the
-// visible column's cards have to leave room for (§2.7): a region reaching into that row would be
-// wrong even though it would still pass a naive "renderCard prefix" check.
+// A region must not reach into the sideways-scroll notice's row (§2.7).
 func TestCardRegionsWithSidewaysScrollNotice(t *testing.T) {
 	tasks := []model.Task{task(1, "todo"), task(2, "working")}
 	h := newHarness(t, Deps{Tasks: newFakeStore(tasks...)}, Settings{})
@@ -220,10 +207,7 @@ func TestCardRegionsWithSidewaysScrollNotice(t *testing.T) {
 	assertRegionMatchesScreen(t, h, screen, h.board.cardRegions[0])
 }
 
-// §2.6: FitCards still returns one card even when it does not fit the column's own budget, and the
-// outer clip in renderColumns then cuts it. The region has to shrink to whatever survived that cut,
-// not to the card's full (unclipped) height — recording the full height would let a click past the
-// visible bottom of the card still open it.
+// A region must shrink to the card's clipped height (§2.6), not its full unclipped one.
 func TestCardRegionsClippedWhenCardOverflowsColumn(t *testing.T) {
 	links := make([]model.Link, 8)
 	for i := range links {
@@ -248,8 +232,8 @@ func TestCardRegionsClippedWhenCardOverflowsColumn(t *testing.T) {
 	assertRegionMatchesScreen(t, h, screen, region)
 }
 
-// The §2.7 regression combined with clipping: a notice competing for the same short column budget
-// as an oversized card must still leave both the notice and a correctly clipped region intact.
+// §2.7 combined with §2.6's clip: both the notice and a correctly clipped region must survive
+// together.
 func TestCardRegionsClippedWithNoticePresent(t *testing.T) {
 	links := make([]model.Link, 6)
 	for i := range links {

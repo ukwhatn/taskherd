@@ -5,13 +5,12 @@ package tui
 // reproducing ChooseDensity, LayoutColumns, FitCards and cardHeight a second time, and the two
 // copies could drift apart silently the moment only one of them changed.
 //
-// columnIndex is the column's position among every column the board holds (the same coordinate
-// space as Board.colIdx), not just the visible ones: a click has to move the cursor there, and the
-// cursor is addressed board-wide.
+// It carries taskID rather than a column, so the click handler looks the task up in the board's
+// current columns instead of trusting where it was drawn: a card can change column between the
+// render that placed it and the click reaching Update.
 type cardRegion struct {
-	columnIndex int
-	taskID      int
-	x, y, w, h  int
+	taskID     int
+	x, y, w, h int
 }
 
 // contains reports whether the screen cell (x, y) falls inside the region.

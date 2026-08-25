@@ -499,10 +499,8 @@ func TestCollapsedStackSitsAtTheRightEdge(t *testing.T) {
 	}
 }
 
-// Regression for §2.7: renderColumns used to clip the joined body to bodyHeight only inside the
-// caller (renderBoard), *after* the notice had already been appended, so a body that ran over —
-// a card FitCards had to return oversized, or a folded-column stack taller than the columns beside
-// it — pushed the notice past the outer cut and dropped it from the screen entirely.
+// Regression (§2.7): an oversized card (FitCards returns one even past the column's own budget)
+// must not push the sideways-scroll notice off screen.
 func TestNoticeSurvivesWhenCardsOverflowTheColumn(t *testing.T) {
 	links := make([]model.Link, 8)
 	for i := range links {
@@ -533,9 +531,8 @@ func TestNoticeSurvivesWhenCardsOverflowTheColumn(t *testing.T) {
 	}
 }
 
-// Same regression, forced through the folded-column stack rather than an oversized card: the stack
-// is a box with one row per folded column regardless of the columns' own height budget, so enough
-// of them make it taller than the notice-adjusted body all on their own.
+// Same regression, forced through the folded-column stack instead: enough folded columns make the
+// stack alone taller than the notice-adjusted body.
 func TestNoticeSurvivesWhenCollapsedStackIsTallerThanTheColumns(t *testing.T) {
 	tasks := []model.Task{task(1, "todo"), task(2, "working")}
 	columns := model.Columns{
@@ -558,9 +555,7 @@ func TestNoticeSurvivesWhenCollapsedStackIsTallerThanTheColumns(t *testing.T) {
 	}
 }
 
-// The bodyHeight==1 edge case named in §2.7: subtracting the notice's line brings the columns'
-// budget to zero, and padLines(body, 0) is "" — appending "\n"+notice to that unconditionally would
-// leave a blank line ahead of the notice for the outer clip to keep instead.
+// The bodyHeight==1 edge case (§2.7): the notice's own line is all there is room for.
 func TestNoticeAloneFillsABodyHeightOfOne(t *testing.T) {
 	store := newFakeStore(task(1, "todo"), task(2, "working"))
 	h := newHarness(t, Deps{Tasks: store}, Settings{})
