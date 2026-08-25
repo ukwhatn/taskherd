@@ -35,12 +35,13 @@ func (a *app) pickerCmd() *cobra.Command {
 			}
 
 			if taskID, ok := a.resolvePaneDetailTask(cmd.Context(), targetPane); ok {
-				// The same order boardCmd itself uses: the check that refuses a columnless board
-				// runs before boardDeps, which is what starts the file and herdr watchers — a
-				// refusal after that point would return without their deferred Close registered.
-				if err := requireOpenColumn(cfg.Columns); err != nil {
-					return err
-				}
+				// requireOpenColumn is not checked here on purpose: it is boardCmd's own rule
+				// ("This is a rule about the board and not about the config" — its own doc comment),
+				// about a board the cursor has to move around on. Opening one task's detail by id
+				// needs no column to put a cursor on, and Columns.Validate accepts a terminal-only
+				// config, so requiring an open column here would refuse this whole feature outright
+				// — no detail and no picker fallback — for a config board itself never rejects
+				// unless someone actually tries to open it.
 				settings := a.boardSettings(cfg)
 				settings.DetailTaskID = taskID
 				return tui.Run(cmd.Context(), a.boardDeps(cmd.Context(), cfg), settings)
