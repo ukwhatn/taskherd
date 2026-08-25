@@ -156,7 +156,20 @@ func widthSafetyScreens(t *testing.T, mode IconMode) map[string]string {
 	sessionStart := boardWithSessionStart(t, mode)
 	screens["session-start"] = sessionStart.board.render()
 
+	fromStart := boardWithDetailFromStart(t, mode)
+	screens["detail/from-start"] = fromStart.board.render()
+
 	return screens
+}
+
+// boardWithDetailFromStart opens straight into a task's detail the way prefix+t does for a pane
+// whose session is already linked to one.
+func boardWithDetailFromStart(t *testing.T, mode IconMode) *harness {
+	t.Helper()
+	tasks := []model.Task{{ID: 1, Title: "task with a linked session", Status: "todo",
+		Sessions: []model.SessionRef{{Agent: "claude", SessionID: "s-1", Cwd: "/tmp/work"}}}}
+	return newHarness(t, Deps{Tasks: newFakeStore(tasks...), Herdr: &fakeHerdr{}},
+		Settings{Columns: model.DefaultColumns(), Icons: mode, Classifier: testClassifier, DetailTaskID: 1})
 }
 
 // boardWithSessionStart opens the launch modal (g on a task with no linked session) over a board

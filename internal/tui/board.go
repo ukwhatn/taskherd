@@ -76,6 +76,12 @@ type Board struct {
 	// rebuilt on every render. A mouse click maps a screen cell back to a task through this rather
 	// than through a second, independent layout computation.
 	cardRegions []cardRegion
+	// pendingDetailTaskID is Settings.DetailTaskID, consumed the first time applyTasks runs with the
+	// task list actually in hand: the initial View() can land before that (bubbletea v2 calls it
+	// once before any Init() Cmd resolves), so opening the modal cannot happen in New() itself.
+	// Zeroed on consumption, whether or not the task turned out to still exist, which is what makes
+	// this a one-time request rather than something the board keeps trying to honour.
+	pendingDetailTaskID int
 
 	width  int
 	height int
@@ -200,12 +206,13 @@ func New(ctx context.Context, deps Deps, settings Settings) *Board {
 		cache:    &fetch.CacheFile{Version: 1, Entries: map[string]fetch.CacheEntry{}},
 		links:    map[string]fetch.LinkState{},
 		// Without a cache there is nothing to wait for before the first fetch.
-		cacheLoaded:      deps.Cache == nil,
-		selected:         map[string]int{},
-		offsets:          map[string]int{},
-		collapseTerminal: true,
-		width:            80,
-		height:           24,
+		cacheLoaded:         deps.Cache == nil,
+		selected:            map[string]int{},
+		offsets:             map[string]int{},
+		collapseTerminal:    true,
+		pendingDetailTaskID: settings.DetailTaskID,
+		width:               80,
+		height:              24,
 	}
 }
 
@@ -684,6 +691,19 @@ func (b *Board) applyTasks(msg tasksLoadedMsg) tea.Cmd {
 	b.rebuildLinks()
 	b.rebuildSessions()
 	b.tasksLoaded = true
+
+	// Consumed on the first successful load regardless of whether the task is still there: a load
+	// that fails returns above before reaching here, so a transient failure leaves the request
+	// intact for the next one, but a load that succeeds and simply finds nothing to open must not
+	// leave the request standing for some later reload to act on instead.
+	if id := b.pendingDetailTaskID; id != 0 {
+		b.pendingDetailTaskID = 0
+		if b.taskByID(id) != nil {
+			b.mode = modeDetail
+			b.detail = newDetailState(id)
+			b.detail.quitOnClose = true
+		}
+	}
 
 	// The detail modal is pinned to a task id, so a task deleted underneath it (by the CLI, or
 	// by another session) has to close it rather than leave it on nothing.

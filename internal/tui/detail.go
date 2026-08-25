@@ -63,6 +63,13 @@ type detailState struct {
 	taskID int
 	cursor int
 	offset int
+	// quitOnClose marks a detail opened straight from startup (prefix+t on a pane whose session was
+	// already linked to a task): Esc there ends the whole program — the popup herdr opened just for
+	// this — rather than falling back to a board the launch was never meant to show. It lives here
+	// rather than as a Board-wide flag because detail closes through more paths than Esc (the task
+	// disappearing underneath it, most notably), and a flag on Board would still be set the next
+	// time a board-opened detail closed, ending the program along with it.
+	quitOnClose bool
 
 	editing  bool
 	editKind detailEditKind
@@ -197,6 +204,9 @@ func (b *Board) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "esc":
+		if b.detail.quitOnClose {
+			return b, tea.Quit
+		}
 		b.mode = modeBoard
 	case "up":
 		b.detail.move(-1, len(items))

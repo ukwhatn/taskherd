@@ -87,6 +87,10 @@ type Settings struct {
 	// (rather than pre-resolved) because which template applies depends on the task being started,
 	// decided at launch time rather than once when the board opens.
 	SessionStart config.SessionStart
+	// DetailTaskID opens the board straight into that task's detail modal once the first task list
+	// arrives, for prefix+t launched from a pane whose session is already linked to a task. Zero
+	// leaves the board on the ordinary board screen.
+	DetailTaskID int
 }
 
 func (d Deps) now() time.Time {
