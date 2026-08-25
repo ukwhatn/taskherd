@@ -172,6 +172,16 @@ func (a *app) promptStartCwd(candidates []string) (string, error) {
 	return cwd, nil
 }
 
+// sessionWaitTimeout is the budget WaitForAgentSession gets: sessionStartWaitTimeout, unless a
+// test has overridden it through Env.SessionStartWaitTimeout to drive the wait without actually
+// waiting out the real budget.
+func (a *app) sessionWaitTimeout() time.Duration {
+	if a.env.SessionStartWaitTimeout > 0 {
+		return a.env.SessionStartWaitTimeout
+	}
+	return sessionStartWaitTimeout
+}
+
 // findReusableAgent looks for a previous launch's agent under this task's own name, before
 // anything is created: a pane left over from an earlier attempt must be recovered rather than
 // getting a second one piled on top of it (§4 of the design). herdr only ever assigns this name to
@@ -249,7 +259,7 @@ func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt st
 				fmt.Sprintf("pane %s を開いて応答してから、セッション picker から後で紐づける", started.PaneID))
 		}
 
-		agent, err := client.WaitForAgentSession(ctx, started.PaneID, sessionStartWaitTimeout)
+		agent, err := client.WaitForAgentSession(ctx, started.PaneID, a.sessionWaitTimeout())
 		if err != nil {
 			return a.emitStart(result, err,
 				fmt.Sprintf("pane %s を確認し、セッション picker から後で紐づける", started.PaneID))

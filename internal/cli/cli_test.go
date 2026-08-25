@@ -46,6 +46,9 @@ type harness struct {
 	stdinContent string
 	stdin        *trackedReader
 	herdr        *fakeHerdr
+	// sessionStartWaitTimeout overrides cli.Env.SessionStartWaitTimeout; zero keeps the production
+	// default, which a test only overrides when it needs start's own wait to actually elapse.
+	sessionStartWaitTimeout time.Duration
 }
 
 type result struct {
@@ -80,12 +83,13 @@ func (h *harness) run(t *testing.T, args ...string) result {
 	var out, errOut bytes.Buffer
 	h.stdin = &trackedReader{content: h.stdinContent}
 	env := cli.Env{
-		Paths:  config.Paths{StateDir: h.stateDir, ConfigPath: h.configPath},
-		Out:    &out,
-		Err:    &errOut,
-		In:     h.stdin,
-		Now:    func() time.Time { return h.now },
-		Getenv: func(key string) string { return h.env[key] },
+		Paths:                   config.Paths{StateDir: h.stateDir, ConfigPath: h.configPath},
+		Out:                     &out,
+		Err:                     &errOut,
+		In:                      h.stdin,
+		Now:                     func() time.Time { return h.now },
+		Getenv:                  func(key string) string { return h.env[key] },
+		SessionStartWaitTimeout: h.sessionStartWaitTimeout,
 	}
 	if h.herdr != nil {
 		env.Herdr = h.herdr.client(func(key string) string { return h.env[key] })

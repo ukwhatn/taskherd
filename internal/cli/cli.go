@@ -33,6 +33,10 @@ type Env struct {
 	Getenv func(string) string
 	// Herdr overrides the herdr client. When nil it is built from Getenv.
 	Herdr *herdrc.Client
+	// SessionStartWaitTimeout overrides how long start waits for a session id once the agent is
+	// idle (sessionStartWaitTimeout in start_cmd.go). Zero means the production default; the field
+	// exists so a test can drive that wait without actually waiting out the real budget, same as Now.
+	SessionStartWaitTimeout time.Duration
 }
 
 // UserError is an error caused by the invocation itself. Hint tells the user how to fix it.

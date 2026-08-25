@@ -224,8 +224,14 @@ func TestStartReportsWaitTimeoutKeepingStartedStage(t *testing.T) {
 	}
 }
 
+// The actual timeout mechanics (polling, giving up once the budget is spent) are herdrc's own
+// contract, covered there with a short timeout passed directly. This only checks that the CLI
+// reports the §6 shape correctly once WaitForAgentSession comes back with no session — a short
+// override timeout here is what keeps that real (not stubbed away) without waiting out the
+// production budget for real.
 func TestStartReportsMissingSessionIDAfterWait(t *testing.T) {
 	h := newHarness(t)
+	h.sessionStartWaitTimeout = 50 * time.Millisecond
 	fake := newFakeHerdr()
 	fake.waitSessionID = ""
 	h.herdr = fake
