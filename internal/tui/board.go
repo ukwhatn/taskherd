@@ -39,6 +39,7 @@ const (
 	modeSessionSelect
 	modeJump
 	modeConfirm
+	modeSessionStart
 )
 
 // Board is the kanban board program.
@@ -79,12 +80,16 @@ type Board struct {
 	// overlayBack is the screen the open overlay was launched from, and the one it returns to.
 	overlayBack mode
 
-	detail     detailState
-	add        addState
-	statusSel  statusSelectState
-	sessionSel sessionSelectState
-	jump       jumpState
-	confirm    confirmState
+	detail       detailState
+	add          addState
+	statusSel    statusSelectState
+	sessionSel   sessionSelectState
+	jump         jumpState
+	confirm      confirmState
+	sessionStart sessionStartState
+	// launch tracks the one session-start operation in flight, independent of the modal: the
+	// modal closes as soon as the launch starts, but the operation keeps running.
+	launch launchState
 
 	collapseTerminal bool
 	fetching         bool
@@ -301,6 +306,22 @@ func (b *Board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusMsg:
 		b.setStatus(msg.text, msg.isError)
 		return b, nil
+
+	case sessionStartMsg:
+		// The currency check runs before msg.file is ever applied, not after: a stale message can
+		// still carry a file from a save that happened before it was cancelled or superseded, and
+		// applying that first would let a dropped operation's data reach the board regardless of
+		// what advanceSessionStart itself goes on to do with the message.
+		if !b.sessionStartMsgIsCurrent(msg) {
+			return b, nil
+		}
+		if msg.file != nil {
+			b.file = msg.file
+			b.rebuild()
+			b.rebuildLinks()
+			b.rebuildSessions()
+		}
+		return b, b.advanceSessionStart(msg)
 	}
 	return b, nil
 }
@@ -308,6 +329,16 @@ func (b *Board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (b *Board) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return b, tea.Quit
+	}
+	// Esc cancels a pending launch before any mode-specific handler runs, regardless of which one
+	// is current: submitSessionStart closes the launch modal the instant the operation starts, so
+	// by the time it is actually in flight the board can be back in any mode — bare board, detail
+	// (opened before g), whatever the launch was started from. Catching this only inside
+	// handleBoardKey missed every mode but the bare board, letting Esc there merely close the
+	// current overlay while the operation kept running underneath it.
+	if msg.String() == "esc" && b.launch.pending {
+		b.cancelSessionStart("起動を中止した")
+		return b, nil
 	}
 	switch b.mode {
 	case modeDetail:
@@ -322,6 +353,8 @@ func (b *Board) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return b.handleJumpKey(msg)
 	case modeConfirm:
 		return b.handleConfirmKey(msg)
+	case modeSessionStart:
+		return b.handleSessionStartKey(msg)
 	default:
 		return b.handleBoardKey(msg)
 	}
@@ -335,6 +368,8 @@ func (b *Board) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		return b.pasteIntoDetail(msg)
 	case modeAdd:
 		return b.pasteIntoAdd(msg)
+	case modeSessionStart:
+		return b.pasteIntoSessionStart(msg)
 	}
 	return b, nil
 }
@@ -381,7 +416,7 @@ func (b *Board) handleBoardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // the screen the overlay was opened from otherwise.
 func (b *Board) baseMode() mode {
 	switch b.mode {
-	case modeStatusSelect, modeSessionSelect, modeJump, modeConfirm:
+	case modeStatusSelect, modeSessionSelect, modeJump, modeConfirm, modeSessionStart:
 		return b.overlayBack
 	default:
 		return b.mode
@@ -588,6 +623,14 @@ func (b *Board) applyTasks(msg tasksLoadedMsg) tea.Cmd {
 	// by another session) has to close it rather than leave it on nothing.
 	if b.detailOpen() && b.taskByID(b.detail.taskID) == nil {
 		b.mode = modeBoard
+	}
+	// Likewise the launch modal, still open at the cwd/prompt step.
+	if b.mode == modeSessionStart && b.taskByID(b.sessionStart.taskID) == nil {
+		b.closeOverlay()
+	}
+	// And an operation already past the modal, running against a task that just vanished.
+	if b.launch.pending && b.taskByID(b.launch.taskID) == nil {
+		b.cancelSessionStart(fmt.Sprintf("#%d が削除されたため起動を中止した", b.launch.taskID))
 	}
 
 	// A change that may have added a link needs a fetch of its own: waiting for the next

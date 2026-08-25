@@ -127,21 +127,81 @@ type execRunner struct {
 func (r *execRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, r.bin, args...)
 	out, err := cmd.Output()
-	if err != nil {
-		// herdr reports failures as a JSON error envelope on stdout; prefer that over the exit status.
-		if apiErr := parseCLIError(out); apiErr != nil {
-			return out, apiErr
-		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
-			return out, fmt.Errorf("%s %v: %s", r.bin, args, strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return out, fmt.Errorf("%s %v の実行に失敗した: %w", r.bin, args, err)
-	}
+
+	// herdr reports failures as a JSON error envelope on stdout; prefer that over the exit status
+	// whether or not the process itself exited non-zero.
 	if apiErr := parseCLIError(out); apiErr != nil {
 		return out, apiErr
 	}
-	return out, nil
+	if err == nil {
+		return out, nil
+	}
+
+	// The real herdr puts the envelope on stderr instead (trust-folder rejections, for instance),
+	// so a failed stdout parse falls through to stderr rather than only trying it when stdout was
+	// empty: a non-error diagnostic on stdout must not hide an envelope that stderr does carry.
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if apiErr := parseCLIError(exitErr.Stderr); apiErr != nil {
+			return out, apiErr
+		}
+		// The raw text is passed through rather than reduced to the operation name: it is herdr's
+		// own diagnostic for why the call was rejected (a trust-folder gate, say), and hiding it
+		// would cost more than the passthrough risks. taskherd never puts an argument value on this
+		// path itself — only herdr's own message text lands here. Confirmed against the real herdr:
+		// it never quotes a caller-supplied value (agent prompt's TEXT included) back in this text.
+		// If a future herdr starts doing that, this line becomes the leak point.
+		if stderr := strings.TrimSpace(string(exitErr.Stderr)); stderr != "" {
+			return out, fmt.Errorf("%s %s: %s", r.bin, operationName(args), stderr)
+		}
+	}
+	// Only the operation name reaches the message, never the argument values: one of them can be
+	// arbitrary text handed to `agent prompt`, and it must not surface on any error path.
+	return out, fmt.Errorf("%s %s の実行に失敗した: %w", r.bin, operationName(args), err)
+}
+
+// knownOperations names every herdr subcommand taskherd invokes, longest first so a 3-word
+// subcommand is not mistaken for a 2-word prefix of it.
+//
+// This is a fixed table rather than a rule derived from args (stopping at the first flag, say):
+// a positional value can sit directly after the subcommand with nothing to mark where it starts,
+// and some of those values — an agent name, a pane id — are built from words that pass any
+// shape-based check a real subcommand word would. `agent prompt`'s TEXT is the sharpest case:
+// it is a second bare positional with no flag ever following it, so a rule short of a fixed list
+// of the subcommands themselves would include it.
+var knownOperations = [][]string{
+	{"plugin", "pane", "open"},
+	{"agent", "focus"},
+	{"agent", "start"},
+	{"agent", "wait"},
+	{"agent", "prompt"},
+	{"tab", "create"},
+	{"pane", "report-metadata"},
+	{"api", "snapshot"},
+}
+
+// operationName reports which herdr subcommand args names, without any of the values after it.
+func operationName(args []string) string {
+	for _, op := range knownOperations {
+		if len(args) < len(op) {
+			continue
+		}
+		match := true
+		for i, word := range op {
+			if args[i] != word {
+				match = false
+				break
+			}
+		}
+		if match {
+			return strings.Join(op, " ")
+		}
+	}
+	// A registration gap only makes the message vaguer, never a leak: args[0] is provably always
+	// the safe subcommand word today (verified against real herdr, never a positional value), but
+	// falling back to it would depend on that staying true forever. The fixed word costs nothing
+	// and stays safe even if a future herdr command shape changes what args[0] can hold.
+	return "コマンド"
 }
 
 // snapshotViaCLI is the fallback path used when the derived socket path does not resolve.

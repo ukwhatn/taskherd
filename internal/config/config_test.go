@@ -103,6 +103,9 @@ func TestLoadDefaultFileContentMatchesDefaults(t *testing.T) {
 	if !reflect.DeepEqual(cfg.Board, config.Default().Board) {
 		t.Errorf("既定 config ファイルの board = %+v, want %+v", cfg.Board, config.Default().Board)
 	}
+	if !reflect.DeepEqual(cfg.SessionStart, config.Default().SessionStart) {
+		t.Errorf("既定 config ファイルの session_start = %+v, want %+v", cfg.SessionStart, config.Default().SessionStart)
+	}
 }
 
 func TestLoadPartialConfigKeepsDefaults(t *testing.T) {
@@ -576,5 +579,86 @@ func TestDefaultFileContentLeavesTokenFileCommentedOut(t *testing.T) {
 	}
 	if !strings.Contains(config.DefaultFileContent(), "# token_file =") {
 		t.Error("生成された config に token_file の書き方が示されていない")
+	}
+}
+
+func TestSessionStartTemplateForResolvesByColumnThenDefault(t *testing.T) {
+	s := config.SessionStart{
+		PromptTemplate: "既定テンプレート",
+		Templates:      map[string]string{"review": "レビュー用", "todo": ""},
+	}
+
+	if got := s.TemplateFor("review"); got != "レビュー用" {
+		t.Errorf("TemplateFor(review) = %q, want 列専用のテンプレート", got)
+	}
+	// An explicit "" override means "send nothing", and must not fall back to PromptTemplate.
+	if got := s.TemplateFor("todo"); got != "" {
+		t.Errorf("TemplateFor(todo) = %q, want 空（明示的な上書き）", got)
+	}
+	if got := s.TemplateFor("working"); got != "既定テンプレート" {
+		t.Errorf("TemplateFor(working) = %q, want 既定テンプレート（列専用の定義が無い）", got)
+	}
+}
+
+// prompt_template = "" is a config author explicitly asking for no prompt, distinct from the key
+// being absent. TemplateFor must return exactly what config holds, not resurrect the built-in
+// default for an empty value (that resurrection would happen only if TemplateFor itself added a
+// third fallback tier, which it deliberately does not).
+func TestSessionStartTemplateForNeverResurrectsBuiltinDefaultForExplicitEmpty(t *testing.T) {
+	s := config.SessionStart{PromptTemplate: ""}
+	if got := s.TemplateFor("todo"); got != "" {
+		t.Errorf("TemplateFor(todo) = %q, want 空のまま", got)
+	}
+}
+
+func TestLoadSessionStartPromptTemplateEmptyStringIsRespected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := "[session_start]\nprompt_template = \"\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("config.toml を書けない: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.SessionStart.PromptTemplate != "" {
+		t.Errorf("prompt_template = %q, want 空（明示指定を既定値で上書きしない）", cfg.SessionStart.PromptTemplate)
+	}
+}
+
+func TestLoadSessionStartTemplatesAcceptsUndefinedColumnID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	// 列 id はドットを含むこともあるため、キーは必ず引用符付きで書く。TOML の dotted key として
+	// 解釈されると map[string]string へのデコードが壊れる。
+	content := "[session_start.templates]\n\"review.req\" = \"x\"\n\"存在しない列\" = \"y\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("config.toml を書けない: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v, want 未定義の列 id があっても読める", err)
+	}
+	if cfg.SessionStart.Templates["review.req"] != "x" {
+		t.Errorf("templates[review.req] = %q, want x（ドット付きキーが引用符でそのまま読める）", cfg.SessionStart.Templates["review.req"])
+	}
+	if cfg.SessionStart.Templates["存在しない列"] != "y" {
+		t.Errorf("templates[存在しない列] = %q, want y", cfg.SessionStart.Templates["存在しない列"])
+	}
+}
+
+func TestLoadSessionStartWithoutSectionKeepsDefaultTemplate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("editor = \"nano\"\n"), 0o600); err != nil {
+		t.Fatalf("config.toml を書けない: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.SessionStart.PromptTemplate != config.Default().SessionStart.PromptTemplate {
+		t.Errorf("prompt_template = %q, want 組み込み既定（キー自体が無い）", cfg.SessionStart.PromptTemplate)
 	}
 }

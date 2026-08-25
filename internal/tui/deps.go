@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/ukwhatn/taskherd/internal/config"
 	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/model"
@@ -30,12 +31,15 @@ type SessionSource interface {
 	Close()
 }
 
-// HerdrOps are the herdr operations the jump flow performs. *herdrc.Client satisfies this.
+// HerdrOps are the herdr operations the jump and session-start flows perform. *herdrc.Client
+// satisfies this.
 type HerdrOps interface {
 	Snapshot(ctx context.Context) (*herdrc.Snapshot, error)
 	FocusAgent(ctx context.Context, paneID string) error
 	CreateTab(ctx context.Context, spec herdrc.TabSpec) (herdrc.Tab, error)
 	StartAgent(ctx context.Context, spec herdrc.AgentSpec) (herdrc.StartResult, error)
+	WaitForAgentState(ctx context.Context, paneID string, until []string, timeout time.Duration) (herdrc.Agent, error)
+	SendAgentPrompt(ctx context.Context, paneID, text string) error
 	ReportTaskToken(ctx context.Context, paneID string, taskID int) error
 }
 
@@ -79,6 +83,10 @@ type Settings struct {
 	Icons IconMode
 	// Hyperlinks wraps link rows in OSC 8 so a terminal that understands it opens them on a click.
 	Hyperlinks bool
+	// SessionStart configures the prompt a session started from a task opens with. Held as-is
+	// (rather than pre-resolved) because which template applies depends on the task being started,
+	// decided at launch time rather than once when the board opens.
+	SessionStart config.SessionStart
 }
 
 func (d Deps) now() time.Time {

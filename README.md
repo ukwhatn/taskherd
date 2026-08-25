@@ -167,6 +167,33 @@ token_file = "~/.config/taskherd/jira_token"
 
 トークンは https://id.atlassian.com/manage-profile/security/api-tokens で発行する。Atlassian は発行したトークンを 1 年で失効させるため、401 が返るようになったら再発行する。
 
+### タスクからセッションを起こすプロンプト（`[session_start]`）
+
+タスクにまだセッションが紐づいていない状態で `board` の `g` を押す・`taskherd start` を実行すると、新しい pane で agent を起動し、初期プロンプトとして `prompt_template` を展開した文面を送る:
+
+```toml
+[session_start]
+prompt_template = """
+#{{id}} {{title}} に取り組んでほしい。
+
+現在のステータス: {{status}}
+
+{{note}}
+{{links}}"""
+```
+
+展開できるプレースホルダは `{{id}}` `{{title}}` `{{note}}` `{{status}}` `{{links}}`。`{{links}}` はリンクごとに `- <url>` の行になり、リンクが 1 つもなければその行ごと消える。
+
+列によって始め方が違う場合は、列 id ごとに上書きできる。`[session_start.templates]` に無い列は `prompt_template` を使う:
+
+```toml
+[session_start.templates]
+"review" = "#{{id}} {{title}} のレビュー観点を確認してほしい。\n\n{{links}}"
+"todo" = ""
+```
+
+列 id はキーを必ず引用符付きで書く（ドットを含む id が TOML の dotted key として誤解釈されるのを防ぐため）。`""` を指定すると、その列からの起動はプロンプトを送らず起動だけする。`prompt_template` 自体を `""` にすれば、列の上書きが無いすべての起動でプロンプトを送らなくなる。
+
 ### herdr integration の更新
 
 セッションバッジの精度（herdr が Claude Code のエージェント状態をどこまで細かく検出できるか）は herdr 側の統合フックのバージョンに依存する。古い統合のままだと `agent_status` の精度が落ちるため、次のコマンドで最新化しておくことを推奨する:
@@ -188,6 +215,7 @@ herdr integration install claude
 | `taskherd link <id> <url> [--note N]` / `taskherd unlink <id> <url>` | 外部リンクの付け外し |
 | `taskherd session link <id> [--current\|--session-id UUID\|--pane PANE_ID]` | エージェントセッションを紐づける |
 | `taskherd jump <id> [--session UUID]` | 紐づいたセッションへ移動する（消滅していれば resume 起動） |
+| `taskherd start <id> [--cwd PATH] [--prompt TEXT]` | 新しいエージェントセッションを起こし、紐づける（cwd 候補が定まらなければ `--cwd` が必須） |
 | `taskherd refresh [<id>] [--all]` | リンクのライブ状態を即時取得する |
 | `taskherd board` | kanban ボード（TUI）を開く |
 | `taskherd rm <id> [--yes]` | タスクを削除する |
@@ -207,7 +235,7 @@ herdr integration install claude
 | `Enter` | 詳細モーダル |
 | `Delete` / `Backspace` | タスク削除（`y`/`n` の確認あり） |
 | `a` | タスク追加モーダル |
-| `g` | 紐づくセッションへジャンプ（複数あれば `↑↓` で選択） |
+| `g` | 紐づくセッションへジャンプ（複数あれば `↑↓` で選択）。紐づいていなければ起動モーダルを開く |
 | `r` / `R` | フォーカスカード / 全体のライブ再取得 |
 | `t` | 完了・却下列（terminal 列）の折り畳み切替 |
 | `q` / `Ctrl+C` | 終了 |
@@ -258,6 +286,18 @@ herdr integration install claude
 - **`Enter` はどの項目にいても「作成して閉じる」**（タイトルが空ならエラーを出して閉じない）。`Esc` で取消
 - タイトルに複数行を貼り付けると **1 行＝1 タスク**として一括作成する（他の項目の値は全行に適用される）
 - `Enter` は作成に使うため、**改行は `Shift+Enter` / `Alt+Enter` / `Ctrl+J`** で入れる。`Shift+Enter` をそのまま判別できるのは拡張キーボードプロトコル対応端末だけだが、`shift+enter=text:\x1b\r` のように ESC+CR を送る設定の端末（ghostty など）では `Alt+Enter` として届くため、こちらも改行として受理する。タイトルの改行は 1 行＝1 タスク、note の改行はそのまま複数行 note になる。どちらのキーが有効かはフッタのキーヘルプに表示される
+
+### 起動モーダル（セッションが紐づいていないタスクで `g`）
+
+作業ディレクトリの候補（既存セッションの cwd を頻度順、同率なら直近リンク順、それも同じなら辞書順）と、初期プロンプトの編集欄を持つ。
+
+- `Tab` で作業ディレクトリ欄とプロンプト欄を切り替える
+- 作業ディレクトリ欄は `↑↓` で候補を選ぶ。最後の行（入力する）を選ぶと自由入力になる
+- プロンプト欄は複数行編集できる。**`Enter` はどこにいても起動する**ため、改行は追加モーダルと同じキー（`Shift+Enter` / `Alt+Enter` / `Ctrl+J`）で入れる
+- `Ctrl+Y` でプロンプトをクリップボードへコピーする（OSC 52。対応端末でのみ反映され、成功の確認手段は無い）
+- `Enter` で起動する。起動は pane 作成 → agent 起動 → セッション id の検出待ち → tasks.json への紐づけ → プロンプト送信の順に進み、モーダルはすぐ閉じてステータス行に進捗と結果を出す
+- 途中で失敗しても **pane は自動で閉じない**。以後の状況は詳細モーダルの ＋セッションを紐づける から手動で追いつける
+- `Esc` でモーダルを閉じる（起動開始後は、ボードに戻ってから `Esc` で起動そのものを中止できる）
 
 ### 入力欄について
 

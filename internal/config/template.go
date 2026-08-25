@@ -1,5 +1,14 @@
 package config
 
+// defaultPromptTemplate is the built-in [session_start] prompt_template, injected by Default()
+// and Load() rather than by SessionStart.TemplateFor() itself (see its doc comment for why).
+const defaultPromptTemplate = `#{{id}} {{title}} に取り組んでほしい。
+
+現在のステータス: {{status}}
+
+{{note}}
+{{links}}`
+
 // defaultFileContent is what config init writes; it must describe the same settings as Default().
 // Environment specific values (GHES hosts, Jira site, address) stay commented out as examples.
 const defaultFileContent = `# taskherd 設定ファイル
@@ -86,6 +95,24 @@ token_env = "TASKHERD_JIRA_TOKEN"
 # herdr プラグインとして board を開くと herdr サーバの環境を継承するためシェルの環境変数は
 # 届かない。3 台で使う・board をプラグインから開く場合はこちらを設定する（chmod 600 推奨）
 # token_file = "~/.config/taskherd/jira_token"
+
+[session_start]
+# タスクからセッションを起こすとき（board の g / taskherd start）に初期値として使うプロンプト。
+# 展開できるプレースホルダ: {{id}} {{title}} {{note}} {{status}} {{links}}
+# {{links}} は "- <url>" の行に展開され、リンクが無ければその行ごと落ちる。
+# "" にするとプロンプトを送らず起動だけする。
+prompt_template = """
+#{{id}} {{title}} に取り組んでほしい。
+
+現在のステータス: {{status}}
+
+{{note}}
+{{links}}"""
+
+# 列 id ごとにテンプレートを上書きする。ここに無い列は prompt_template を使う。
+# [session_start.templates]
+# "review" = "#{{id}} {{title}} のレビュー観点を確認してほしい。\n\n{{links}}"
+# "todo" = ""
 `
 
 // DefaultFileContent returns the generated config.toml content.

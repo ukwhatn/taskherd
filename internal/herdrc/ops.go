@@ -160,6 +160,50 @@ func (c *Client) StartAgent(ctx context.Context, spec AgentSpec) (StartResult, e
 	return result, nil
 }
 
+// WaitForAgentState blocks until the agent in paneID reports one of the given states, or herdr's
+// own wait gives up at timeout.
+//
+// A newly started agent is trust-gated separately from the process starting (an unfamiliar cwd
+// stops at a first-run prompt before herdr ever reports a session id), so StartAgent alone cannot
+// say when the pane is ready to be linked: this is what waits for that.
+func (c *Client) WaitForAgentState(ctx context.Context, paneID string, until []string, timeout time.Duration) (Agent, error) {
+	// herdr's own wait is bounded by timeout; cliTimeout is spent on the request/response round
+	// trip around it, the same margin StartAgent gives its own timeout.
+	callCtx, cancel := requestContext(ctx, timeout+cliTimeout)
+	defer cancel()
+
+	args := []string{"agent", "wait", paneID}
+	for _, state := range until {
+		args = append(args, "--until", state)
+	}
+	args = append(args, "--timeout", strconv.Itoa(int(timeout.Milliseconds())))
+
+	out, err := c.runner.Run(callCtx, args...)
+	if err != nil {
+		return Agent{}, err
+	}
+
+	var payload struct {
+		Agent Agent `json:"agent"`
+	}
+	if err := decodeResult(out, &payload); err != nil {
+		return Agent{}, err
+	}
+	return payload.Agent, nil
+}
+
+// SendAgentPrompt sends text to an already-started agent's input.
+//
+// The text is never echoed into an error: execRunner's own error messages carry only the
+// operation name (§3.2), and this method adds nothing of its own on top of what runner.Run returns.
+func (c *Client) SendAgentPrompt(ctx context.Context, paneID, text string) error {
+	callCtx, cancel := requestContext(ctx, cliTimeout)
+	defer cancel()
+
+	_, err := c.runner.Run(callCtx, "agent", "prompt", paneID, text)
+	return err
+}
+
 // ReportTaskToken stamps the task id onto the pane so herdr's own UI can show it.
 // herdr caps the TTL at 24h, so the stamp is a display convenience and never a source of truth.
 func (c *Client) ReportTaskToken(ctx context.Context, paneID string, taskID int) error {

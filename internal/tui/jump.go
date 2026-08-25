@@ -9,14 +9,15 @@ import (
 )
 
 // beginJump starts the jump flow for the active task: straight to the session when there is only
-// one, through a picker when there are several.
+// one, through a picker when there are several, and through the launch modal when there is none
+// (g is one key for both "go to the session" and "start one" — §5 of the design).
 func (b *Board) beginJump() tea.Cmd {
 	task := b.activeTask()
 	if task == nil {
 		return status("カードが選択されていない", true)
 	}
 	if len(task.Sessions) == 0 {
-		return status(fmt.Sprintf("#%d にセッションが紐づいていない（詳細モーダルの ＋セッションを紐づける）", task.ID), true)
+		return b.beginSessionStart(task)
 	}
 	if b.deps.Herdr == nil {
 		return status("herdr に接続できないため jump できない", true)

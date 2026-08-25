@@ -316,6 +316,62 @@ func TestStartAgentPropagatesOtherErrors(t *testing.T) {
 	}
 }
 
+func TestWaitForAgentStateRepeatsUntilFlagAndDecodesAgent(t *testing.T) {
+	runner := &fakeRunner{handler: func([]string) ([]byte, error) {
+		return []byte(`{"id":"cli:agent:wait","result":{"agent":` +
+			agentJSON("wS:p9", "s-9", "idle", "/repo") + `}}`), nil
+	}}
+	client := newClient(t, newFakeHerdr(t, snapshotJSON()), runner)
+
+	got, err := client.WaitForAgentState(context.Background(), "wS:p9",
+		[]string{herdrc.StateIdle, herdrc.StateBlocked}, 30*time.Second)
+	if err != nil {
+		t.Fatalf("WaitForAgentState: %v", err)
+	}
+	if got.SessionID() != "s-9" || got.AgentStatus != "idle" || got.PaneID != "wS:p9" {
+		t.Errorf("agent = %+v", got)
+	}
+
+	joined := strings.Join(runner.Calls()[0], " ")
+	if !strings.HasPrefix(joined, "agent wait wS:p9 ") {
+		t.Errorf("呼び出し = %q", joined)
+	}
+	if got := strings.Count(joined, "--until"); got != 2 {
+		t.Errorf("--until の回数 = %d, want 2（状態ごとに繰り返す）", got)
+	}
+	if !strings.Contains(joined, "--until idle") || !strings.Contains(joined, "--until blocked") {
+		t.Errorf("呼び出し = %q, want 各状態が --until で渡る", joined)
+	}
+	if !strings.Contains(joined, "--timeout 30000") {
+		t.Errorf("呼び出し = %q, want --timeout 30000", joined)
+	}
+}
+
+func TestWaitForAgentStatePropagatesTimeoutError(t *testing.T) {
+	runner := &fakeRunner{handler: func([]string) ([]byte, error) {
+		return nil, &herdrc.APIError{Code: "wait_timeout", Message: "timed out"}
+	}}
+	client := newClient(t, newFakeHerdr(t, snapshotJSON()), runner)
+
+	if _, err := client.WaitForAgentState(context.Background(), "wS:p9", []string{herdrc.StateIdle}, time.Second); err == nil {
+		t.Fatal("err = nil, want timeout エラーを伝播")
+	}
+}
+
+func TestSendAgentPromptSendsExactText(t *testing.T) {
+	runner := &fakeRunner{handler: func([]string) ([]byte, error) { return nil, nil }}
+	client := newClient(t, newFakeHerdr(t, snapshotJSON()), runner)
+
+	if err := client.SendAgentPrompt(context.Background(), "wS:p9", "実装してください"); err != nil {
+		t.Fatalf("SendAgentPrompt: %v", err)
+	}
+
+	got := strings.Join(runner.Calls()[0], " ")
+	if got != "agent prompt wS:p9 実装してください" {
+		t.Errorf("呼び出し = %q", got)
+	}
+}
+
 func TestReportTaskTokenStampsWithTTL(t *testing.T) {
 	runner := &fakeRunner{}
 	client := newClient(t, newFakeHerdr(t, snapshotJSON()), runner)

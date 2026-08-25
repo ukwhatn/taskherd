@@ -153,7 +153,29 @@ func widthSafetyScreens(t *testing.T, mode IconMode) map[string]string {
 	crowded.board.height = 18
 	screens["board/overflow"] = crowded.board.render()
 
+	sessionStart := boardWithSessionStart(t, mode)
+	screens["session-start"] = sessionStart.board.render()
+
 	return screens
+}
+
+// boardWithSessionStart opens the launch modal (g on a task with no linked session) over a board
+// that also has one existing session, so the cwd candidate list is not empty.
+func boardWithSessionStart(t *testing.T, mode IconMode) *harness {
+	t.Helper()
+	tasks := []model.Task{
+		{ID: 1, Title: "existing session task", Status: "todo",
+			Sessions: []model.SessionRef{{Agent: "claude", SessionID: "s-1", Cwd: "/tmp/existing", LinkedAt: "2026-08-20T10:00:00+09:00"}}},
+		{ID: 2, Title: "task without a session yet", Status: "working"},
+	}
+	h := newHarness(t, Deps{Tasks: newFakeStore(tasks...), Herdr: &fakeHerdr{}},
+		Settings{Columns: model.DefaultColumns(), Icons: mode, Classifier: testClassifier})
+	h.key("right") // todo -> planning
+	h.key("right") // planning -> working, selecting the task with no session
+	h.key("g")
+	h.board.sessionStart.cwdInput.SetValue("/typed/by/hand")
+	h.board.sessionStart.prompt.SetValue("multi\nline prompt text")
+	return h
 }
 
 func boardWithMode(t *testing.T, mode IconMode, n int) *harness {

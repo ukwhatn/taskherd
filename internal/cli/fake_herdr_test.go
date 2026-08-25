@@ -26,8 +26,27 @@ type fakeHerdr struct {
 	unavailable bool
 	// newPaneID is the pane returned by tab create.
 	newPaneID string
+	// createTabErr is returned by tab create instead of a success payload.
+	createTabErr error
 	// startErr is returned by agent start instead of a success payload.
 	startErr error
+	// waitErr is returned by agent wait instead of a success payload.
+	waitErr error
+	// waitSessionID is the session id agent wait reports; empty means agent_session stays null
+	// (herdr never detected one). waitStatus defaults to "idle" when unset.
+	waitSessionID  string
+	waitStatus     string
+	waitSideEffect func()
+	// promptErr is returned by agent prompt instead of success.
+	promptErr error
+	// prompts records every agent prompt call, pane and text apart, so a test can assert on the
+	// text sent without also having to match the pane id.
+	prompts []promptCall
+}
+
+type promptCall struct {
+	PaneID string
+	Text   string
 }
 
 type fakeAgent struct {
@@ -38,7 +57,7 @@ type fakeAgent struct {
 }
 
 func newFakeHerdr() *fakeHerdr {
-	return &fakeHerdr{agents: map[string]fakeAgent{}, newPaneID: "wS:p9"}
+	return &fakeHerdr{agents: map[string]fakeAgent{}, newPaneID: "wS:p9", waitSessionID: "s-started"}
 }
 
 func (f *fakeHerdr) withAgent(sessionID string, agent fakeAgent) *fakeHerdr {
@@ -88,9 +107,44 @@ func (f *fakeHerdr) Run(_ context.Context, args ...string) ([]byte, error) {
 		return []byte(`{"id":"cli:agent:focus","result":{"type":"ok"}}`), nil
 
 	case strings.HasPrefix(joined, "tab create"):
+		if f.createTabErr != nil {
+			return nil, f.createTabErr
+		}
 		return []byte(fmt.Sprintf(`{"id":"cli:tab:create","result":{"type":"tab_created",`+
 			`"tab":{"tab_id":"wS:t9","workspace_id":"wS"},`+
 			`"root_pane":{"pane_id":%q,"cwd":"/repo"}}}`, f.newPaneID)), nil
+
+	case strings.HasPrefix(joined, "agent wait"):
+		if f.waitErr != nil {
+			return nil, f.waitErr
+		}
+		// waitSideEffect lets a test land a change through another path (a concurrent taskherd
+		// process, say) at the exact point in the sequence where the real wait would still be
+		// running, well before the eventual save.
+		if f.waitSideEffect != nil {
+			f.waitSideEffect()
+		}
+		status := f.waitStatus
+		if status == "" {
+			status = "idle"
+		}
+		session := "null"
+		if f.waitSessionID != "" {
+			session = fmt.Sprintf(`{"agent":"claude","kind":"id","source":"herdr:claude","value":%q}`, f.waitSessionID)
+		}
+		return []byte(fmt.Sprintf(`{"id":"cli:agent:wait","result":{"agent":{"pane_id":%q,"agent_status":%q,"agent_session":%s}}}`,
+			args[2], status, session)), nil
+
+	case strings.HasPrefix(joined, "agent prompt"):
+		if len(args) >= 4 {
+			f.mu.Lock()
+			f.prompts = append(f.prompts, promptCall{PaneID: args[2], Text: args[3]})
+			f.mu.Unlock()
+		}
+		if f.promptErr != nil {
+			return nil, f.promptErr
+		}
+		return nil, nil
 
 	case strings.HasPrefix(joined, "agent start"):
 		if f.startErr != nil {
@@ -144,6 +198,16 @@ func (f *fakeHerdr) called(prefix string) bool {
 		}
 	}
 	return false
+}
+
+// promptSent returns the text of the first agent prompt call, or ok=false if there was none.
+func (f *fakeHerdr) promptSent() (promptCall, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.prompts) == 0 {
+		return promptCall{}, false
+	}
+	return f.prompts[0], true
 }
 
 // call returns the first invocation starting with prefix.

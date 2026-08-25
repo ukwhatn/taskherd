@@ -23,11 +23,12 @@ type Paths struct {
 // Config is the content of config.toml.
 type Config struct {
 	// Editor is the command note editing opens, taking precedence over the environment.
-	Editor  string
-	Board   Board
-	Columns model.Columns
-	GitHub  GitHub
-	Jira    Jira
+	Editor       string
+	Board        Board
+	Columns      model.Columns
+	GitHub       GitHub
+	Jira         Jira
+	SessionStart SessionStart
 }
 
 // Board configures the board TUI and the live fetch cadence.
@@ -67,6 +68,29 @@ type Jira struct {
 	TokenFile string
 }
 
+// SessionStart configures the prompt a session started from a task opens with.
+type SessionStart struct {
+	// PromptTemplate is used when a task's status has no entry in Templates.
+	PromptTemplate string
+	// Templates overrides PromptTemplate per column id, for columns whose work starts differently.
+	Templates map[string]string
+}
+
+// TemplateFor resolves the template for a column: the column's own override when Templates names
+// it, falling back to PromptTemplate otherwise.
+//
+// Neither side falls back again on an empty string. prompt_template = "" and a per-column entry
+// set to "" both mean "launch without sending a prompt" (a session-start config decision, not a
+// board one), and treating an explicit empty as "unset" here would resurrect the built-in default
+// a config author asked to suppress. The built-in default itself is injected by Default() and
+// Load(), never here: TemplateFor only resolves between what the config actually holds.
+func (s SessionStart) TemplateFor(status string) string {
+	if tmpl, ok := s.Templates[status]; ok {
+		return tmpl
+	}
+	return s.PromptTemplate
+}
+
 // fileConfig mirrors config.toml. Scalars are pointers so that an explicit 0 is distinguishable
 // from an absent key (0 disables background refresh).
 type fileConfig struct {
@@ -88,6 +112,12 @@ type fileConfig struct {
 		TokenEnv  *string `toml:"token_env"`
 		TokenFile *string `toml:"token_file"`
 	} `toml:"jira"`
+	SessionStart struct {
+		// PromptTemplate is a pointer so that an explicit "" (send no prompt) is distinguishable
+		// from the key being absent (use the built-in default).
+		PromptTemplate *string           `toml:"prompt_template"`
+		Templates      map[string]string `toml:"templates"`
+	} `toml:"session_start"`
 }
 
 // validIconModes are the glyph vocabularies board.icons may name. The list is repeated here rather
@@ -98,9 +128,10 @@ var validIconModes = map[string]bool{"nerd": true, "ascii": true, "none": true}
 // Default returns the settings used when config.toml is absent.
 func Default() *Config {
 	return &Config{
-		Board:   Board{RefreshIntervalMinutes: 10, CacheTTLMinutes: 5, Icons: "nerd", Hyperlinks: true},
-		Columns: model.DefaultColumns(),
-		Jira:    Jira{TokenEnv: "TASKHERD_JIRA_TOKEN"},
+		Board:        Board{RefreshIntervalMinutes: 10, CacheTTLMinutes: 5, Icons: "nerd", Hyperlinks: true},
+		Columns:      model.DefaultColumns(),
+		Jira:         Jira{TokenEnv: "TASKHERD_JIRA_TOKEN"},
+		SessionStart: SessionStart{PromptTemplate: defaultPromptTemplate},
 	}
 }
 
@@ -183,6 +214,10 @@ func Load(path string) (*Config, error) {
 	if raw.Jira.TokenFile != nil {
 		cfg.Jira.TokenFile = *raw.Jira.TokenFile
 	}
+	if raw.SessionStart.PromptTemplate != nil {
+		cfg.SessionStart.PromptTemplate = *raw.SessionStart.PromptTemplate
+	}
+	cfg.SessionStart.Templates = raw.SessionStart.Templates
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
