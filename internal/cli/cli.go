@@ -70,7 +70,12 @@ func Run(env Env, args []string) int {
 	root.SetIn(env.In)
 
 	if err := root.Execute(); err != nil {
-		a.report(err)
+		// A partialResultError means the command already wrote its (possibly partial) result to
+		// stdout: report() would print a second, conflicting thing to stderr on top of it.
+		var partial *partialResultError
+		if !errors.As(err, &partial) {
+			a.report(err)
+		}
 		return 1
 	}
 	return 0
@@ -98,6 +103,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.unlinkCmd(),
 		a.sessionCmd(),
 		a.jumpCmd(),
+		a.startCmd(),
 		a.rmCmd(),
 		a.configCmd(),
 		a.refreshCmd(),

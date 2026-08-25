@@ -215,6 +215,7 @@ herdr integration install claude
 | `taskherd link <id> <url> [--note N]` / `taskherd unlink <id> <url>` | 外部リンクの付け外し |
 | `taskherd session link <id> [--current\|--session-id UUID\|--pane PANE_ID]` | エージェントセッションを紐づける |
 | `taskherd jump <id> [--session UUID]` | 紐づいたセッションへ移動する（消滅していれば resume 起動） |
+| `taskherd start <id> [--cwd PATH] [--prompt TEXT]` | 新しいエージェントセッションを起こし、紐づける（cwd 候補が定まらなければ `--cwd` が必須） |
 | `taskherd refresh [<id>] [--all]` | リンクのライブ状態を即時取得する |
 | `taskherd board` | kanban ボード（TUI）を開く |
 | `taskherd rm <id> [--yes]` | タスクを削除する |
