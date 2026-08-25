@@ -266,6 +266,12 @@ func (b *Board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		return b.handlePaste(msg)
 
+	case tea.MouseClickMsg:
+		return b.handleMouseClick(msg)
+
+	case tea.MouseWheelMsg:
+		return b.handleMouseWheel(msg)
+
 	case tea.KeyboardEnhancementsMsg:
 		b.shiftEnter = msg.SupportsKeyDisambiguation()
 		return b, nil
@@ -410,6 +416,62 @@ func (b *Board) handleBoardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return b, b.refreshTaskCmd()
 	case "R":
 		return b, b.refreshAllCmd()
+	}
+	return b, nil
+}
+
+// handleMouseClick opens whichever card the click landed on, the same way Enter does once the
+// cursor is there. baseMode() is not used for the gate: it resolves an overlay back to the screen
+// it was opened from, which is modeBoard for every overlay the board itself opens (jump, confirm,
+// status/session select, session start), and a card behind one of those must not be reachable
+// while it has the keyboard.
+func (b *Board) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	mouse := msg.Mouse()
+	if mouse.Button != tea.MouseLeft || b.mode != modeBoard {
+		return b, nil
+	}
+	region, ok := hitCard(b.cardRegions, mouse.X, mouse.Y)
+	if !ok {
+		return b, nil
+	}
+	b.selectCard(region.columnIndex, region.taskID)
+	return b, b.openDetail()
+}
+
+// selectCard moves the cursor onto the given task within the given column, the two identifiers a
+// cardRegion carries: the column comes from where the card was drawn rather than a fresh lookup by
+// task id, so a click lands where it was clicked even if the task moved column between the render
+// and the click reaching Update.
+func (b *Board) selectCard(columnIndex, taskID int) {
+	if columnIndex < 0 || columnIndex >= len(b.columns) {
+		return
+	}
+	col := b.columns[columnIndex]
+	for i, task := range col.Tasks {
+		if task.ID == taskID {
+			b.colIdx = columnIndex
+			b.selected[col.Key()] = i
+			return
+		}
+	}
+}
+
+// handleMouseWheel drives the same cursor movement the arrow keys do: vertical scroll steps the
+// card within the focused column, horizontal steps the column itself. Gated the same way a click
+// is, so scrolling cannot move the selection out from under an open overlay.
+func (b *Board) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if b.mode != modeBoard {
+		return b, nil
+	}
+	switch msg.Mouse().Button {
+	case tea.MouseWheelUp:
+		b.moveCard(-1)
+	case tea.MouseWheelDown:
+		b.moveCard(1)
+	case tea.MouseWheelLeft:
+		b.moveColumn(-1)
+	case tea.MouseWheelRight:
+		b.moveColumn(1)
 	}
 	return b, nil
 }

@@ -32,6 +32,9 @@ func (b *Board) boardHelp() string {
 func (b *Board) View() tea.View {
 	view := tea.NewView(b.render())
 	view.AltScreen = true
+	// CellMotion rather than AllMotion: the board has no use for a motion event fired on every cell
+	// the pointer crosses while no button is held, only for clicks, releases and wheel turns.
+	view.MouseMode = tea.MouseModeCellMotion
 	return view
 }
 
