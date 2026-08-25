@@ -156,15 +156,20 @@ func TestMouseIgnoredOutsideBoardMode(t *testing.T) {
 			}
 
 			// render() always draws the board underneath before splicing whatever is open on top of
-			// it (render()'s own first line is renderBoard()), so this populates cardRegions with
-			// #1's real rectangle regardless of mode. Clicking an arbitrary (5, 5) instead of a real
+			// it (render()'s own first line is renderBoard()), so this populates cardRegions with a
+			// real rectangle regardless of mode. Clicking an arbitrary (5, 5) instead of a real
 			// card's coordinates would make the gate untestable: hitCard on an empty cardRegions
 			// always misses, so the click would do nothing whether or not the mode guard actually
 			// worked, and reverting the guard to baseMode() would not be caught here.
+			//
+			// #2, not #1: every case above puts the cursor on #1 before opening its overlay, so a
+			// click that leaked through onto #1's own region would leave colIdx/selected exactly
+			// where they already were — indistinguishable from the guard actually holding. #2 makes
+			// a leaked click move the cursor, which the checks below already look for.
 			h.board.render()
-			region, ok := findRegion(h.board.cardRegions, 1)
+			region, ok := findRegion(h.board.cardRegions, 2)
 			if !ok {
-				t.Fatalf("前提: #1 の矩形が見つからない（クリックが本当にカードへ当たるかを検証できない）: %+v", h.board.cardRegions)
+				t.Fatalf("前提: #2 の矩形が見つからない（クリックが本当にカードへ当たるかを検証できない）: %+v", h.board.cardRegions)
 			}
 
 			colBefore := h.board.colIdx
