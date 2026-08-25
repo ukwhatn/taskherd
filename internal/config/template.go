@@ -82,6 +82,10 @@ color = "gray"
 # email = "you@example.com"
 # API トークンはこの環境変数から読む（config への平文保存はしない）
 token_env = "TASKHERD_JIRA_TOKEN"
+# 環境変数が空のときは、このファイルからトークンを読む。先頭の ~/ は HOME に展開する。
+# herdr プラグインとして board を開くと herdr サーバの環境を継承するためシェルの環境変数は
+# 届かない。3 台で使う・board をプラグインから開く場合はこちらを設定する（chmod 600 推奨）
+# token_file = "~/.config/taskherd/jira_token"
 `
 
 // DefaultFileContent returns the generated config.toml content.

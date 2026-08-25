@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -162,21 +164,62 @@ func (a *app) cache() *fetch.Cache {
 	return a.cacheStore
 }
 
-// fetcher builds a Fetcher wired to cfg. The Jira token is read from the environment
-// variable cfg.Jira.TokenEnv names, never from config.toml itself.
+// fetcher builds a Fetcher wired to cfg. The Jira token comes from the environment or from a
+// file, never from config.toml itself.
 func (a *app) fetcher(cfg *config.Config) *fetch.Fetcher {
 	return &fetch.Fetcher{
 		GitHub:     fetch.NewGitHubFetcher(cfg.GitHub.Accounts),
 		Jira:       fetch.NewJiraFetcher(),
 		Cache:      a.cache(),
 		Classifier: cfg.Classifier(),
-		JiraCreds: fetch.JiraCredentials{
-			Site:  cfg.Jira.Site,
-			Email: cfg.Jira.Email,
-			Token: a.env.Getenv(cfg.Jira.TokenEnv),
-		},
-		Now: a.env.Now,
+		JiraCreds:  a.jiraCredentials(cfg),
+		Now:        a.env.Now,
 	}
+}
+
+// jiraCredentials resolves the Jira token: the environment variable named by token_env first, then
+// the file named by token_file.
+//
+// The environment wins so that a one-off `TASKHERD_JIRA_TOKEN=... taskherd refresh` still works,
+// and the file is what makes the board work when it is opened as a herdr plugin: that board is
+// spawned by the herdr server and inherits its environment, not the shell's.
+//
+// A file that cannot be read is not an error here. The fetch reports it per link, the same way an
+// unreachable GitHub does, so one broken setting does not stop the rest of the board from working.
+func (a *app) jiraCredentials(cfg *config.Config) fetch.JiraCredentials {
+	creds := fetch.JiraCredentials{Site: cfg.Jira.Site, Email: cfg.Jira.Email}
+	if token := strings.TrimSpace(a.env.Getenv(cfg.Jira.TokenEnv)); token != "" {
+		creds.Token = token
+		return creds
+	}
+	if cfg.Jira.TokenFile == "" {
+		return creds
+	}
+
+	data, err := os.ReadFile(a.expandHome(cfg.Jira.TokenFile))
+	if err != nil {
+		// The path is quoted but the file's content never is: this string is written to cache.json
+		// and drawn on the board.
+		creds.TokenReason = fmt.Sprintf("token_file %q を読めない: %v", cfg.Jira.TokenFile, err)
+		return creds
+	}
+	if creds.Token = strings.TrimSpace(string(data)); creds.Token == "" {
+		creds.TokenReason = fmt.Sprintf("token_file %q が空", cfg.Jira.TokenFile)
+	}
+	return creds
+}
+
+// expandHome resolves a leading ~/ against HOME, which is how a hand-written config actually writes
+// a path in the home directory. Any other form is left as written.
+func (a *app) expandHome(path string) string {
+	if !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home := a.env.Getenv("HOME")
+	if home == "" {
+		return path
+	}
+	return filepath.Join(home, path[2:])
 }
 
 func (a *app) herdr() *herdrc.Client {

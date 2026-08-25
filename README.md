@@ -144,13 +144,28 @@ herdr プラグインが開いた pane は shell を経由しないため `$EDIT
 
 ### Jira トークンの設定
 
-Jira のトークンは config.toml に書かず、`token_env` が指す環境変数（既定 `TASKHERD_JIRA_TOKEN`）から読む:
+Jira のトークンは config.toml に書かない。読む順序は `token_env` が指す環境変数（既定 `TASKHERD_JIRA_TOKEN`）、次に `token_file` が指すファイル:
 
 ```
 export TASKHERD_JIRA_TOKEN="..."
 ```
 
-トークンは https://id.atlassian.com/manage-profile/security/api-tokens で発行する。Atlassian は発行したトークンを 1 年で失効させるため、401 が返るようになったら再発行して環境変数を更新する。
+**board を herdr プラグイン（`prefix+space`）から開くなら `token_file` を使う。** プラグインの pane は常駐している herdr サーバが起動するため、シェルで export した環境変数は届かない。ファイルなら board をどう起動しても同じように読める:
+
+```
+umask 077 && printf '%s' "$TOKEN" > ~/.config/taskherd/jira_token
+```
+
+```toml
+[jira]
+token_file = "~/.config/taskherd/jira_token"
+```
+
+先頭の `~/` は `HOME` に展開する。ファイルの中身はトークンだけを置き、前後の空白と改行は読み込み時に落とされる。パーミッションは `600` にしておく。
+
+ファイルが読めない・空のときは、その理由がリンクの取得失敗としてボードに出る（`Jira の設定がない: token_file "..." を読めない: ...`）。トークン自体はエラーにもキャッシュにも書かれない。
+
+トークンは https://id.atlassian.com/manage-profile/security/api-tokens で発行する。Atlassian は発行したトークンを 1 年で失効させるため、401 が返るようになったら再発行する。
 
 ### herdr integration の更新
 
