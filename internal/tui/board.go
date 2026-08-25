@@ -72,6 +72,18 @@ type Board struct {
 	// focusTaskID pulls the selection onto a specific task after the next rebuild, so a card
 	// stays under the cursor after it moves to another column.
 	focusTaskID int
+	// cardRegions are the on-screen rectangles the last renderColumns pass drew the cards in
+	// (cardRegion, hit.go), rebuilt on every render.
+	cardRegions []cardRegion
+	// wheel accumulates scroll events so that one cursor step costs several of them (see
+	// handleMouseWheel for why one-to-one does not work).
+	wheel wheelState
+	// pendingDetailTaskID is Settings.DetailTaskID, consumed the first time applyTasks runs with the
+	// task list actually in hand: the initial View() can land before that (bubbletea v2 calls it
+	// once before any Init() Cmd resolves), so opening the modal cannot happen in New() itself.
+	// Zeroed on consumption, whether or not the task turned out to still exist, which is what makes
+	// this a one-time request rather than something the board keeps trying to honour.
+	pendingDetailTaskID int
 
 	width  int
 	height int
@@ -196,12 +208,13 @@ func New(ctx context.Context, deps Deps, settings Settings) *Board {
 		cache:    &fetch.CacheFile{Version: 1, Entries: map[string]fetch.CacheEntry{}},
 		links:    map[string]fetch.LinkState{},
 		// Without a cache there is nothing to wait for before the first fetch.
-		cacheLoaded:      deps.Cache == nil,
-		selected:         map[string]int{},
-		offsets:          map[string]int{},
-		collapseTerminal: true,
-		width:            80,
-		height:           24,
+		cacheLoaded:         deps.Cache == nil,
+		selected:            map[string]int{},
+		offsets:             map[string]int{},
+		collapseTerminal:    true,
+		pendingDetailTaskID: settings.DetailTaskID,
+		width:               80,
+		height:              24,
 	}
 }
 
@@ -261,6 +274,12 @@ func (b *Board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.PasteMsg:
 		return b.handlePaste(msg)
+
+	case tea.MouseClickMsg:
+		return b.handleMouseClick(msg)
+
+	case tea.MouseWheelMsg:
+		return b.handleMouseWheel(msg)
 
 	case tea.KeyboardEnhancementsMsg:
 		b.shiftEnter = msg.SupportsKeyDisambiguation()
@@ -406,6 +425,103 @@ func (b *Board) handleBoardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return b, b.refreshTaskCmd()
 	case "R":
 		return b, b.refreshAllCmd()
+	}
+	return b, nil
+}
+
+// handleMouseClick opens whichever card the click landed on, the same way Enter does once the
+// cursor is there. baseMode() is not used for the gate: it resolves an overlay back to the screen
+// it was opened from, which is modeBoard for every overlay the board itself opens (jump, confirm,
+// status/session select, session start), and a card behind one of those must not be reachable
+// while it has the keyboard.
+func (b *Board) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	mouse := msg.Mouse()
+	if mouse.Button != tea.MouseLeft || b.mode != modeBoard {
+		return b, nil
+	}
+	region, ok := hitCard(b.cardRegions, mouse.X, mouse.Y)
+	if !ok {
+		return b, nil
+	}
+	b.selectCard(region.taskID)
+	return b, b.openDetail()
+}
+
+// selectCard moves the cursor onto the given task, looked up fresh in the board's current columns
+// (findTask) rather than trusted from where the click's region was recorded: a card can change
+// column between the render that placed it and the click reaching Update.
+func (b *Board) selectCard(taskID int) {
+	col, row, ok := findTask(b.columns, taskID)
+	if !ok {
+		return
+	}
+	b.colIdx = col
+	b.selected[b.columns[col].Key()] = row
+}
+
+// Scroll axes. The zero value means no scrolling has been seen yet.
+const (
+	wheelAxisNone = iota
+	wheelAxisVertical
+	wheelAxisHorizontal
+)
+
+// wheelStepsPerMove is how many scroll events one cursor step costs.
+//
+// One-to-one does not survive a trackpad: a single flick delivers well over a hundred events, so
+// the cursor would shoot past whatever the user was reading. It also carries stray events from the
+// other axis — a vertical flick emits the occasional lone left/right — and at one-to-one each of
+// those jumps to another column. Requiring several events in the same direction absorbs both: the
+// stray never reaches the threshold, and a flick moves a handful of cards instead of dozens.
+const wheelStepsPerMove = 3
+
+// wheelState accumulates scroll events for the axis currently being scrolled.
+type wheelState struct {
+	axis  int
+	steps int
+}
+
+// step counts one event on axis and reports whether the cursor should move now.
+//
+// Switching axes drops whatever the other one had accumulated rather than keeping both alive: the
+// stray events a trackpad mixes in would otherwise pile up across an entire gesture and eventually
+// cross the threshold on their own, moving a column the user never asked for.
+func (w *wheelState) step(axis int) bool {
+	if w.axis != axis {
+		w.axis, w.steps = axis, 0
+	}
+	w.steps++
+	if w.steps < wheelStepsPerMove {
+		return false
+	}
+	w.steps = 0
+	return true
+}
+
+// handleMouseWheel drives the same cursor movement the arrow keys do: vertical scroll steps the
+// card within the focused column, horizontal steps the column itself. Gated the same way a click
+// is, so scrolling cannot move the selection out from under an open overlay.
+func (b *Board) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if b.mode != modeBoard {
+		return b, nil
+	}
+	switch msg.Mouse().Button {
+	case tea.MouseWheelUp:
+		if b.wheel.step(wheelAxisVertical) {
+			b.moveCard(-1)
+		}
+	case tea.MouseWheelDown:
+		if b.wheel.step(wheelAxisVertical) {
+			b.moveCard(1)
+		}
+	case tea.MouseWheelLeft:
+		if b.wheel.step(wheelAxisHorizontal) {
+			b.moveColumn(-1)
+		}
+	case tea.MouseWheelRight:
+		if b.wheel.step(wheelAxisHorizontal) {
+			b.moveColumn(1)
+		}
 	}
 	return b, nil
 }
@@ -618,6 +734,19 @@ func (b *Board) applyTasks(msg tasksLoadedMsg) tea.Cmd {
 	b.rebuildLinks()
 	b.rebuildSessions()
 	b.tasksLoaded = true
+
+	// Consumed on the first successful load regardless of whether the task is still there: a load
+	// that fails returns above before reaching here, so a transient failure leaves the request
+	// intact for the next one, but a load that succeeds and simply finds nothing to open must not
+	// leave the request standing for some later reload to act on instead.
+	if id := b.pendingDetailTaskID; id != 0 {
+		b.pendingDetailTaskID = 0
+		if b.taskByID(id) != nil {
+			b.mode = modeDetail
+			b.detail = newDetailState(id)
+			b.detail.quitOnClose = true
+		}
+	}
 
 	// The detail modal is pinned to a task id, so a task deleted underneath it (by the CLI, or
 	// by another session) has to close it rather than leave it on nothing.

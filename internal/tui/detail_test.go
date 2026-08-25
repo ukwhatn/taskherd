@@ -452,6 +452,106 @@ func TestDetailClosesWhenTaskDisappears(t *testing.T) {
 	}
 }
 
+// The Esc that opens quitOnClose has to end the program, not fall back to the board: the board
+// behind it was never the point of a detail opened straight from prefix+t.
+func TestDetailEscQuitsWhenOpenedFromStart(t *testing.T) {
+	store := newFakeStore(task(1, "todo"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{DetailTaskID: 1})
+	if h.board.mode != modeDetail || !h.board.detail.quitOnClose {
+		t.Fatalf("前提: quitOnClose 付きで detail が開いていること（mode=%v quitOnClose=%v）",
+			h.board.mode, h.board.detail.quitOnClose)
+	}
+
+	cmd := h.dispatch(keyMsg("esc"))
+
+	if cmd == nil {
+		t.Fatal("esc がコマンドを返していない、want tea.Quit")
+	}
+	if h.board.mode != modeDetail {
+		t.Errorf("mode = %v, want modeDetail のまま（quit する前に board へ落ちない）", h.board.mode)
+	}
+}
+
+// The ordinary board-opened detail is the contrast case: its Esc returns to the board and quits
+// nothing.
+func TestDetailEscReturnsToBoardWhenOpenedNormally(t *testing.T) {
+	store := newFakeStore(task(1, "todo"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{})
+
+	h.key("enter")
+	cmd := h.dispatch(keyMsg("esc"))
+
+	if cmd != nil {
+		t.Error("通常に開いた detail の esc が何かコマンドを返している、want nil")
+	}
+	if h.board.mode != modeBoard {
+		t.Errorf("mode = %v, want modeBoard", h.board.mode)
+	}
+}
+
+// Once a detail opened from board closes over #1 disappearing, opening a fresh one over #2 gets a
+// clean detailState — quitOnClose is not something the board carries between details.
+func TestDetailReopenedAfterQuitOnCloseTargetDisappearsDoesNotQuit(t *testing.T) {
+	store := newFakeStore(task(1, "todo"), task(2, "todo"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{DetailTaskID: 1})
+	if !h.board.detail.quitOnClose {
+		t.Fatal("前提: quitOnClose が立っていること")
+	}
+
+	if err := store.Update(nil, func(f *model.File) error {
+		_, err := f.RemoveTask(1)
+		return err
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	h.reload()
+	if h.board.mode != modeBoard {
+		t.Fatalf("mode = %v, want modeBoard（#1 消滅で board に戻る）", h.board.mode)
+	}
+
+	h.key("enter") // opens #2's detail fresh, from the board
+	if h.board.mode != modeDetail || h.board.detail.quitOnClose {
+		t.Fatalf("mode=%v quitOnClose=%v, want modeDetail かつ quitOnClose=false", h.board.mode, h.board.detail.quitOnClose)
+	}
+	cmd := h.dispatch(keyMsg("esc"))
+
+	if cmd != nil {
+		t.Error("#2 の detail の esc が何かコマンドを返している（プログラムが終了してはいけない）")
+	}
+	if h.board.mode != modeBoard {
+		t.Errorf("mode = %v, want modeBoard", h.board.mode)
+	}
+}
+
+// A quitOnClose detail with an overlay open over it (the status-select picker, opened from the
+// modal's own ステータス row) still has to fall back to the board — not quit — when the task it is
+// pinned to disappears underneath both of them.
+func TestDetailQuitOnCloseDoesNotQuitWhenTaskDisappearsUnderOverlay(t *testing.T) {
+	store := newFakeStore(task(1, "todo"))
+	h := newHarness(t, Deps{Tasks: store}, Settings{DetailTaskID: 1})
+	if h.board.mode != modeDetail || !h.board.detail.quitOnClose {
+		t.Fatalf("前提: quitOnClose 付きで detail が開いていること（mode=%v quitOnClose=%v）",
+			h.board.mode, h.board.detail.quitOnClose)
+	}
+	focusDetailItem(t, h, itemStatus, "")
+	h.key("enter")
+	if h.board.mode != modeStatusSelect {
+		t.Fatalf("mode = %v, want modeStatusSelect", h.board.mode)
+	}
+
+	if err := store.Update(nil, func(f *model.File) error {
+		_, err := f.RemoveTask(1)
+		return err
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	h.reload()
+
+	if h.board.mode != modeBoard {
+		t.Errorf("mode = %v, want modeBoard（quitOnClose でも自動終了しない）", h.board.mode)
+	}
+}
+
 func TestDetailNoteWithoutEditorReports(t *testing.T) {
 	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
 	h := newHarness(t, Deps{Tasks: store}, Settings{})

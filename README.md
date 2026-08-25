@@ -45,22 +45,24 @@ herdr プラグインのマニフェスト（`herdr-plugin.toml`）は action �
 
 ```toml
 [[keys.command]]
-key = "prefix+t"
+key = "prefix+space"
 type = "plugin_action"
 command = "taskherd.open-board"
 description = "open task board"
 
 [[keys.command]]
-key = "prefix+shift+t"
+key = "prefix+t"
 type = "plugin_action"
 command = "taskherd.link-pane"
 description = "link pane to task"
 ```
 
 - `taskherd.open-board`: kanban ボードをオーバーレイで開く
-- `taskherd.link-pane`: 今いる pane をタスクに紐づける picker をポップアップで開く
+- `taskherd.link-pane`: 今いる pane が既にタスクへ紐づいていればそのタスクの詳細モーダルを、まだ紐づいていなければタスクに紐づける picker をポップアップで開く
 
-`link-pane` の実体は 2 段構成になっている。action 自身は対象 pane を特定して `plugin pane open --entrypoint picker` を呼ぶだけで、実際の選択 UI は別プロセス（`taskherd picker`）が担う。これは popup 実体に `HERDR_PANE_ID` が注入されない herdr 側の制約に合わせた構成で、キー1つの体験としては変わらない。
+`link-pane` の実体は 2 段構成になっている。action 自身は対象 pane を特定して `plugin pane open --entrypoint picker` を呼ぶだけで、実際の判定・UI は別プロセス（`taskherd picker`）が担う。これは popup 実体に `HERDR_PANE_ID` が注入されない herdr 側の制約に合わせた構成で、キー1つの体験としては変わらない。
+
+`taskherd picker` は起動時に、対象 pane に herdr が検出しているエージェントのセッションが、tasks.json 上のいずれかのタスクに紐づいているかを調べる。紐づいていれば picker を開かずそのタスクの詳細モーダルを直接開き、`Esc` で（board へ戻らず）ポップアップごと終了する。同じセッションが複数のタスクに紐づいている場合は id が最小のタスクを開く。herdr に到達できない・pane からエージェントを検出できない・セッション id が無い・どのタスクにも紐づいていない、のいずれの場合も判定を諦めて従来どおり picker を開く。
 
 ## config.toml のセットアップ
 
@@ -240,6 +242,18 @@ herdr integration install claude
 | `t` | 完了・却下列（terminal 列）の折り畳み切替 |
 | `q` / `Ctrl+C` | 終了 |
 
+### マウス操作
+
+board はマウスも受け付ける（herdr の pane 内からのマウス転送が前提）。
+
+| 操作 | 動作 |
+|---|---|
+| カードを左クリック | そのカードへ選択を移し、詳細モーダルを開く（`Enter` と同じ） |
+| ホイール上下 | フォーカス中の列でカードを送る（`↑↓` と同じ） |
+| ホイール左右 | 列フォーカスを送る（`←→` と同じ） |
+
+盤面以外の場所のクリック・ホイールは無視する。詳細・追加・各種セレクタ・確認ダイアログが開いている間はマウス操作全体を無視する（背後のカードは押せない）。
+
 ### 画面の見え方
 
 - カードは角丸ボーダーのボックスで描画し、選択中のカードは列の色でボーダーを強調する。列ヘッダは列色のラベルと件数、フォーカス中の列は反転表示
@@ -275,7 +289,7 @@ herdr integration install claude
 - **＋リンクを追加**: 空白・改行区切りで複数 URL を一括登録できる（1 つでも不正なら全体を中止する）
 - **セッション行**: `Enter` でそのセッションへジャンプ、`Delete` で確認付きの解除
 - **＋セッションを紐づける**: herdr が検出しているエージェント一覧から `↑↓` で選ぶ。herdr 不達時は無効表示になる
-- `Esc` で board へ戻る
+- `Esc` で board へ戻る。ただし `link-pane` がセッション紐づけ済みタスクの詳細を直接開いた場合（前述）は、`Esc` で board へは戻らずポップアップごと終了する
 
 ### 追加モーダル（`a`）
 
