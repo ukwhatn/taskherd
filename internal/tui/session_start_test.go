@@ -345,6 +345,41 @@ func TestBoardSessionStartStaleOperationMessageIsDropped(t *testing.T) {
 	}
 }
 
+// A stale message can carry a non-nil file (the link step's own save, arriving after the
+// operation was cancelled): that file must never be applied to the board, not even briefly.
+// Checking staleness only inside advanceSessionStart, after the file has already been swapped
+// into b.file by the caller, would miss this — the message is still dropped, but the swap already
+// happened.
+func TestBoardSessionStartStaleFileNeverReachesBoard(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+	h := newHarness(t, Deps{Tasks: store, Herdr: &fakeHerdr{}}, Settings{})
+	realFile := h.board.file
+
+	h.key("g")
+	h.board.sessionStart.cwdInput.SetValue("/repo/work")
+	h.dispatch(keyMsg("enter")) // op starts, left pending (never run further)
+	staleOpID := h.board.launch.opID
+	h.key("esc") // cancel it before it ever completed a stage
+
+	poisoned := model.NewFile()
+	poisoned.Tasks = append(poisoned.Tasks, model.Task{ID: 999, Title: "poisoned", Status: "todo"})
+
+	h.dispatch(sessionStartMsg{
+		opID: staleOpID, taskID: 1, cwd: "/repo/stale",
+		stage: sessionStageWaited, paneID: "pane-old", sessionID: "s-old",
+		file: poisoned,
+	})
+
+	if h.board.file != realFile {
+		t.Error("キャンセル済み operation の file が board に適用された")
+	}
+	for _, task := range h.board.file.Tasks {
+		if task.ID == 999 {
+			t.Fatal("poisoned タスクが board に載っている")
+		}
+	}
+}
+
 // The task disappearing while its launch modal is still open (before Enter) closes the modal.
 func TestBoardSessionStartClosesWhenTargetTaskDeletedBeforeSubmit(t *testing.T) {
 	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})

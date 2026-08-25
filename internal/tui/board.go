@@ -308,6 +308,13 @@ func (b *Board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return b, nil
 
 	case sessionStartMsg:
+		// The currency check runs before msg.file is ever applied, not after: a stale message can
+		// still carry a file from a save that happened before it was cancelled or superseded, and
+		// applying that first would let a dropped operation's data reach the board regardless of
+		// what advanceSessionStart itself goes on to do with the message.
+		if !b.sessionStartMsgIsCurrent(msg) {
+			return b, nil
+		}
 		if msg.file != nil {
 			b.file = msg.file
 			b.rebuild()

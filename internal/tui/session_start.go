@@ -274,10 +274,18 @@ func (b *Board) submitSessionStart() tea.Cmd {
 	return b.createTabCmd(ctx, sessionStartMsg{opID: opID, taskID: taskID, cwd: cwd, title: title, prompt: prompt})
 }
 
+// sessionStartMsgIsCurrent reports whether msg still belongs to the one session-start operation
+// the board considers in flight. A stale message — superseded by cancellation, a newer launch, or
+// the target task disappearing — must be dropped before any of its payload, including the *File
+// it may carry, ever touches board state.
+func (b *Board) sessionStartMsgIsCurrent(msg sessionStartMsg) bool {
+	return b.launch.pending && msg.opID == b.launch.opID
+}
+
 // advanceSessionStart decides what happens next for one stage message: drop it when it belongs to
 // an operation no longer in flight, report and stop on any error, or move on to the next stage.
 func (b *Board) advanceSessionStart(msg sessionStartMsg) tea.Cmd {
-	if !b.launch.pending || msg.opID != b.launch.opID {
+	if !b.sessionStartMsgIsCurrent(msg) {
 		return nil
 	}
 	if msg.err != nil {
