@@ -256,18 +256,28 @@ func TestCardRegionsClippedWithNoticePresent(t *testing.T) {
 	assertRegionMatchesScreen(t, h, screen, h.board.cardRegions[0])
 }
 
-// newHarness fills in testColumns() when Settings.Columns is empty (it has to, for every other
-// test in this package), so an actually-empty column set is built by hand here instead.
-func TestCardRegionsEmptyWhenNoColumnsConfigured(t *testing.T) {
-	board := New(context.Background(), Deps{Tasks: newFakeStore(task(1, "todo")), Now: func() time.Time { return boardNow }},
-		Settings{Columns: model.Columns{}})
-	board.width, board.height = 80, 24
+// renderColumns clears cardRegions at its own top (§4.2) rather than only ever appending to it, so
+// a board that had regions from an earlier render must not still report them once its columns and
+// tasks are both gone: a fresh Board's cardRegions being nil would pass this even without that
+// reset line, since it never held anything to clear in the first place.
+func TestCardRegionsResetWhenColumnsBecomeEmpty(t *testing.T) {
+	h := newHarness(t, Deps{Tasks: newFakeStore(task(1, "todo"))}, Settings{})
+	h.board.width, h.board.height = 80, 24
 
-	board.render()
-	if len(board.cardRegions) != 0 {
-		t.Errorf("cardRegions = %+v, want 空（列が定義されていない）", board.cardRegions)
+	h.board.render()
+	if len(h.board.cardRegions) == 0 {
+		t.Fatal("前提: 列がある状態でカードの矩形が記録されていること")
 	}
-	if _, ok := hitCard(board.cardRegions, 10, 10); ok {
+
+	h.board.settings.Columns = model.Columns{}
+	h.board.file.Tasks = nil
+	h.board.rebuild()
+	h.board.render()
+
+	if len(h.board.cardRegions) != 0 {
+		t.Errorf("cardRegions = %+v, want 空（列が定義されなくなった後の再描画）", h.board.cardRegions)
+	}
+	if _, ok := hitCard(h.board.cardRegions, 10, 10); ok {
 		t.Error("列が無いのにヒットした")
 	}
 }
