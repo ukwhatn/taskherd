@@ -657,6 +657,16 @@ func TestStartNewIgnoresExistingAgentAndStartsFresh(t *testing.T) {
 	if len(task.Sessions) != 1 || task.Sessions[0].SessionID != "s-new" {
 		t.Errorf("sessions = %+v", task.Sessions)
 	}
+
+	// The display name is built from the task id and title alone, never the herdr agent name, so
+	// --new's numbered NAME must not leak into it.
+	display := fake.call("pane report-metadata")
+	if display == nil || !strings.Contains(strings.Join(display, " "), "--display-agent #1 a") {
+		t.Errorf("report-metadata = %v, want --display-agent #1 a（連番を含まない）", display)
+	}
+	if display != nil && strings.Contains(strings.Join(display, " "), "1-2") {
+		t.Errorf("report-metadata = %v, want 表示名に連番を含まない", display)
+	}
 }
 
 // The smallest unused suffix is picked, not the historical max+1: a gap left by an agent that has
