@@ -192,6 +192,52 @@ func (c *Client) WaitForAgentState(ctx context.Context, paneID string, until []s
 	return payload.Agent, nil
 }
 
+// sessionPollInterval is how often WaitForAgentSession re-fetches the snapshot once the agent is
+// idle but has not yet reported a session id.
+const sessionPollInterval = 200 * time.Millisecond
+
+// WaitForAgentSession waits for the agent in paneID to become idle (or blocked) and, when idle,
+// for its native session id to appear.
+//
+// `agent start` succeeding and the session id being reported are two separate events with no
+// ordering guarantee between them: the agent can be detected and ready for input before the
+// integration hook that reports the session id has run. herdr's own wait has no way to block on
+// the session id itself (--until only takes agent_status values), so once WaitForAgentState
+// reports idle with no session yet, this re-fetches the snapshot every sessionPollInterval until
+// one appears, the agent turns blocked, or timeout — the same single budget WaitForAgentState was
+// given, not a second one stacked on top of it — runs out.
+func (c *Client) WaitForAgentSession(ctx context.Context, paneID string, timeout time.Duration) (Agent, error) {
+	deadline := time.Now().Add(timeout)
+
+	agent, err := c.WaitForAgentState(ctx, paneID, []string{StateIdle, StateBlocked}, timeout)
+	if err != nil {
+		return Agent{}, err
+	}
+
+	for agent.SessionID() == "" && agent.AgentStatus != StateBlocked {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return agent, nil
+		}
+		wait := sessionPollInterval
+		if wait > remaining {
+			wait = remaining
+		}
+		if !sleep(ctx, wait) {
+			return Agent{}, ctx.Err()
+		}
+
+		snapshot, err := c.Snapshot(ctx)
+		if err != nil {
+			return Agent{}, err
+		}
+		if found, ok := snapshot.AgentByPaneID(paneID); ok {
+			agent = *found
+		}
+	}
+	return agent, nil
+}
+
 // SendAgentPrompt sends text to an already-started agent's input.
 //
 // The text is never echoed into an error: execRunner's own error messages carry only the

@@ -181,7 +181,7 @@ func (f *fakeHerdr) StartAgent(ctx context.Context, spec herdrc.AgentSpec) (herd
 	return result, nil
 }
 
-func (f *fakeHerdr) WaitForAgentState(ctx context.Context, paneID string, until []string, _ time.Duration) (herdrc.Agent, error) {
+func (f *fakeHerdr) WaitForAgentSession(ctx context.Context, paneID string, _ time.Duration) (herdrc.Agent, error) {
 	if err := ctx.Err(); err != nil {
 		return herdrc.Agent{}, err
 	}

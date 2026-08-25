@@ -12,7 +12,7 @@ import (
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
-// waitingHerdr answers WaitForAgentState with sessionID on the pane fakeHerdr.CreateTab always
+// waitingHerdr answers WaitForAgentSession with sessionID on the pane fakeHerdr.CreateTab always
 // creates ("pane-new"), so a full session-start flow through this fake finds a session id waiting.
 func waitingHerdr(sessionID string) *fakeHerdr {
 	return &fakeHerdr{

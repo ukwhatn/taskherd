@@ -344,8 +344,7 @@ func (b *Board) startAgentCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd 
 
 func (b *Board) waitAgentCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd {
 	return func() tea.Msg {
-		agent, err := b.deps.Herdr.WaitForAgentState(ctx, msg.paneID,
-			[]string{herdrc.StateIdle, herdrc.StateBlocked}, sessionStartWaitTimeout)
+		agent, err := b.deps.Herdr.WaitForAgentSession(ctx, msg.paneID, sessionStartWaitTimeout)
 		if err != nil {
 			msg.err = err
 			msg.hint = fmt.Sprintf("pane %s を確認し、詳細モーダルの ＋セッションを紐づける で後から紐づける", msg.paneID)
