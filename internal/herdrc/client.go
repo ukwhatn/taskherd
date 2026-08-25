@@ -145,6 +145,12 @@ func (r *execRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
 		if apiErr := parseCLIError(exitErr.Stderr); apiErr != nil {
 			return out, apiErr
 		}
+		// The raw text is passed through rather than reduced to the operation name: it is herdr's
+		// own diagnostic for why the call was rejected (a trust-folder gate, say), and hiding it
+		// would cost more than the passthrough risks. taskherd never puts an argument value on this
+		// path itself — only herdr's own message text lands here. Confirmed against the real herdr:
+		// it never quotes a caller-supplied value (agent prompt's TEXT included) back in this text.
+		// If a future herdr starts doing that, this line becomes the leak point.
 		if stderr := strings.TrimSpace(string(exitErr.Stderr)); stderr != "" {
 			return out, fmt.Errorf("%s %s: %s", r.bin, operationName(args), stderr)
 		}
@@ -191,9 +197,10 @@ func operationName(args []string) string {
 			return strings.Join(op, " ")
 		}
 	}
-	if len(args) > 0 {
-		return args[0]
-	}
+	// A registration gap only makes the message vaguer, never a leak: args[0] is provably always
+	// the safe subcommand word today (verified against real herdr, never a positional value), but
+	// falling back to it would depend on that staying true forever. The fixed word costs nothing
+	// and stays safe even if a future herdr command shape changes what args[0] can hold.
 	return "コマンド"
 }
 

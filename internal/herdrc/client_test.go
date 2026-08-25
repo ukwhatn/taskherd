@@ -154,7 +154,7 @@ func TestOperationNameStopsAtKnownSubcommands(t *testing.T) {
 		{[]string{"agent", "start", "taskherd-1", "--kind", "claude"}, "agent start"},
 		{[]string{"plugin", "pane", "open", "--plugin", "x"}, "plugin pane open"},
 		{[]string{"pane", "report-metadata", "wS:p1", "--source", "s"}, "pane report-metadata"},
-		{[]string{"unknown-command", "x", "y"}, "unknown-command"},
+		{[]string{"unknown-command", "x", "y"}, "コマンド"},
 		{nil, "コマンド"},
 	}
 	for _, tt := range tests {
