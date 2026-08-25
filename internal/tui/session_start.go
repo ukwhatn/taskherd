@@ -21,9 +21,8 @@ import (
 // CLI's own constant of the same name (internal/cli/start_cmd.go).
 const sessionStartWaitTimeout = 30 * time.Second
 
-// Session-start stages, mirroring the CLI's own stage names (internal/cli/start_cmd.go) so the
-// same launch is described the same way whether it ran from the board or from `taskherd start`.
-// Each names the last step that completed, not the one being attempted.
+// Session-start stages mirror the CLI's own names (start_cmd.go) so the same launch reads the same
+// way from board or CLI. Each names the last step completed, not the one being attempted.
 const (
 	sessionStageStarted  = "started"
 	sessionStageWaited   = "waited"
@@ -69,10 +68,9 @@ type launchState struct {
 	cancel  context.CancelFunc
 }
 
-// sessionStartMsg carries the state of a session-start operation as it moves through its stages.
-// One type is reused for every stage rather than one type per transition: each stage only adds a
-// field or two to what the previous one already gathered, and advanceSessionStart's dispatch on
-// Stage is what decides which Cmd runs next.
+// sessionStartMsg is one type reused for every stage of a launch rather than one type per
+// transition: each stage only adds a field or two to what the previous one already gathered, and
+// advanceSessionStart's dispatch on stage decides which Cmd runs next.
 type sessionStartMsg struct {
 	opID   int
 	taskID int
@@ -80,11 +78,9 @@ type sessionStartMsg struct {
 	cwd    string
 	prompt string
 
-	stage      string
-	paneID     string
-	sessionID  string
-	linked     bool
-	promptSent bool
+	stage     string
+	paneID    string
+	sessionID string
 	// file is set only by the link step, right after a successful save: the board's own copy is
 	// stale until this is applied, since the save happened on Store's own re-read under its lock
 	// rather than through the model the board is holding.
@@ -282,12 +278,10 @@ func (b *Board) sessionStartMsgIsCurrent(msg sessionStartMsg) bool {
 	return b.launch.pending && msg.opID == b.launch.opID
 }
 
-// advanceSessionStart decides what happens next for one stage message: drop it when it belongs to
-// an operation no longer in flight, report and stop on any error, or move on to the next stage.
+// advanceSessionStart decides what happens next for one stage message, already known current by
+// the caller (Board.Update, its only call site): report and stop on any error, or move on to the
+// next stage.
 func (b *Board) advanceSessionStart(msg sessionStartMsg) tea.Cmd {
-	if !b.sessionStartMsgIsCurrent(msg) {
-		return nil
-	}
 	if msg.err != nil {
 		b.finishSessionStart(msg)
 		return nil
@@ -359,10 +353,7 @@ func (b *Board) waitAgentCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd {
 		}
 		sessionID := agent.SessionID()
 		if sessionID == "" {
-			// blocked is the state an untrusted cwd's agent settles into (herdr is waiting on a
-			// trust-folder prompt or similar), and it never carries a session id. Naming that
-			// instead of the generic message matters here: it is the single most common way this
-			// wait ends without one.
+			// See the CLI's own startSession for why blocked gets its own message (start_cmd.go).
 			if agent.AgentStatus == herdrc.StateBlocked {
 				msg.err = errors.New("入力待ちで止まっている（trust-folder の確認など）")
 			} else {
@@ -403,7 +394,6 @@ func (b *Board) linkSessionCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd
 		// Best-effort, same as the existing jump / session link paths: a failed stamp is only a
 		// missing convenience in herdr's own UI, never a reason to fail the launch.
 		_ = b.deps.Herdr.ReportTaskToken(ctx, msg.paneID, msg.taskID)
-		msg.linked = true
 		msg.stage = sessionStageLinked
 		return msg
 	}
@@ -416,7 +406,6 @@ func (b *Board) sendPromptCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd 
 			msg.hint = "起動と紐づけは済んでいる。プロンプトの送信だけ失敗した"
 			return msg
 		}
-		msg.promptSent = true
 		msg.stage = sessionStagePrompted
 		return msg
 	}

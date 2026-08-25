@@ -217,9 +217,7 @@ func Load(path string) (*Config, error) {
 	if raw.SessionStart.PromptTemplate != nil {
 		cfg.SessionStart.PromptTemplate = *raw.SessionStart.PromptTemplate
 	}
-	if raw.SessionStart.Templates != nil {
-		cfg.SessionStart.Templates = raw.SessionStart.Templates
-	}
+	cfg.SessionStart.Templates = raw.SessionStart.Templates
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err

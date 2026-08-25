@@ -3,6 +3,7 @@ package cli_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -467,11 +468,7 @@ func TestStartRejectsBlankCwdBeforeCreatingAnything(t *testing.T) {
 }
 
 var (
-	herdrcUnavailableErr = &herdrcTestErr{"herdr に到達できない"}
-	errStartWait         = &herdrcTestErr{"wait タイムアウト"}
-	errPromptFailed      = &herdrcTestErr{"agent prompt に失敗した"}
+	herdrcUnavailableErr = errors.New("herdr に到達できない")
+	errStartWait         = errors.New("wait タイムアウト")
+	errPromptFailed      = errors.New("agent prompt に失敗した")
 )
-
-type herdrcTestErr struct{ msg string }
-
-func (e *herdrcTestErr) Error() string { return e.msg }
