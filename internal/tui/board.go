@@ -75,6 +75,9 @@ type Board struct {
 	// cardRegions are the on-screen rectangles the last renderColumns pass drew the cards in
 	// (cardRegion, hit.go), rebuilt on every render.
 	cardRegions []cardRegion
+	// wheel accumulates scroll events so that one cursor step costs several of them (see
+	// handleMouseWheel for why one-to-one does not work).
+	wheel wheelState
 	// pendingDetailTaskID is Settings.DetailTaskID, consumed the first time applyTasks runs with the
 	// task list actually in hand: the initial View() can land before that (bubbletea v2 calls it
 	// once before any Init() Cmd resolves), so opening the modal cannot happen in New() itself.
@@ -456,6 +459,45 @@ func (b *Board) selectCard(taskID int) {
 	b.selected[b.columns[col].Key()] = row
 }
 
+// Scroll axes. The zero value means no scrolling has been seen yet.
+const (
+	wheelAxisNone = iota
+	wheelAxisVertical
+	wheelAxisHorizontal
+)
+
+// wheelStepsPerMove is how many scroll events one cursor step costs.
+//
+// One-to-one does not survive a trackpad: a single flick delivers well over a hundred events, so
+// the cursor would shoot past whatever the user was reading. It also carries stray events from the
+// other axis — a vertical flick emits the occasional lone left/right — and at one-to-one each of
+// those jumps to another column. Requiring several events in the same direction absorbs both: the
+// stray never reaches the threshold, and a flick moves a handful of cards instead of dozens.
+const wheelStepsPerMove = 3
+
+// wheelState accumulates scroll events for the axis currently being scrolled.
+type wheelState struct {
+	axis  int
+	steps int
+}
+
+// step counts one event on axis and reports whether the cursor should move now.
+//
+// Switching axes drops whatever the other one had accumulated rather than keeping both alive: the
+// stray events a trackpad mixes in would otherwise pile up across an entire gesture and eventually
+// cross the threshold on their own, moving a column the user never asked for.
+func (w *wheelState) step(axis int) bool {
+	if w.axis != axis {
+		w.axis, w.steps = axis, 0
+	}
+	w.steps++
+	if w.steps < wheelStepsPerMove {
+		return false
+	}
+	w.steps = 0
+	return true
+}
+
 // handleMouseWheel drives the same cursor movement the arrow keys do: vertical scroll steps the
 // card within the focused column, horizontal steps the column itself. Gated the same way a click
 // is, so scrolling cannot move the selection out from under an open overlay.
@@ -465,13 +507,21 @@ func (b *Board) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.Mouse().Button {
 	case tea.MouseWheelUp:
-		b.moveCard(-1)
+		if b.wheel.step(wheelAxisVertical) {
+			b.moveCard(-1)
+		}
 	case tea.MouseWheelDown:
-		b.moveCard(1)
+		if b.wheel.step(wheelAxisVertical) {
+			b.moveCard(1)
+		}
 	case tea.MouseWheelLeft:
-		b.moveColumn(-1)
+		if b.wheel.step(wheelAxisHorizontal) {
+			b.moveColumn(-1)
+		}
 	case tea.MouseWheelRight:
-		b.moveColumn(1)
+		if b.wheel.step(wheelAxisHorizontal) {
+			b.moveColumn(1)
+		}
 	}
 	return b, nil
 }

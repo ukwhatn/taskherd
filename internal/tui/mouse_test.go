@@ -192,13 +192,20 @@ func TestMouseIgnoredOutsideBoardMode(t *testing.T) {
 	}
 }
 
+// scroll delivers n wheel events in one direction, the way a real device does.
+func scroll(h *harness, button tea.MouseButton, n int) {
+	for i := 0; i < n; i++ {
+		h.dispatch(tea.MouseWheelMsg{Button: button})
+	}
+}
+
 func TestMouseWheelMatchesKeyMovement(t *testing.T) {
 	newBoard := func() *harness {
 		return newHarness(t, Deps{Tasks: newFakeStore(task(1, "todo"), task(2, "todo"), task(3, "working"))}, Settings{})
 	}
 
 	down := newBoard()
-	down.dispatch(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	scroll(down, tea.MouseWheelDown, wheelStepsPerMove)
 	downKey := newBoard()
 	downKey.key("down")
 	if got, want := down.board.currentTask().ID, downKey.board.currentTask().ID; got != want {
@@ -206,7 +213,7 @@ func TestMouseWheelMatchesKeyMovement(t *testing.T) {
 	}
 
 	up := newBoard()
-	up.dispatch(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	scroll(up, tea.MouseWheelUp, wheelStepsPerMove)
 	upKey := newBoard()
 	upKey.key("up")
 	if got, want := up.board.currentTask().ID, upKey.board.currentTask().ID; got != want {
@@ -214,7 +221,7 @@ func TestMouseWheelMatchesKeyMovement(t *testing.T) {
 	}
 
 	right := newBoard()
-	right.dispatch(tea.MouseWheelMsg{Button: tea.MouseWheelRight})
+	scroll(right, tea.MouseWheelRight, wheelStepsPerMove)
 	rightKey := newBoard()
 	rightKey.key("right")
 	if got, want := right.board.colIdx, rightKey.board.colIdx; got != want {
@@ -223,11 +230,47 @@ func TestMouseWheelMatchesKeyMovement(t *testing.T) {
 
 	left := newBoard()
 	left.key("right")
-	left.dispatch(tea.MouseWheelMsg{Button: tea.MouseWheelLeft})
+	scroll(left, tea.MouseWheelLeft, wheelStepsPerMove)
 	leftKey := newBoard()
 	leftKey.key("right")
 	leftKey.key("left")
 	if got, want := left.board.colIdx, leftKey.board.colIdx; got != want {
 		t.Errorf("wheel left の colIdx = %d, want %d（key left と同じ）", got, want)
+	}
+}
+
+func TestMouseWheelNeedsSeveralEventsPerStep(t *testing.T) {
+	h := newHarness(t, Deps{Tasks: newFakeStore(task(1, "todo"), task(2, "todo"), task(3, "todo"))}, Settings{})
+	first := h.board.currentTask().ID
+
+	scroll(h, tea.MouseWheelDown, wheelStepsPerMove-1)
+	if got := h.board.currentTask().ID; got != first {
+		t.Fatalf("%d 件のスクロールで選択が #%d に動いた。%d 件までは動かないこと",
+			wheelStepsPerMove-1, got, wheelStepsPerMove-1)
+	}
+
+	scroll(h, tea.MouseWheelDown, 1)
+	if got := h.board.currentTask().ID; got == first {
+		t.Fatalf("%d 件目のスクロールで選択が動いていない（#%d のまま）", wheelStepsPerMove, got)
+	}
+}
+
+// A trackpad flick is not one axis: scrolling down emits the occasional lone left/right event
+// mixed into the run. Measured on the real device, those strays are always single — so as long as
+// one stray cannot reach the threshold on its own, the column stays put while the user reads down
+// a column. This is the regression the accumulator exists for.
+func TestMouseWheelIgnoresStrayHorizontalEventsWhileScrollingDown(t *testing.T) {
+	h := newHarness(t, Deps{
+		Tasks: newFakeStore(task(1, "todo"), task(2, "todo"), task(3, "todo"), task(4, "working")),
+	}, Settings{})
+	col := h.board.colIdx
+
+	// The measured pattern: four down events, one stray right, then more down events.
+	scroll(h, tea.MouseWheelDown, 4)
+	scroll(h, tea.MouseWheelRight, 1)
+	scroll(h, tea.MouseWheelDown, 6)
+
+	if got := h.board.colIdx; got != col {
+		t.Errorf("縦スクロール中に混ざった横イベント 1 件で列が %d → %d に動いた", col, got)
 	}
 }
