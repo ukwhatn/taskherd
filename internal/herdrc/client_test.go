@@ -8,7 +8,15 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
+
+// runnerFunc adapts a plain function to the Runner interface, for a test that needs to inspect
+// the context WaitForAgentState builds rather than just the args (fakeRunner in the external test
+// package drops the context, which every other test here has no need of).
+type runnerFunc func(ctx context.Context, args ...string) ([]byte, error)
+
+func (f runnerFunc) Run(ctx context.Context, args ...string) ([]byte, error) { return f(ctx, args...) }
 
 // writeFakeBin writes a shell script standing in for the herdr binary, so execRunner's own
 // subprocess handling (as opposed to the Runner interface tests elsewhere) can be exercised
@@ -109,6 +117,31 @@ func TestExecRunnerSucceedsWithoutEnvelope(t *testing.T) {
 	}
 	if !strings.Contains(string(out), `"ok":true`) {
 		t.Errorf("out = %q", out)
+	}
+}
+
+// The context WaitForAgentState builds must outlive the timeout it hands herdr itself: herdr's own
+// wait is bounded by --timeout, and cliTimeout on top of that is the round-trip margin, the same
+// shape StartAgent already uses. A context cut to exactly the wait timeout would cancel the request
+// out from under a herdr that answers right at the deadline.
+func TestWaitForAgentStateContextOutlivesTheWaitTimeout(t *testing.T) {
+	const timeout = 50 * time.Millisecond
+	var deadline time.Time
+	var hasDeadline bool
+	runner := runnerFunc(func(ctx context.Context, args ...string) ([]byte, error) {
+		deadline, hasDeadline = ctx.Deadline()
+		return []byte(`{"id":"x","result":{"agent":{"pane_id":"p"}}}`), nil
+	})
+	client := &Client{runner: runner}
+
+	if _, err := client.WaitForAgentState(context.Background(), "p", []string{StateIdle}, timeout); err != nil {
+		t.Fatalf("WaitForAgentState: %v", err)
+	}
+	if !hasDeadline {
+		t.Fatal("context に締切が付いていない")
+	}
+	if remaining := time.Until(deadline); remaining <= timeout {
+		t.Errorf("残り時間 = %s, want %s（cliTimeout の余裕）より大きい", remaining, timeout)
 	}
 }
 
