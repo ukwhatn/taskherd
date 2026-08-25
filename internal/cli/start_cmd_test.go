@@ -1,11 +1,15 @@
 package cli_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ukwhatn/taskherd/internal/herdrc"
+	"github.com/ukwhatn/taskherd/internal/model"
+	"github.com/ukwhatn/taskherd/internal/store"
 )
 
 type startResult struct {
@@ -316,6 +320,40 @@ func TestStartRequiresCwdWhenNoCandidateExists(t *testing.T) {
 	payload := decodeError(t, res.stderr)
 	if !strings.Contains(payload.Hint, "--cwd") {
 		t.Errorf("hint = %q, want --cwd の案内", payload.Hint)
+	}
+}
+
+// A change landed through another path (a concurrent taskherd process, say) while agent wait is
+// still running must survive the eventual save: AddSession is reached through Store.Update, which
+// re-reads under its own lock rather than from the *model.File this command loaded at the start.
+func TestStartConcurrentExternalUpdateSurvives(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr()
+	fake.waitSessionID = "s-new"
+	fake.waitSideEffect = func() {
+		err := store.New(h.stateDir).Update(context.Background(), func(f *model.File) error {
+			task, err := f.Task(1)
+			if err != nil {
+				return err
+			}
+			task.SetNote("外部から更新", time.Now())
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("外部更新に失敗: %v", err)
+		}
+	}
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	h.mustRun(t, "start", "1", "--cwd", "/repo", "--json")
+
+	task := h.tasks(t).Tasks[0]
+	if task.Note != "外部から更新" {
+		t.Errorf("note = %q, want 外部更新が残る", task.Note)
+	}
+	if len(task.Sessions) != 1 || task.Sessions[0].SessionID != "s-new" {
+		t.Errorf("sessions = %+v", task.Sessions)
 	}
 }
 

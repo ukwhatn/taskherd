@@ -34,8 +34,9 @@ type fakeHerdr struct {
 	waitErr error
 	// waitSessionID is the session id agent wait reports; empty means agent_session stays null
 	// (herdr never detected one). waitStatus defaults to "idle" when unset.
-	waitSessionID string
-	waitStatus    string
+	waitSessionID  string
+	waitStatus     string
+	waitSideEffect func()
 	// promptErr is returned by agent prompt instead of success.
 	promptErr error
 	// prompts records every agent prompt call, pane and text apart, so a test can assert on the
@@ -116,6 +117,12 @@ func (f *fakeHerdr) Run(_ context.Context, args ...string) ([]byte, error) {
 	case strings.HasPrefix(joined, "agent wait"):
 		if f.waitErr != nil {
 			return nil, f.waitErr
+		}
+		// waitSideEffect lets a test land a change through another path (a concurrent taskherd
+		// process, say) at the exact point in the sequence where the real wait would still be
+		// running, well before the eventual save.
+		if f.waitSideEffect != nil {
+			f.waitSideEffect()
 		}
 		status := f.waitStatus
 		if status == "" {
