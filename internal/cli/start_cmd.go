@@ -190,9 +190,14 @@ func (a *app) sessionWaitTimeout() time.Duration {
 // nil, nil means no such agent exists and the caller should start fresh — this is also what a
 // snapshot fetch failure falls back to, since CreateTab/StartAgent right after would hit the same
 // unreachable herdr anyway and are what actually reports it. A non-nil error means an agent does
-// exist but launching now would be wrong (already linked to this task, or not usable yet); it is a
-// plain UserError since nothing has been created up to this point.
-func (a *app) findReusableAgent(ctx context.Context, client *herdrc.Client, task *model.Task, agentName string) (*herdrc.Agent, error) {
+// exist but launching now would be wrong (already linked to this task, stuck at a different cwd, or
+// not usable yet); it is a plain UserError since nothing has been created up to this point.
+//
+// cwd is the directory this launch is about to use: a recovered pane at a different cwd is not
+// reused (the whole point of retrying with a different cwd would silently be thrown away), and it
+// is not started fresh either — that would leave two agents under the same name, which is exactly
+// what this check exists to prevent. Only --new is allowed to add a second one.
+func (a *app) findReusableAgent(ctx context.Context, client *herdrc.Client, task *model.Task, agentName, cwd string) (*herdrc.Agent, error) {
 	snapshot, err := client.Snapshot(ctx)
 	if err != nil {
 		return nil, nil
@@ -215,6 +220,13 @@ func (a *app) findReusableAgent(ctx context.Context, client *herdrc.Client, task
 			HintText: fmt.Sprintf("taskherd jump %d で移動する", task.ID),
 		}
 	}
+	if strings.TrimSpace(agent.Cwd) != strings.TrimSpace(cwd) {
+		return nil, &UserError{
+			Msg: fmt.Sprintf("#%d の前回の起動が別の cwd（%s）の pane %s で動いている", task.ID, agent.Cwd, agent.PaneID),
+			HintText: fmt.Sprintf(
+				"pane %s へ移るか、taskherd start %d --new --cwd %s で新しく起こす", agent.PaneID, task.ID, cwd),
+		}
+	}
 	return agent, nil
 }
 
@@ -226,7 +238,7 @@ func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt st
 	result := startResult{TaskID: task.ID}
 	agentName := fmt.Sprintf("taskherd-%d", task.ID)
 
-	reused, err := a.findReusableAgent(ctx, client, task, agentName)
+	reused, err := a.findReusableAgent(ctx, client, task, agentName, cwd)
 	if err != nil {
 		return err
 	}

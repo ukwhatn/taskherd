@@ -475,17 +475,17 @@ func TestStartRejectsBlankCwdBeforeCreatingAnything(t *testing.T) {
 }
 
 // A previous attempt's agent, idle with a session already but not yet linked to this task, must be
-// recovered rather than piling a second pane on top of it (§4 of the design). --cwd is given here
-// even though the recovered pane's own cwd (not this flag) is what gets linked: cwd resolution
-// still runs unconditionally before the recovery check (see start_cmd.go's resolveStartCwd call
-// site), so a task with no session anywhere yet has no candidate to fall back to without it.
+// recovered rather than piling a second pane on top of it (§4 of the design). --cwd here matches
+// the recovered pane's own cwd: cwd resolution still runs unconditionally before the recovery
+// check (see start_cmd.go's resolveStartCwd call site), and findReusableAgent itself refuses a
+// recovery whose cwd differs from what this launch asked for (TestStartRefusesWhenExistingAgentIsInADifferentCwd).
 func TestStartReusesIdleUnlinkedAgentInsteadOfCreatingANewPane(t *testing.T) {
 	h := newHarness(t)
 	fake := newFakeHerdr().withAgent("s-prev", fakeAgent{PaneID: "wS:p9", Name: "taskherd-1", Cwd: "/repo/reused"})
 	h.herdr = fake
 	h.mustRun(t, "add", "a")
 
-	res := h.mustRun(t, "start", "1", "--cwd", "/ignored", "--prompt", "続きから", "--json")
+	res := h.mustRun(t, "start", "1", "--cwd", "/repo/reused", "--prompt", "続きから", "--json")
 
 	got := decodeStart(t, res.stdout)
 	if !got.Reused {
@@ -511,6 +511,36 @@ func TestStartReusesIdleUnlinkedAgentInsteadOfCreatingANewPane(t *testing.T) {
 	task := h.tasks(t).Tasks[0]
 	if len(task.Sessions) != 1 || task.Sessions[0].SessionID != "s-prev" || task.Sessions[0].Cwd != "/repo/reused" {
 		t.Errorf("sessions = %+v, want 回収した pane 自身の cwd", task.Sessions)
+	}
+}
+
+// Retrying with a different --cwd (the user realized the first attempt used the wrong directory)
+// must not silently link the old pane's cwd instead: that would resume the wrong directory every
+// time this session is jumped back to later, quietly discarding the correction. It must also not
+// start a second agent under the same name — that is exactly what --new is for.
+func TestStartRefusesWhenExistingAgentIsInADifferentCwd(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr().withAgent("s-prev", fakeAgent{PaneID: "wS:p9", Name: "taskherd-1", Cwd: "/repo/a"})
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	res := h.run(t, "start", "1", "--cwd", "/repo/b", "--json")
+
+	if res.code == 0 {
+		t.Fatal("exit = 0, want 非 0")
+	}
+	if res.stdout != "" {
+		t.Errorf("stdout = %q, want 空（起動していない）", res.stdout)
+	}
+	payload := decodeError(t, res.stderr)
+	if !strings.Contains(payload.Hint, "wS:p9") || !strings.Contains(payload.Hint, "--new") {
+		t.Errorf("hint = %q, want 既存 pane と --new の案内", payload.Hint)
+	}
+	if fake.called("tab create") {
+		t.Error("cwd が違うのに新規起動した（暗黙の 2 つ目を作っている）")
+	}
+	if len(h.tasks(t).Tasks[0].Sessions) != 0 {
+		t.Error("cwd が違うのに紐づいている")
 	}
 }
 
