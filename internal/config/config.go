@@ -51,12 +51,20 @@ type GitHub struct {
 	Accounts map[string]string
 }
 
-// Jira configures Jira Cloud. The token is read from the environment variable named by TokenEnv,
-// never stored in the file.
+// Jira configures Jira Cloud. The token itself is never stored in config.toml: it is read from
+// the environment variable named by TokenEnv, or from the file named by TokenFile.
+//
+// TokenFile exists because the environment is not a path that reaches every way the board starts.
+// A board opened as a herdr plugin is spawned by the long-running herdr server, and inherits that
+// server's environment rather than the shell's, so a variable exported in a shell never arrives.
+// A file is read the same way whichever process starts the board.
 type Jira struct {
 	Site     string
 	Email    string
 	TokenEnv string
+	// TokenFile is a path to a file holding the token and nothing else. A leading ~/ is expanded
+	// against HOME. Surrounding whitespace and the trailing newline are stripped when read.
+	TokenFile string
 }
 
 // fileConfig mirrors config.toml. Scalars are pointers so that an explicit 0 is distinguishable
@@ -75,9 +83,10 @@ type fileConfig struct {
 		Accounts  map[string]string `toml:"accounts"`
 	} `toml:"github"`
 	Jira struct {
-		Site     *string `toml:"site"`
-		Email    *string `toml:"email"`
-		TokenEnv *string `toml:"token_env"`
+		Site      *string `toml:"site"`
+		Email     *string `toml:"email"`
+		TokenEnv  *string `toml:"token_env"`
+		TokenFile *string `toml:"token_file"`
 	} `toml:"jira"`
 }
 
@@ -170,6 +179,9 @@ func Load(path string) (*Config, error) {
 	}
 	if raw.Jira.TokenEnv != nil {
 		cfg.Jira.TokenEnv = *raw.Jira.TokenEnv
+	}
+	if raw.Jira.TokenFile != nil {
+		cfg.Jira.TokenFile = *raw.Jira.TokenFile
 	}
 
 	if err := cfg.Validate(); err != nil {

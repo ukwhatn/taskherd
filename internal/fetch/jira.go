@@ -12,12 +12,16 @@ import (
 )
 
 // JiraCredentials identifies the Jira Cloud site and the account used for Basic auth.
-// Token is resolved by the caller from the environment variable named in config.toml
-// (jira.token_env); it never comes from the config file directly.
+// Token is resolved by the caller from the environment variable or the file named in config.toml
+// (jira.token_env / jira.token_file); it never comes from the config file directly.
 type JiraCredentials struct {
 	Site  string
 	Email string
 	Token string
+	// TokenReason says why Token is empty when the caller tried and failed to resolve one. It is
+	// what turns "Jira の設定がない" from a dead end into something the user can act on, so it
+	// names the path and the failure but never the token.
+	TokenReason string
 }
 
 // Configured reports whether enough is set to attempt a fetch.
@@ -65,14 +69,22 @@ func (e *JiraStatusError) Error() string {
 	return fmt.Sprintf("Jira API が %d を返した: %s", e.StatusCode, e.Body)
 }
 
-// JiraNotConfiguredError reports that jira.site/email or the token environment variable is unset.
-type JiraNotConfiguredError struct{}
+// JiraNotConfiguredError reports that jira.site/email is unset, or that no token could be resolved.
+type JiraNotConfiguredError struct {
+	// Reason is the caller's explanation when it tried to resolve a token and could not.
+	Reason string
+}
 
-func (e *JiraNotConfiguredError) Error() string { return "Jira の設定がない" }
+func (e *JiraNotConfiguredError) Error() string {
+	if e.Reason == "" {
+		return "Jira の設定がない"
+	}
+	return "Jira の設定がない: " + e.Reason
+}
 
 // Hint points at the config keys that must be filled in.
 func (e *JiraNotConfiguredError) Hint() string {
-	return "config.toml の [jira] site/email、および token_env が指す環境変数を設定する"
+	return "config.toml の [jira] に site/email を設定し、token_env が指す環境変数か token_file が指すファイルにトークンを置く"
 }
 
 // JiraFetcher fetches issue status from Jira Cloud's REST API via net/http directly:
@@ -90,7 +102,7 @@ func NewJiraFetcher() *JiraFetcher {
 // FetchIssue fetches summary/status/updated for key using HTTP Basic auth.
 func (f *JiraFetcher) FetchIssue(ctx context.Context, creds JiraCredentials, key string) (*JiraData, error) {
 	if !creds.Configured() {
-		return nil, &JiraNotConfiguredError{}
+		return nil, &JiraNotConfiguredError{Reason: creds.TokenReason}
 	}
 
 	endpoint := jiraIssueEndpoint(creds.Site, key)

@@ -535,3 +535,46 @@ func TestDefaultFileContentDocumentsOwnerForm(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadReadsJiraTokenFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := `
+[jira]
+site = "your-tenant.atlassian.net"
+email = "you@example.com"
+token_file = "~/.config/taskherd/jira_token"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("config.toml を書けない: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Jira.TokenFile != "~/.config/taskherd/jira_token" {
+		t.Errorf("TokenFile = %q, want 展開前の値そのまま", cfg.Jira.TokenFile)
+	}
+	// token_env は書かれていないので既定のままで、両方を試せる。
+	if cfg.Jira.TokenEnv != "TASKHERD_JIRA_TOKEN" {
+		t.Errorf("TokenEnv = %q, want 既定値", cfg.Jira.TokenEnv)
+	}
+}
+
+func TestDefaultFileContentLeavesTokenFileCommentedOut(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(config.DefaultFileContent()), 0o600); err != nil {
+		t.Fatalf("config.toml を書けない: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Jira.TokenFile != "" {
+		t.Errorf("TokenFile = %q, want 空（生成された config では例をコメントで示すだけ）", cfg.Jira.TokenFile)
+	}
+	if !strings.Contains(config.DefaultFileContent(), "# token_file =") {
+		t.Error("生成された config に token_file の書き方が示されていない")
+	}
+}
