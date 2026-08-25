@@ -93,7 +93,7 @@ func (a *app) sessionLinkCmd() *cobra.Command {
 			}
 
 			if ref.PaneID != "" {
-				a.stampTaskToken(cmd.Context(), ref.PaneID, updated.ID)
+				a.stampTaskToken(cmd.Context(), ref.PaneID, updated.ID, updated.Title)
 			}
 			return a.emitTask(updated, fmt.Sprintf("#%d に %s セッション %s を紐づけた", updated.ID, ref.Agent, ref.SessionID))
 		},
@@ -224,10 +224,10 @@ func (a *app) resolveSession(ctx context.Context, spec sessionSpec) (sessionRef,
 	}, nil
 }
 
-// stampTaskToken records the task id on the pane. It is a display convenience in herdr's own UI,
-// so a failure is reported but never fails the command that triggered it.
-func (a *app) stampTaskToken(ctx context.Context, paneID string, taskID int) {
-	if err := a.herdr().ReportTaskToken(ctx, paneID, taskID); err != nil && !a.jsonOut {
+// stampTaskToken records the task id and display name on the pane. It is a display convenience in
+// herdr's own UI, so a failure is reported but never fails the command that triggered it.
+func (a *app) stampTaskToken(ctx context.Context, paneID string, taskID int, title string) {
+	if err := a.herdr().ReportTaskDisplay(ctx, paneID, taskID, title); err != nil && !a.jsonOut {
 		fmt.Fprintf(a.env.Err, "注記: pane %s へのタスク id 記録に失敗した: %v\n", paneID, err)
 	}
 }
@@ -346,7 +346,7 @@ func (a *app) jumpTo(ctx context.Context, task *model.Task, target *model.Sessio
 		if err := client.FocusAgent(ctx, agent.PaneID); err != nil {
 			return err
 		}
-		a.stampTaskToken(ctx, agent.PaneID, task.ID)
+		a.stampTaskToken(ctx, agent.PaneID, task.ID, task.Title)
 		return a.emitJump(task, target, jumpActionFocus, agent.PaneID, false)
 	}
 
@@ -387,7 +387,7 @@ func (a *app) jumpTo(ctx context.Context, task *model.Task, target *model.Sessio
 	if err != nil {
 		return err
 	}
-	a.stampTaskToken(ctx, started.PaneID, task.ID)
+	a.stampTaskToken(ctx, started.PaneID, task.ID, task.Title)
 	return a.emitJump(task, target, jumpActionResume, started.PaneID, started.NeedsAttention)
 }
 

@@ -102,6 +102,11 @@ type Board struct {
 	// launch tracks the one session-start operation in flight, independent of the modal: the
 	// modal closes as soon as the launch starts, but the operation keeps running.
 	launch launchState
+	// sessionStartProbe is the id of a task whose launch modal is deferred behind one herdr snapshot
+	// (probeRecoverableCwdCmd, session_start.go), 0 when none is in flight. It exists a step before
+	// launch: the modal has not opened yet, so there is nothing there for launch's own bookkeeping
+	// to track.
+	sessionStartProbe int
 
 	collapseTerminal bool
 	fetching         bool
@@ -320,6 +325,10 @@ func (b *Board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case agentsLoadedMsg:
 		b.applyAgents(msg)
+		return b, nil
+
+	case sessionStartProbedMsg:
+		b.applySessionStartProbe(msg)
 		return b, nil
 
 	case statusMsg:
@@ -760,6 +769,12 @@ func (b *Board) applyTasks(msg tasksLoadedMsg) tea.Cmd {
 	// And an operation already past the modal, running against a task that just vanished.
 	if b.launch.pending && b.taskByID(b.launch.taskID) == nil {
 		b.cancelSessionStart(fmt.Sprintf("#%d が削除されたため起動を中止した", b.launch.taskID))
+	}
+	// And a probe already in flight one step before the modal, against a task that just vanished:
+	// the probe itself keeps running (there is nothing to cancel it with), but its result is dropped
+	// once it lands, this reset being what makes it stale.
+	if b.sessionStartProbe != 0 && b.taskByID(b.sessionStartProbe) == nil {
+		b.sessionStartProbe = 0
 	}
 
 	// A change that may have added a link needs a fetch of its own: waiting for the next

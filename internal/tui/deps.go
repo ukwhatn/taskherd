@@ -38,9 +38,9 @@ type HerdrOps interface {
 	FocusAgent(ctx context.Context, paneID string) error
 	CreateTab(ctx context.Context, spec herdrc.TabSpec) (herdrc.Tab, error)
 	StartAgent(ctx context.Context, spec herdrc.AgentSpec) (herdrc.StartResult, error)
-	WaitForAgentState(ctx context.Context, paneID string, until []string, timeout time.Duration) (herdrc.Agent, error)
+	WaitForAgentSession(ctx context.Context, paneID string, timeout time.Duration) (herdrc.Agent, error)
 	SendAgentPrompt(ctx context.Context, paneID, text string) error
-	ReportTaskToken(ctx context.Context, paneID string, taskID int) error
+	ReportTaskDisplay(ctx context.Context, paneID string, taskID int, title string) error
 }
 
 // CacheLoader reads the live-status cache. *fetch.Cache satisfies this.

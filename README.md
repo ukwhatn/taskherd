@@ -196,6 +196,22 @@ prompt_template = """
 
 列 id はキーを必ず引用符付きで書く（ドットを含む id が TOML の dotted key として誤解釈されるのを防ぐため）。`""` を指定すると、その列からの起動はプロンプトを送らず起動だけする。`prompt_template` 自体を `""` にすれば、列の上書きが無いすべての起動でプロンプトを送らなくなる。
 
+### 前回起動した pane の回収と `--new`
+
+`taskherd start` / board の `g` は、同じタスクで前回起こした agent（`taskherd-<id>` という名前）が herdr 上にまだ残っていれば、新しい pane を作らずにそれを使う:
+
+| 前回の agent の状態 | 挙動 |
+|---|---|
+| idle・セッション取得済み・未紐づけ・同じ cwd | その pane を紐づけてプロンプトを送る（`--json` では `reused: true`） |
+| 既にこのタスクに紐づけ済み | 起動せず、`jump` を案内する |
+| blocked、またはまだセッション id が取得できていない | 起動せず、その pane を案内する |
+| 前回と別の cwd を指定した | 回収も新規起動もせず、既存 pane か `--new` を案内する（cwd を直したい意図を握り潰さないため） |
+| 前回の agent が見つからない | 通常どおり新しく起動する |
+
+意図的にもう 1 つセッションを起こしたいときは `--new` を付ける。回収チェックを無視して常に新しく起動し、herdr 上の agent 名（識別子）にだけ連番が付く（`taskherd-43-2` のように、空いている最小の番号）。
+
+起動・紐づけ・jump のいずれでも、herdr の sidebar の Agent 行に `#<id> <title>` を表示する（`pane report-metadata --display-agent`）。これは表示専用で、agent 名（`agent focus` 等の TARGET になる一意な識別子）とは別物なので、`--new` の連番は表示名には含まれない。
+
 ### herdr integration の更新
 
 セッションバッジの精度（herdr が Claude Code のエージェント状態をどこまで細かく検出できるか）は herdr 側の統合フックのバージョンに依存する。古い統合のままだと `agent_status` の精度が落ちるため、次のコマンドで最新化しておくことを推奨する:
@@ -217,7 +233,7 @@ herdr integration install claude
 | `taskherd link <id> <url> [--note N]` / `taskherd unlink <id> <url>` | 外部リンクの付け外し |
 | `taskherd session link <id> [--current\|--session-id UUID\|--pane PANE_ID]` | エージェントセッションを紐づける |
 | `taskherd jump <id> [--session UUID]` | 紐づいたセッションへ移動する（消滅していれば resume 起動） |
-| `taskherd start <id> [--cwd PATH] [--prompt TEXT]` | 新しいエージェントセッションを起こし、紐づける（cwd 候補が定まらなければ `--cwd` が必須） |
+| `taskherd start <id> [--cwd PATH] [--prompt TEXT] [--new]` | 新しいエージェントセッションを起こし、紐づける（cwd 候補が定まらなければ `--cwd` が必須）。前回の起動が同名で残っていれば回収する（`--new` で無視して新しく起こす） |
 | `taskherd refresh [<id>] [--all]` | リンクのライブ状態を即時取得する |
 | `taskherd board` | kanban ボード（TUI）を開く |
 | `taskherd rm <id> [--yes]` | タスクを削除する |
@@ -309,7 +325,7 @@ board はマウスも受け付ける（herdr の pane 内からのマウス転�
 - 作業ディレクトリ欄は `↑↓` で候補を選ぶ。最後の行（入力する）を選ぶと自由入力になる
 - プロンプト欄は複数行編集できる。**`Enter` はどこにいても起動する**ため、改行は追加モーダルと同じキー（`Shift+Enter` / `Alt+Enter` / `Ctrl+J`）で入れる
 - `Ctrl+Y` でプロンプトをクリップボードへコピーする（OSC 52。対応端末でのみ反映され、成功の確認手段は無い）
-- `Enter` で起動する。起動は pane 作成 → agent 起動 → セッション id の検出待ち → tasks.json への紐づけ → プロンプト送信の順に進み、モーダルはすぐ閉じてステータス行に進捗と結果を出す
+- `Enter` で起動する。起動は前回の agent の回収チェック → （回収できなければ）pane 作成 → agent 起動 → セッション id の検出待ち → tasks.json への紐づけ → プロンプト送信の順に進み、モーダルはすぐ閉じてステータス行に進捗と結果を出す（前回の起動を回収する条件は前述）
 - 途中で失敗しても **pane は自動で閉じない**。以後の状況は詳細モーダルの ＋セッションを紐づける から手動で追いつける
 - `Esc` でモーダルを閉じる（起動開始後は、ボードに戻ってから `Esc` で起動そのものを中止できる）
 

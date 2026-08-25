@@ -64,12 +64,13 @@ func TestSessionLinkCurrentResolvesFromSnapshot(t *testing.T) {
 	if session.LinkedAt != model.NewTimestamp(baseTime) {
 		t.Errorf("linked_at = %q, want %q", session.LinkedAt, model.NewTimestamp(baseTime))
 	}
-	// The task id is stamped back onto the pane so herdr's own UI can show it.
+	// The task id and display name are stamped back onto the pane so herdr's own UI can show them.
 	stamp := fake.call("pane report-metadata")
 	if stamp == nil {
 		t.Fatal("pane report-metadata を呼んでいない")
 	}
-	if got := strings.Join(stamp, " "); !strings.Contains(got, "--token task=1") || !strings.Contains(got, "--source plugin:taskherd") {
+	if got := strings.Join(stamp, " "); !strings.Contains(got, "--token task=1") ||
+		!strings.Contains(got, "--source plugin:taskherd") || !strings.Contains(got, "--display-agent #1 設計") {
 		t.Errorf("report-metadata の引数 = %q", got)
 	}
 }

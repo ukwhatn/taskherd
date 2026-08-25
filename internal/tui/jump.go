@@ -68,7 +68,7 @@ func (b *Board) jumpTo(taskID int, title string, session model.SessionRef) tea.C
 	}
 
 	if paneID := b.sessions.Pane[session.SessionID]; paneID != "" {
-		return b.focusCmd(taskID, paneID)
+		return b.focusCmd(taskID, title, paneID)
 	}
 	if session.Agent != resumeAgent {
 		return status(fmt.Sprintf("%s セッションの pane が消滅している。この agent の resume には未対応。%s で手動再開する", session.Agent, session.Cwd), true)
@@ -85,12 +85,12 @@ func (b *Board) jumpTo(taskID int, title string, session model.SessionRef) tea.C
 }
 
 // focusCmd moves herdr's focus to the pane. One focus call moves workspace, tab and pane together.
-func (b *Board) focusCmd(taskID int, paneID string) tea.Cmd {
+func (b *Board) focusCmd(taskID int, title, paneID string) tea.Cmd {
 	return func() tea.Msg {
 		if err := b.deps.Herdr.FocusAgent(b.ctx, paneID); err != nil {
 			return statusMsg{text: fmt.Sprintf("pane %s へ移動できない: %v", paneID, err), isError: true}
 		}
-		_ = b.deps.Herdr.ReportTaskToken(b.ctx, paneID, taskID)
+		_ = b.deps.Herdr.ReportTaskDisplay(b.ctx, paneID, taskID, title)
 		return statusMsg{text: fmt.Sprintf("#%d のセッションへ移動した（pane %s）", taskID, paneID)}
 	}
 }
@@ -113,7 +113,7 @@ func (b *Board) resumeCmd(state confirmState) tea.Cmd {
 		if err != nil {
 			return statusMsg{text: fmt.Sprintf("resume 起動に失敗した: %v", err), isError: true}
 		}
-		_ = b.deps.Herdr.ReportTaskToken(b.ctx, started.PaneID, taskID)
+		_ = b.deps.Herdr.ReportTaskDisplay(b.ctx, started.PaneID, taskID, state.title)
 
 		if started.NeedsAttention {
 			return statusMsg{

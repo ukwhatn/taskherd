@@ -137,6 +137,7 @@ type promptCall struct {
 type tokenStamp struct {
 	paneID string
 	taskID int
+	title  string
 }
 
 func (f *fakeHerdr) Snapshot(context.Context) (*herdrc.Snapshot, error) {
@@ -181,7 +182,7 @@ func (f *fakeHerdr) StartAgent(ctx context.Context, spec herdrc.AgentSpec) (herd
 	return result, nil
 }
 
-func (f *fakeHerdr) WaitForAgentState(ctx context.Context, paneID string, until []string, _ time.Duration) (herdrc.Agent, error) {
+func (f *fakeHerdr) WaitForAgentSession(ctx context.Context, paneID string, _ time.Duration) (herdrc.Agent, error) {
 	if err := ctx.Err(); err != nil {
 		return herdrc.Agent{}, err
 	}
@@ -204,8 +205,8 @@ func (f *fakeHerdr) SendAgentPrompt(ctx context.Context, paneID, text string) er
 	return f.promptErr
 }
 
-func (f *fakeHerdr) ReportTaskToken(_ context.Context, paneID string, taskID int) error {
-	f.tokens = append(f.tokens, tokenStamp{paneID: paneID, taskID: taskID})
+func (f *fakeHerdr) ReportTaskDisplay(_ context.Context, paneID string, taskID int, title string) error {
+	f.tokens = append(f.tokens, tokenStamp{paneID: paneID, taskID: taskID, title: title})
 	return nil
 }
 

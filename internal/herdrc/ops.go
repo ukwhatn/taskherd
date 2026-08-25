@@ -192,6 +192,52 @@ func (c *Client) WaitForAgentState(ctx context.Context, paneID string, until []s
 	return payload.Agent, nil
 }
 
+// sessionPollInterval is how often WaitForAgentSession re-fetches the snapshot once the agent is
+// idle but has not yet reported a session id.
+const sessionPollInterval = 200 * time.Millisecond
+
+// WaitForAgentSession waits for the agent in paneID to become idle (or blocked) and, when idle,
+// for its native session id to appear.
+//
+// `agent start` succeeding and the session id being reported are two separate events with no
+// ordering guarantee between them: the agent can be detected and ready for input before the
+// integration hook that reports the session id has run. herdr's own wait has no way to block on
+// the session id itself (--until only takes agent_status values), so once WaitForAgentState
+// reports idle with no session yet, this re-fetches the snapshot every sessionPollInterval until
+// one appears, the agent turns blocked, or timeout — the same single budget WaitForAgentState was
+// given, not a second one stacked on top of it — runs out.
+func (c *Client) WaitForAgentSession(ctx context.Context, paneID string, timeout time.Duration) (Agent, error) {
+	deadline := time.Now().Add(timeout)
+
+	agent, err := c.WaitForAgentState(ctx, paneID, []string{StateIdle, StateBlocked}, timeout)
+	if err != nil {
+		return Agent{}, err
+	}
+
+	for agent.SessionID() == "" && agent.AgentStatus != StateBlocked {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return agent, nil
+		}
+		wait := sessionPollInterval
+		if wait > remaining {
+			wait = remaining
+		}
+		if !sleep(ctx, wait) {
+			return Agent{}, ctx.Err()
+		}
+
+		snapshot, err := c.Snapshot(ctx)
+		if err != nil {
+			return Agent{}, err
+		}
+		if found, ok := snapshot.AgentByPaneID(paneID); ok {
+			agent = *found
+		}
+	}
+	return agent, nil
+}
+
 // SendAgentPrompt sends text to an already-started agent's input.
 //
 // The text is never echoed into an error: execRunner's own error messages carry only the
@@ -204,9 +250,12 @@ func (c *Client) SendAgentPrompt(ctx context.Context, paneID, text string) error
 	return err
 }
 
-// ReportTaskToken stamps the task id onto the pane so herdr's own UI can show it.
-// herdr caps the TTL at 24h, so the stamp is a display convenience and never a source of truth.
-func (c *Client) ReportTaskToken(ctx context.Context, paneID string, taskID int) error {
+// ReportTaskDisplay stamps the task id onto the pane so herdr's own UI can show it, and sets the
+// sidebar's display name to "#<id> <title>" via --display-agent. Unlike the task id token, the
+// display name has no uniqueness constraint (it is not the agent's herdr-internal identifier), so
+// it carries the title as-is; herdr truncates it for display.
+// herdr caps the token TTL at 24h, so the stamp is a display convenience and never a source of truth.
+func (c *Client) ReportTaskDisplay(ctx context.Context, paneID string, taskID int, title string) error {
 	callCtx, cancel := requestContext(ctx, cliTimeout)
 	defer cancel()
 
@@ -215,6 +264,7 @@ func (c *Client) ReportTaskToken(ctx context.Context, paneID string, taskID int)
 		"--source", Source,
 		"--token", "task="+strconv.Itoa(taskID),
 		"--ttl-ms", strconv.Itoa(taskTokenTTL),
+		"--display-agent", fmt.Sprintf("#%d %s", taskID, title),
 	)
 	return err
 }

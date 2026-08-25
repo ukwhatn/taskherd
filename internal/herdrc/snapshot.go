@@ -51,10 +51,13 @@ type Pane struct {
 
 // Agent is a pane with a detected agent. Agents are the subset of panes taskherd links tasks to.
 type Agent struct {
-	PaneID        string        `json:"pane_id"`
-	TabID         string        `json:"tab_id"`
-	WorkspaceID   string        `json:"workspace_id"`
-	Agent         string        `json:"agent"`
+	PaneID      string `json:"pane_id"`
+	TabID       string `json:"tab_id"`
+	WorkspaceID string `json:"workspace_id"`
+	Agent       string `json:"agent"`
+	// Name is the identifier passed to `agent start`/`agent rename` (the TARGET for agent focus
+	// etc.), distinct from the display-only name pane report-metadata's --display-agent sets.
+	Name          string        `json:"name"`
 	AgentStatus   string        `json:"agent_status"`
 	Cwd           string        `json:"cwd"`
 	Session       *AgentSession `json:"agent_session"`
@@ -98,6 +101,20 @@ func (s *Snapshot) AgentByPaneID(paneID string) (*Agent, bool) {
 	}
 	for i := range s.Agents {
 		if s.Agents[i].PaneID == paneID {
+			return &s.Agents[i], true
+		}
+	}
+	return nil, false
+}
+
+// AgentByName finds the agent herdr identifies by name (the TARGET `agent start` registered it
+// under), the identifier taskherd uses to detect a previous launch for the same task.
+func (s *Snapshot) AgentByName(name string) (*Agent, bool) {
+	if s == nil || name == "" {
+		return nil, false
+	}
+	for i := range s.Agents {
+		if s.Agents[i].Name == name {
 			return &s.Agents[i], true
 		}
 	}

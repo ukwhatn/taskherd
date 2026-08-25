@@ -20,6 +20,7 @@ type startResult struct {
 	SessionID  string `json:"session_id"`
 	Linked     bool   `json:"linked"`
 	PromptSent bool   `json:"prompt_sent"`
+	Reused     bool   `json:"reused"`
 	Error      string `json:"error"`
 	Hint       string `json:"hint"`
 }
@@ -223,8 +224,14 @@ func TestStartReportsWaitTimeoutKeepingStartedStage(t *testing.T) {
 	}
 }
 
+// The actual timeout mechanics (polling, giving up once the budget is spent) are herdrc's own
+// contract, covered there with a short timeout passed directly. This only checks that the CLI
+// reports the §6 shape correctly once WaitForAgentSession comes back with no session — a short
+// override timeout here is what keeps that real (not stubbed away) without waiting out the
+// production budget for real.
 func TestStartReportsMissingSessionIDAfterWait(t *testing.T) {
 	h := newHarness(t)
+	h.sessionStartWaitTimeout = 50 * time.Millisecond
 	fake := newFakeHerdr()
 	fake.waitSessionID = ""
 	h.herdr = fake
@@ -349,6 +356,36 @@ func TestStartRequiresCwdWhenNoCandidateExists(t *testing.T) {
 	}
 }
 
+// A first attempt that never reached the link step (it failed before AddSession ran) leaves no
+// SessionRef, so RankSessionCwds has nothing to offer — but if that attempt's pane is still alive
+// and recoverable, its cwd is exactly where the retry belongs. Without this fallback, a brand-new
+// user's very first retry (task created, start, trust-folder prompt fails it, retry) would hit an
+// unrelated "no cwd" error instead of the recovery findReusableAgent exists to provide (§4.4 update
+// to the design).
+func TestStartUsesRecoveredAgentCwdWhenNoCandidateExists(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr().withAgent("s-prev", fakeAgent{PaneID: "wS:p9", Name: "taskherd-1", Cwd: "/repo/first-attempt"})
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	res := h.mustRun(t, "start", "1", "--json")
+
+	got := decodeStart(t, res.stdout)
+	if !got.Reused {
+		t.Errorf("reused = %v, want true", got.Reused)
+	}
+	if got.PaneID != "wS:p9" || got.SessionID != "s-prev" {
+		t.Errorf("start = %+v, want 前回の pane を回収", got)
+	}
+	if fake.called("tab create") {
+		t.Error("回収できるのに tab create を呼んでいる")
+	}
+	task := h.tasks(t).Tasks[0]
+	if len(task.Sessions) != 1 || task.Sessions[0].Cwd != "/repo/first-attempt" {
+		t.Errorf("sessions = %+v, want 回収した pane 自身の cwd で紐づく", task.Sessions)
+	}
+}
+
 // A change landed through another path (a concurrent taskherd process, say) while agent wait is
 // still running must survive the eventual save: AddSession is reached through Store.Update, which
 // re-reads under its own lock rather than from the *model.File this command loaded at the start.
@@ -464,6 +501,235 @@ func TestStartRejectsBlankCwdBeforeCreatingAnything(t *testing.T) {
 	}
 	if fake.called("tab create") {
 		t.Error("空白だけの --cwd なのに pane を作った")
+	}
+}
+
+// A previous attempt's agent, idle with a session already but not yet linked to this task, must be
+// recovered rather than piling a second pane on top of it (§4 of the design). --cwd here matches
+// the recovered pane's own cwd: cwd resolution still runs unconditionally before the recovery
+// check (see start_cmd.go's resolveStartCwd call site), and findReusableAgent itself refuses a
+// recovery whose cwd differs from what this launch asked for (TestStartRefusesWhenExistingAgentIsInADifferentCwd).
+func TestStartReusesIdleUnlinkedAgentInsteadOfCreatingANewPane(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr().withAgent("s-prev", fakeAgent{PaneID: "wS:p9", Name: "taskherd-1", Cwd: "/repo/reused"})
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	res := h.mustRun(t, "start", "1", "--cwd", "/repo/reused", "--prompt", "続きから", "--json")
+
+	got := decodeStart(t, res.stdout)
+	if !got.Reused {
+		t.Errorf("reused = %v, want true", got.Reused)
+	}
+	if got.PaneID != "wS:p9" || got.SessionID != "s-prev" {
+		t.Errorf("start = %+v", got)
+	}
+	if got.Stage != "prompted" || !got.Linked || !got.PromptSent {
+		t.Fatalf("start = %+v, want 完走", got)
+	}
+	if fake.called("tab create") {
+		t.Error("回収したのに tab create を呼んでいる")
+	}
+	if fake.called("agent start") {
+		t.Error("回収したのに agent start を呼んでいる")
+	}
+	prompt, ok := fake.promptSent()
+	if !ok || prompt.Text != "続きから" || prompt.PaneID != "wS:p9" {
+		t.Errorf("送信されたプロンプト = %+v", prompt)
+	}
+
+	task := h.tasks(t).Tasks[0]
+	if len(task.Sessions) != 1 || task.Sessions[0].SessionID != "s-prev" || task.Sessions[0].Cwd != "/repo/reused" {
+		t.Errorf("sessions = %+v, want 回収した pane 自身の cwd", task.Sessions)
+	}
+}
+
+// Retrying with a different --cwd (the user realized the first attempt used the wrong directory)
+// must not silently link the old pane's cwd instead: that would resume the wrong directory every
+// time this session is jumped back to later, quietly discarding the correction. It must also not
+// start a second agent under the same name — that is exactly what --new is for.
+func TestStartRefusesWhenExistingAgentIsInADifferentCwd(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr().withAgent("s-prev", fakeAgent{PaneID: "wS:p9", Name: "taskherd-1", Cwd: "/repo/a"})
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	res := h.run(t, "start", "1", "--cwd", "/repo/b", "--json")
+
+	if res.code == 0 {
+		t.Fatal("exit = 0, want 非 0")
+	}
+	if res.stdout != "" {
+		t.Errorf("stdout = %q, want 空（起動していない）", res.stdout)
+	}
+	payload := decodeError(t, res.stderr)
+	if !strings.Contains(payload.Hint, "wS:p9") || !strings.Contains(payload.Hint, "--new") {
+		t.Errorf("hint = %q, want 既存 pane と --new の案内", payload.Hint)
+	}
+	if fake.called("tab create") {
+		t.Error("cwd が違うのに新規起動した（暗黙の 2 つ目を作っている）")
+	}
+	if len(h.tasks(t).Tasks[0].Sessions) != 0 {
+		t.Error("cwd が違うのに紐づいている")
+	}
+}
+
+func TestStartRefusesWhenExistingAgentAlreadyLinkedToTask(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr().withAgent(sessionA, fakeAgent{PaneID: "wS:p9", Name: "taskherd-1", Cwd: "/repo/reused"})
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+	h.mustRun(t, "session", "link", "1", "--session-id", sessionA)
+
+	res := h.run(t, "start", "1", "--cwd", "/ignored", "--json")
+
+	if res.code == 0 {
+		t.Fatal("exit = 0, want 非 0")
+	}
+	if res.stdout != "" {
+		t.Errorf("stdout = %q, want 空（何も作られていない）", res.stdout)
+	}
+	payload := decodeError(t, res.stderr)
+	if !strings.Contains(payload.Hint, "jump") {
+		t.Errorf("hint = %q, want jump の案内", payload.Hint)
+	}
+	if fake.called("tab create") || fake.called("agent start") {
+		t.Error("既に紐づいているのに起動系コマンドを呼んでいる")
+	}
+}
+
+// blocked and "idle だがまだ session が無い" are the two states a recovered agent can be stuck in
+// without being usable yet (§4 of the design); starting a second pane would only land on the same
+// stuck agent, so both must refuse and point at the existing pane instead.
+func TestStartRefusesWhenExistingAgentNotUsableYet(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+	}{
+		{"blocked", herdrc.StateBlocked},
+		{"idle だが session 未到着", herdrc.StateIdle},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			fake := newFakeHerdr().withAgent("",
+				fakeAgent{PaneID: "wS:p9", Name: "taskherd-1", Status: tt.status, Cwd: "/repo/reused"})
+			h.herdr = fake
+			h.mustRun(t, "add", "a")
+
+			res := h.run(t, "start", "1", "--cwd", "/ignored", "--json")
+
+			if res.code == 0 {
+				t.Fatal("exit = 0, want 非 0")
+			}
+			if res.stdout != "" {
+				t.Errorf("stdout = %q, want 空", res.stdout)
+			}
+			payload := decodeError(t, res.stderr)
+			if !strings.Contains(payload.Hint, "wS:p9") {
+				t.Errorf("hint = %q, want 既存 pane の案内", payload.Hint)
+			}
+			if fake.called("tab create") {
+				t.Error("使えない agent が居るのに tab create した")
+			}
+		})
+	}
+}
+
+// The recovery check itself is only a snapshot read: when herdr cannot answer it, the launch must
+// still attempt a fresh start rather than failing outright — CreateTab/StartAgent right after are
+// what actually report herdr being unreachable, if it really is.
+func TestStartProceedsFreshWhenRecoveryCheckCannotReachHerdr(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr()
+	fake.unavailable = true
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	res := h.mustRun(t, "start", "1", "--cwd", "/repo", "--json")
+
+	got := decodeStart(t, res.stdout)
+	if got.Reused {
+		t.Error("reused = true, want false（回収チェック自体が失敗しているので新規のはず）")
+	}
+	if got.Stage != "prompted" || !got.Linked {
+		t.Errorf("start = %+v, want 新規起動で紐づけまで成功", got)
+	}
+	if !fake.called("tab create") {
+		t.Error("回収チェック失敗時に新規起動へフォールバックしていない")
+	}
+}
+
+// --new is the one way to intentionally run a second session for a task: it must ignore a
+// perfectly reusable agent (idle, session already there, unlinked, same cwd) rather than recovering
+// it, and the fresh agent's NAME must be numbered so it never collides with the one --new skipped.
+func TestStartNewIgnoresExistingAgentAndStartsFresh(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr().withAgent("s-prev", fakeAgent{PaneID: "wS:p9", Name: "taskherd-1", Cwd: "/repo/a"})
+	fake.waitSessionID = "s-new"
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	res := h.mustRun(t, "start", "1", "--cwd", "/repo/a", "--new", "--json")
+
+	got := decodeStart(t, res.stdout)
+	if got.Reused {
+		t.Error("reused = true, want false（--new は既存を無視する）")
+	}
+	if !fake.called("tab create") {
+		t.Error("--new なのに tab create を呼んでいない")
+	}
+	start := fake.call("agent start")
+	if start == nil || !strings.Contains(strings.Join(start, " "), "taskherd-1-2") {
+		t.Errorf("agent start = %v, want NAME に連番（taskherd-1-2）", start)
+	}
+	task := h.tasks(t).Tasks[0]
+	if len(task.Sessions) != 1 || task.Sessions[0].SessionID != "s-new" {
+		t.Errorf("sessions = %+v", task.Sessions)
+	}
+
+	// The display name is built from the task id and title alone, never the herdr agent name, so
+	// --new's numbered NAME must not leak into it.
+	display := fake.call("pane report-metadata")
+	if display == nil || !strings.Contains(strings.Join(display, " "), "--display-agent #1 a") {
+		t.Errorf("report-metadata = %v, want --display-agent #1 a（連番を含まない）", display)
+	}
+	if display != nil && strings.Contains(strings.Join(display, " "), "1-2") {
+		t.Errorf("report-metadata = %v, want 表示名に連番を含まない", display)
+	}
+}
+
+// The smallest unused suffix is picked, not the historical max+1: a gap left by an agent that has
+// since exited (taskherd-1-2 here) is filled before reaching for taskherd-1-3.
+func TestStartNewPicksSmallestAvailableSuffix(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr().
+		withAgent("s-1", fakeAgent{PaneID: "wS:p1", Name: "taskherd-1", Cwd: "/repo/a"}).
+		withAgent("s-3", fakeAgent{PaneID: "wS:p3", Name: "taskherd-1-3", Cwd: "/repo/a"})
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	h.mustRun(t, "start", "1", "--cwd", "/repo/a", "--new", "--json")
+
+	start := fake.call("agent start")
+	if start == nil || !strings.Contains(strings.Join(start, " "), "taskherd-1-2") {
+		t.Errorf("agent start = %v, want 空いている連番 taskherd-1-2（-3 は埋まっている）", start)
+	}
+}
+
+// The bare name is reserved for the one launch findReusableAgent is willing to recover, so --new
+// numbers from 2 even when nothing exists yet to collide with.
+func TestStartNewNumbersFromTwoEvenWithNoExistingAgent(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr()
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	h.mustRun(t, "start", "1", "--cwd", "/repo", "--new", "--json")
+
+	start := fake.call("agent start")
+	if start == nil || !strings.Contains(strings.Join(start, " "), "taskherd-1-2") {
+		t.Errorf("agent start = %v, want taskherd-1-2（既存が無くても連番から始める）", start)
 	}
 }
 

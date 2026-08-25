@@ -266,12 +266,13 @@ func (b *Board) stampTokensCmd() tea.Cmd {
 	type stamp struct {
 		paneID string
 		taskID int
+		title  string
 	}
 	var stamps []stamp
 	for i := range b.file.Tasks {
 		for _, session := range b.file.Tasks[i].Sessions {
 			if paneID := b.sessions.Pane[session.SessionID]; paneID != "" {
-				stamps = append(stamps, stamp{paneID: paneID, taskID: b.file.Tasks[i].ID})
+				stamps = append(stamps, stamp{paneID: paneID, taskID: b.file.Tasks[i].ID, title: b.file.Tasks[i].Title})
 			}
 		}
 	}
@@ -283,7 +284,7 @@ func (b *Board) stampTokensCmd() tea.Cmd {
 		for _, s := range stamps {
 			// A failed stamp is only a missing convenience in herdr's own UI, so it never
 			// becomes an error the user has to dismiss.
-			_ = b.deps.Herdr.ReportTaskToken(b.ctx, s.paneID, s.taskID)
+			_ = b.deps.Herdr.ReportTaskDisplay(b.ctx, s.paneID, s.taskID, s.title)
 		}
 		return nil
 	}

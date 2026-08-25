@@ -85,7 +85,7 @@ func (a *app) addCmd() *cobra.Command {
 				return err
 			}
 			if ref.PaneID != "" {
-				a.stampTaskToken(cmd.Context(), ref.PaneID, created.ID)
+				a.stampTaskToken(cmd.Context(), ref.PaneID, created.ID, created.Title)
 			}
 			return a.emitTask(created, fmt.Sprintf("#%d を作成した（%s）: %s", created.ID, created.Status, created.Title))
 		},

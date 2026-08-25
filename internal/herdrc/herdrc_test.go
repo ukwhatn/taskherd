@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -89,6 +91,32 @@ func TestSnapshotDecodesAgentsAndSessions(t *testing.T) {
 	}
 }
 
+// AgentByName resolves the identifier `agent start` registered the agent under (the TARGET for
+// agent focus etc.), which is a different string from the display name pane report-metadata sets
+// and is never itself decoded onto Agent.
+func TestAgentByNameFindsAgentByIdentifierNotDisplayName(t *testing.T) {
+	fake := newFakeHerdr(t, snapshotJSON(
+		agentJSONNamed("taskherd-43", "wS:p2", "s-43", "idle", "/repo"),
+	))
+	client := newClient(t, fake, nil)
+
+	snapshot, err := client.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	agent, ok := snapshot.AgentByName("taskherd-43")
+	if !ok || agent.PaneID != "wS:p2" {
+		t.Fatalf("AgentByName = %+v (ok=%v), want wS:p2", agent, ok)
+	}
+	if _, ok := snapshot.AgentByName("taskherd-99"); ok {
+		t.Error("登録されていない名前が一致した")
+	}
+	if _, ok := snapshot.AgentByName(""); ok {
+		t.Error("空の名前が一致した")
+	}
+}
+
 // Each request needs its own connection: the real server closes the connection after answering.
 func TestSnapshotWorksAcrossSuccessiveCalls(t *testing.T) {
 	fake := newFakeHerdr(t, snapshotJSON(agentJSON("wS:p1", "s-1", "idle", "/repo")))
@@ -145,7 +173,7 @@ func TestSnapshotFallsBackToCLI(t *testing.T) {
 	}
 }
 
-// The task id stamped by ReportTaskToken comes back on the pane's tokens map.
+// The task id stamped by ReportTaskDisplay comes back on the pane's tokens map.
 func TestSnapshotDecodesPaneTokens(t *testing.T) {
 	body := `{"version":"0.8.2","protocol":20,"focused_workspace_id":"wS","focused_tab_id":"wS:t1",` +
 		`"focused_pane_id":"wS:p1","agents":[],"panes":[` +
@@ -358,6 +386,148 @@ func TestWaitForAgentStatePropagatesTimeoutError(t *testing.T) {
 	}
 }
 
+// runnerOnlyClient builds a client whose socket dial always fails, so Snapshot falls back to the
+// CLI runner the same way it does when herdr is reached only through the CLI. WaitForAgentSession
+// re-fetches the snapshot itself once idle carries no session yet, and routing that through the
+// runner is what lets these tests control what each poll sees.
+func runnerOnlyClient(runner herdrc.Runner) *herdrc.Client {
+	return herdrc.New(herdrc.Options{
+		Getenv: envFunc(nil),
+		Dialer: func(context.Context, string) (net.Conn, error) {
+			return nil, errors.New("テストでは socket を使わない")
+		},
+		Runner: runner,
+	})
+}
+
+func waitAgentJSON(paneID, sessionID, status string) []byte {
+	return []byte(`{"id":"cli:agent:wait","result":{"agent":` +
+		agentJSON(paneID, sessionID, status, "/repo") + `}}`)
+}
+
+func snapshotEnvelopeJSON(paneID, sessionID, status string) []byte {
+	return []byte(`{"id":"cli:api:snapshot","result":{"type":"session_snapshot","snapshot":` +
+		snapshotJSON(agentJSON(paneID, sessionID, status, "/repo")) + `}}`)
+}
+
+// idle carrying no session is what a freshly started agent reports before the session id catches
+// up: agent start succeeding and the session id being reported are separate events with no
+// ordering guarantee (§2 of the design). herdr's own wait cannot block on the session id itself,
+// so WaitForAgentSession is the one re-fetching the snapshot on its own.
+func TestWaitForAgentSessionPicksUpSessionReportedLate(t *testing.T) {
+	var snapshotCalls int
+	runner := &fakeRunner{handler: func(args []string) ([]byte, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.HasPrefix(joined, "agent wait"):
+			return waitAgentJSON("wS:p9", "", herdrc.StateIdle), nil
+		case strings.HasPrefix(joined, "api snapshot"):
+			snapshotCalls++
+			sessionID := ""
+			if snapshotCalls >= 2 {
+				sessionID = "s-late"
+			}
+			return snapshotEnvelopeJSON("wS:p9", sessionID, herdrc.StateIdle), nil
+		}
+		return nil, fmt.Errorf("想定外の呼び出し: %s", joined)
+	}}
+	client := runnerOnlyClient(runner)
+
+	got, err := client.WaitForAgentSession(context.Background(), "wS:p9", time.Second)
+	if err != nil {
+		t.Fatalf("WaitForAgentSession: %v", err)
+	}
+	if got.SessionID() != "s-late" {
+		t.Errorf("session_id = %q, want s-late（後から届いたものを拾う）", got.SessionID())
+	}
+	if snapshotCalls < 2 {
+		t.Errorf("snapshot 呼び出し = %d, want 2 回以上（1 回目は session 無しのはず）", snapshotCalls)
+	}
+}
+
+// blocked never carries a session id (it is what an untrusted cwd's agent settles into), so
+// polling for one would just burn the timeout for nothing: this must return the moment agent wait
+// itself reports blocked, without ever fetching a snapshot.
+func TestWaitForAgentSessionStopsImmediatelyOnBlocked(t *testing.T) {
+	runner := &fakeRunner{handler: func(args []string) ([]byte, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.HasPrefix(joined, "agent wait"):
+			return waitAgentJSON("wS:p9", "", herdrc.StateBlocked), nil
+		case strings.HasPrefix(joined, "api snapshot"):
+			t.Fatal("blocked で打ち切るはずが snapshot を取りに行った")
+		}
+		return nil, fmt.Errorf("想定外の呼び出し: %s", joined)
+	}}
+	client := runnerOnlyClient(runner)
+
+	got, err := client.WaitForAgentSession(context.Background(), "wS:p9", 5*time.Second)
+	if err != nil {
+		t.Fatalf("WaitForAgentSession: %v", err)
+	}
+	if got.AgentStatus != herdrc.StateBlocked || got.SessionID() != "" {
+		t.Errorf("agent = %+v, want blocked のまま", got)
+	}
+}
+
+// A session that never arrives must not hang past the budget WaitForAgentState was already given:
+// there is no second timeout stacked on top of it. The custom (short) timeout here stands in for
+// the CLI's own 30s constant so the test does not have to wait it out for real.
+func TestWaitForAgentSessionGivesUpAtTimeoutKeepingAgentIdle(t *testing.T) {
+	runner := &fakeRunner{handler: func(args []string) ([]byte, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.HasPrefix(joined, "agent wait"):
+			return waitAgentJSON("wS:p9", "", herdrc.StateIdle), nil
+		case strings.HasPrefix(joined, "api snapshot"):
+			return snapshotEnvelopeJSON("wS:p9", "", herdrc.StateIdle), nil
+		}
+		return nil, fmt.Errorf("想定外の呼び出し: %s", joined)
+	}}
+	client := runnerOnlyClient(runner)
+
+	start := time.Now()
+	got, err := client.WaitForAgentSession(context.Background(), "wS:p9", 120*time.Millisecond)
+	if err != nil {
+		t.Fatalf("WaitForAgentSession: %v", err)
+	}
+	if got.SessionID() != "" || got.AgentStatus != herdrc.StateIdle {
+		t.Errorf("agent = %+v, want idle のまま session 無し", got)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("elapsed = %s, want timeout 付近で打ち切り（新しい上限を積んでいない）", elapsed)
+	}
+}
+
+// A cancelled context must stop the polling loop right away rather than running it out to
+// whatever remains of timeout: board cancels the same context when the launch is aborted or its
+// target task disappears out from under it.
+func TestWaitForAgentSessionStopsOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var snapshotCalls int
+	runner := &fakeRunner{handler: func(args []string) ([]byte, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.HasPrefix(joined, "agent wait"):
+			return waitAgentJSON("wS:p9", "", herdrc.StateIdle), nil
+		case strings.HasPrefix(joined, "api snapshot"):
+			snapshotCalls++
+			cancel()
+			return snapshotEnvelopeJSON("wS:p9", "", herdrc.StateIdle), nil
+		}
+		return nil, fmt.Errorf("想定外の呼び出し: %s", joined)
+	}}
+	client := runnerOnlyClient(runner)
+
+	_, err := client.WaitForAgentSession(ctx, "wS:p9", 5*time.Second)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if snapshotCalls > 2 {
+		t.Errorf("snapshot 呼び出し = %d, want cancel 後は打ち切り", snapshotCalls)
+	}
+}
+
 func TestSendAgentPromptSendsExactText(t *testing.T) {
 	runner := &fakeRunner{handler: func([]string) ([]byte, error) { return nil, nil }}
 	client := newClient(t, newFakeHerdr(t, snapshotJSON()), runner)
@@ -372,16 +542,17 @@ func TestSendAgentPromptSendsExactText(t *testing.T) {
 	}
 }
 
-func TestReportTaskTokenStampsWithTTL(t *testing.T) {
+func TestReportTaskDisplayStampsTokenAndDisplayName(t *testing.T) {
 	runner := &fakeRunner{}
 	client := newClient(t, newFakeHerdr(t, snapshotJSON()), runner)
 
-	if err := client.ReportTaskToken(context.Background(), "wS:p1", 12); err != nil {
-		t.Fatalf("ReportTaskToken: %v", err)
+	if err := client.ReportTaskDisplay(context.Background(), "wS:p1", 12, "設計する"); err != nil {
+		t.Fatalf("ReportTaskDisplay: %v", err)
 	}
 
 	got := strings.Join(runner.Calls()[0], " ")
-	want := "pane report-metadata wS:p1 --source plugin:taskherd --token task=12 --ttl-ms 86400000"
+	want := "pane report-metadata wS:p1 --source plugin:taskherd --token task=12 --ttl-ms 86400000 " +
+		"--display-agent #12 設計する"
 	if got != want {
 		t.Errorf("呼び出し = %q, want %q", got, want)
 	}

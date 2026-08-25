@@ -50,14 +50,18 @@ type startResult struct {
 	SessionID  string `json:"session_id,omitempty"`
 	Linked     bool   `json:"linked"`
 	PromptSent bool   `json:"prompt_sent"`
-	Error      string `json:"error,omitempty"`
-	Hint       string `json:"hint,omitempty"`
+	// Reused reports that no new pane was created: a previous launch's agent was found idle with a
+	// session already, and that pane was linked and prompted instead (§4 of the design).
+	Reused bool   `json:"reused"`
+	Error  string `json:"error,omitempty"`
+	Hint   string `json:"hint,omitempty"`
 }
 
 func (a *app) startCmd() *cobra.Command {
 	var (
 		cwdFlag    string
 		promptFlag string
+		newFlag    bool
 	)
 
 	cmd := &cobra.Command{
@@ -78,7 +82,7 @@ func (a *app) startCmd() *cobra.Command {
 				return err
 			}
 
-			cwd, err := a.resolveStartCwd(*f, cwdFlag, cmd.Flags().Changed("cwd"))
+			cwd, err := a.resolveStartCwd(cmd.Context(), *f, cwdFlag, cmd.Flags().Changed("cwd"), agentNameFor(task.ID))
 			if err != nil {
 				return err
 			}
@@ -92,13 +96,15 @@ func (a *app) startCmd() *cobra.Command {
 				prompt = model.RenderPrompt(cfg.SessionStart.TemplateFor(task.Status), *task)
 			}
 
-			return a.startSession(cmd.Context(), task, cwd, prompt)
+			return a.startSession(cmd.Context(), task, cwd, prompt, newFlag)
 		},
 	}
 
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "起動する作業ディレクトリ（候補が定まらなければ必須）")
 	cmd.Flags().StringVar(&promptFlag, "prompt", "",
 		"起動直後に送るプロンプト（省略時は config のテンプレートを使う。空文字を明示すると送らない）")
+	cmd.Flags().BoolVar(&newFlag, "new", false,
+		"前回起動した agent があっても回収せず、新しく起こす（NAME に連番が付く）")
 	return cmd
 }
 
@@ -107,11 +113,16 @@ func (a *app) startCmd() *cobra.Command {
 // An explicit --cwd wins outright, blank or not: a blank one is rejected here rather than treated
 // as "not given", since silently falling through to a candidate would start the agent somewhere
 // the caller did not ask for. Without --cwd the ranked candidates (frequency, then recency, then
-// name — model.RankSessionCwds) decide: none means there is nothing to default to and --cwd is
-// required, exactly one is unambiguous and used outright, and several are resolved the same way
-// jump resolves an ambiguous session — an explicit flag in --json mode, an interactive pick
-// otherwise.
-func (a *app) resolveStartCwd(f model.File, flag string, changed bool) (string, error) {
+// name — model.RankSessionCwds) decide: none normally means there is nothing to default to and
+// --cwd is required, but a task with no SessionRef yet has no ranked candidates even when a
+// previous attempt's agent is still alive and recoverable (its pane never reached the link step
+// that would have recorded one) — recoverableAgentCwd catches exactly that case, since without it
+// the launch that findReusableAgent exists to make retriable would instead stop one step earlier on
+// an unrelated "no cwd" error, right when a new user hitting a first-run failure (a trust-folder
+// prompt, say) needs the retry to just work. Exactly one candidate is unambiguous and used outright,
+// and several are resolved the same way jump resolves an ambiguous session — an explicit flag in
+// --json mode, an interactive pick otherwise.
+func (a *app) resolveStartCwd(ctx context.Context, f model.File, flag string, changed bool, agentName string) (string, error) {
 	if changed {
 		cwd := strings.TrimSpace(flag)
 		if cwd == "" {
@@ -126,6 +137,9 @@ func (a *app) resolveStartCwd(f model.File, flag string, changed bool) (string, 
 	candidates := model.RankSessionCwds(f)
 	switch len(candidates) {
 	case 0:
+		if cwd, ok := a.recoverableAgentCwd(ctx, agentName); ok {
+			return cwd, nil
+		}
 		return "", &UserError{
 			Msg:      "cwd の候補が無い（このタスクに紐づくセッションがまだ無い）",
 			HintText: "--cwd <path> で作業ディレクトリを指定する",
@@ -141,6 +155,26 @@ func (a *app) resolveStartCwd(f model.File, flag string, changed bool) (string, 
 		}
 	}
 	return a.promptStartCwd(candidates)
+}
+
+// recoverableAgentCwd looks up this task's own previous-attempt agent (see findReusableAgent) just
+// far enough to learn where it is running, for resolveStartCwd's no-candidates fallback. Whether it
+// is actually reusable in full (not already linked, not stuck) is left to findReusableAgent's own
+// check once startSession runs for real — that check needs the very cwd this one exists to supply,
+// so it cannot run here first.
+//
+// ok is false when there is no such agent, herdr could not be asked, or the agent is not usable yet;
+// resolveStartCwd's own "no candidates" error is accurate in all three cases.
+func (a *app) recoverableAgentCwd(ctx context.Context, agentName string) (string, bool) {
+	snapshot, err := a.herdr().Snapshot(ctx)
+	if err != nil {
+		return "", false
+	}
+	agent, ok := snapshot.AgentByName(agentName)
+	if !ok || !agentIsUsable(agent) {
+		return "", false
+	}
+	return agent.Cwd, true
 }
 
 func (a *app) promptStartCwd(candidates []string) (string, error) {
@@ -169,76 +203,188 @@ func (a *app) promptStartCwd(candidates []string) (string, error) {
 	return cwd, nil
 }
 
-// startSession runs the launch sequence: tab, agent start, wait for a session id, save the link,
-// then the prompt. Each step's failure is reported with whatever the result holds so far (§6).
-func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt string) error {
-	client := a.herdr()
-	result := startResult{TaskID: task.ID}
-
-	tab, err := client.CreateTab(ctx, herdrc.TabSpec{Cwd: cwd, Label: task.Title})
-	if err != nil {
-		// Nothing was created: a plain error, not a partial result.
-		return err
+// sessionWaitTimeout is the budget WaitForAgentSession gets: sessionStartWaitTimeout, unless a
+// test has overridden it through Env.SessionStartWaitTimeout to drive the wait without actually
+// waiting out the real budget.
+func (a *app) sessionWaitTimeout() time.Duration {
+	if a.env.SessionStartWaitTimeout > 0 {
+		return a.env.SessionStartWaitTimeout
 	}
-	result.PaneID = tab.PaneID
+	return sessionStartWaitTimeout
+}
 
-	started, err := client.StartAgent(ctx, herdrc.AgentSpec{
-		Name:   fmt.Sprintf("taskherd-%d", task.ID),
-		Kind:   resumeAgent,
-		PaneID: tab.PaneID,
-	})
+// findReusableAgent looks for a previous launch's agent under this task's own name, before
+// anything is created: a pane left over from an earlier attempt must be recovered rather than
+// getting a second one piled on top of it (§4 of the design). herdr only ever assigns this name to
+// a pane taskherd itself started, so a match can only be this task's own earlier attempt.
+//
+// nil, nil means no such agent exists and the caller should start fresh — this is also what a
+// snapshot fetch failure falls back to, since CreateTab/StartAgent right after would hit the same
+// unreachable herdr anyway and are what actually reports it. A non-nil error means an agent does
+// exist but launching now would be wrong (already linked to this task, stuck at a different cwd, or
+// not usable yet); it is a plain UserError since nothing has been created up to this point.
+//
+// cwd is the directory this launch is about to use: a recovered pane at a different cwd is not
+// reused (the whole point of retrying with a different cwd would silently be thrown away), and it
+// is not started fresh either — that would leave two agents under the same name, which is exactly
+// what this check exists to prevent. Only --new is allowed to add a second one.
+func (a *app) findReusableAgent(ctx context.Context, client *herdrc.Client, task *model.Task, agentName, cwd string) (*herdrc.Agent, error) {
+	snapshot, err := client.Snapshot(ctx)
 	if err != nil {
-		return a.emitStart(result, err, fmt.Sprintf("pane %s を確認する（起動に失敗した）", tab.PaneID))
+		return nil, nil
 	}
-	result.PaneID = started.PaneID
-	result.Stage = stageStarted
-	if started.NeedsAttention {
-		return a.emitStart(result,
-			fmt.Errorf("起動直後に入力待ちになっている（%s）", started.Code),
-			fmt.Sprintf("pane %s を開いて応答してから、セッション picker から後で紐づける", started.PaneID))
+	agent, ok := snapshot.AgentByName(agentName)
+	if !ok {
+		return nil, nil
 	}
 
-	agent, err := client.WaitForAgentState(ctx, started.PaneID,
-		[]string{herdrc.StateIdle, herdrc.StateBlocked}, sessionStartWaitTimeout)
-	if err != nil {
-		return a.emitStart(result, err,
-			fmt.Sprintf("pane %s を確認し、セッション picker から後で紐づける", started.PaneID))
+	if !agentIsUsable(agent) {
+		return nil, &UserError{
+			Msg:      fmt.Sprintf("#%d の前回の起動が pane %s に残っている（まだ使える状態ではない）", task.ID, agent.PaneID),
+			HintText: fmt.Sprintf("pane %s を確認する", agent.PaneID),
+		}
 	}
 	sessionID := agent.SessionID()
-	if sessionID == "" {
-		// blocked is the state an untrusted cwd's agent settles into (herdr is waiting on a
-		// trust-folder prompt or similar), and it never carries a session id. Naming that instead
-		// of the generic message matters here: it is the single most common way this wait ends
-		// without one.
-		if agent.AgentStatus == herdrc.StateBlocked {
-			return a.emitStart(result, errors.New("入力待ちで止まっている（trust-folder の確認など）"),
+	if _, linked := task.Session(sessionID); linked {
+		return nil, &UserError{
+			Msg:      fmt.Sprintf("#%d は既にこのセッションに紐づいている", task.ID),
+			HintText: fmt.Sprintf("taskherd jump %d で移動する", task.ID),
+		}
+	}
+	if strings.TrimSpace(agent.Cwd) != strings.TrimSpace(cwd) {
+		return nil, &UserError{
+			Msg: fmt.Sprintf("#%d の前回の起動が別の cwd（%s）の pane %s で動いている", task.ID, agent.Cwd, agent.PaneID),
+			HintText: fmt.Sprintf(
+				"pane %s へ移るか、taskherd start %d --new --cwd %s で新しく起こす", agent.PaneID, task.ID, cwd),
+		}
+	}
+	return agent, nil
+}
+
+// agentNameFor is the herdr agent name a task's launch runs under, shared by resolveStartCwd's
+// recovery lookup and startSession's own so both ask about the same agent.
+func agentNameFor(taskID int) string {
+	return fmt.Sprintf("taskherd-%d", taskID)
+}
+
+// agentIsUsable reports whether agent is far enough along to recover: it has a session id and is
+// not stuck waiting for input. blocked never carries a session id either, but naming it separately
+// is what lets a caller's own error say which of the two it actually hit.
+func agentIsUsable(agent *herdrc.Agent) bool {
+	return agent.SessionID() != "" && agent.AgentStatus != herdrc.StateBlocked
+}
+
+// nextAgentName returns the smallest -<n> (n >= 2) suffix of agentName not already held by a live
+// agent in snapshot. --new is the only caller: the bare name is reserved for the one launch
+// findReusableAgent is willing to recover, so an intentional extra one is always numbered, even
+// when the bare name happens to be free (§4.3 of the design) — that keeps "the" launch and "an
+// additional" one told apart by name regardless of what state the bare one is currently in.
+func nextAgentName(snapshot *herdrc.Snapshot, agentName string) string {
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s-%d", agentName, n)
+		if _, ok := snapshot.AgentByName(candidate); !ok {
+			return candidate
+		}
+	}
+}
+
+// startSession runs the launch sequence: recover a previous attempt's agent when one exists,
+// otherwise a fresh tab and agent start, then wait for a session id, save the link, then the
+// prompt. Each step's failure is reported with whatever the result holds so far (§6).
+//
+// forceNew (--new) skips the recovery check entirely and always starts a fresh pane, the one way
+// to intentionally run a second session for the same task (§4.3).
+func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt string, forceNew bool) error {
+	client := a.herdr()
+	result := startResult{TaskID: task.ID}
+	agentName := agentNameFor(task.ID)
+
+	var reused *herdrc.Agent
+	if forceNew {
+		if snapshot, err := client.Snapshot(ctx); err == nil {
+			agentName = nextAgentName(snapshot, agentName)
+		}
+		// A snapshot fetch failure here falls back to the bare name: CreateTab/StartAgent right
+		// after hit the same unreachable herdr and are what actually report it, same as
+		// findReusableAgent's own fallback.
+	} else {
+		var err error
+		reused, err = a.findReusableAgent(ctx, client, task, agentName, cwd)
+		if err != nil {
+			return err
+		}
+	}
+
+	var paneID, sessionID, linkCwd string
+	if reused != nil {
+		paneID, sessionID, linkCwd = reused.PaneID, reused.SessionID(), reused.Cwd
+		result.PaneID, result.SessionID, result.Stage, result.Reused = paneID, sessionID, stageWaited, true
+	} else {
+		tab, err := client.CreateTab(ctx, herdrc.TabSpec{Cwd: cwd, Label: task.Title})
+		if err != nil {
+			// Nothing was created: a plain error, not a partial result.
+			return err
+		}
+		result.PaneID = tab.PaneID
+
+		started, err := client.StartAgent(ctx, herdrc.AgentSpec{
+			Name:   agentName,
+			Kind:   resumeAgent,
+			PaneID: tab.PaneID,
+		})
+		if err != nil {
+			return a.emitStart(result, err, fmt.Sprintf("pane %s を確認する（起動に失敗した）", tab.PaneID))
+		}
+		result.PaneID = started.PaneID
+		result.Stage = stageStarted
+		if started.NeedsAttention {
+			return a.emitStart(result,
+				fmt.Errorf("起動直後に入力待ちになっている（%s）", started.Code),
+				fmt.Sprintf("pane %s を開いて応答してから、セッション picker から後で紐づける", started.PaneID))
+		}
+
+		agent, err := client.WaitForAgentSession(ctx, started.PaneID, a.sessionWaitTimeout())
+		if err != nil {
+			return a.emitStart(result, err,
 				fmt.Sprintf("pane %s を確認し、セッション picker から後で紐づける", started.PaneID))
 		}
-		return a.emitStart(result, errors.New("herdr がセッション id を報告しなかった"),
-			fmt.Sprintf("pane %s を確認し、セッション picker から後で紐づける", started.PaneID))
+		sessionID = agent.SessionID()
+		if sessionID == "" {
+			// blocked is the state an untrusted cwd's agent settles into (herdr is waiting on a
+			// trust-folder prompt or similar), and it never carries a session id. Naming that instead
+			// of the generic message matters here: it is the single most common way this wait ends
+			// without one.
+			if agent.AgentStatus == herdrc.StateBlocked {
+				return a.emitStart(result, errors.New("入力待ちで止まっている（trust-folder の確認など）"),
+					fmt.Sprintf("pane %s を確認し、セッション picker から後で紐づける", started.PaneID))
+			}
+			return a.emitStart(result, errors.New("herdr がセッション id を報告しなかった"),
+				fmt.Sprintf("pane %s を確認し、セッション picker から後で紐づける", started.PaneID))
+		}
+		paneID, linkCwd = started.PaneID, cwd
+		result.SessionID = sessionID
+		result.Stage = stageWaited
 	}
-	result.SessionID = sessionID
-	result.Stage = stageWaited
 
 	now := a.env.Now()
-	err = a.tasks().Update(ctx, func(f *model.File) error {
+	err := a.tasks().Update(ctx, func(f *model.File) error {
 		t, err := f.Task(task.ID)
 		if err != nil {
 			return err
 		}
-		_, err = t.AddSession(model.SessionRef{Agent: resumeAgent, SessionID: sessionID, Cwd: cwd}, now)
+		_, err = t.AddSession(model.SessionRef{Agent: resumeAgent, SessionID: sessionID, Cwd: linkCwd}, now)
 		return err
 	})
 	if err != nil {
 		return a.emitStart(result, err,
-			fmt.Sprintf("pane %s / session %s を taskherd session link で手動で紐づける", started.PaneID, sessionID))
+			fmt.Sprintf("pane %s / session %s を taskherd session link で手動で紐づける", paneID, sessionID))
 	}
 	result.Linked = true
 	result.Stage = stageLinked
-	a.stampTaskToken(ctx, started.PaneID, task.ID)
+	a.stampTaskToken(ctx, paneID, task.ID, task.Title)
 
 	if prompt != "" {
-		if err := client.SendAgentPrompt(ctx, started.PaneID, prompt); err != nil {
+		if err := client.SendAgentPrompt(ctx, paneID, prompt); err != nil {
 			return a.emitStart(result, err, "起動と紐づけは済んでいる。プロンプトの送信だけ失敗した")
 		}
 		result.PromptSent = true
