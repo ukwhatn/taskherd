@@ -340,7 +340,7 @@ func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt st
 	}
 	result.Linked = true
 	result.Stage = stageLinked
-	a.stampTaskToken(ctx, paneID, task.ID)
+	a.stampTaskToken(ctx, paneID, task.ID, task.Title)
 
 	if prompt != "" {
 		if err := client.SendAgentPrompt(ctx, paneID, prompt); err != nil {

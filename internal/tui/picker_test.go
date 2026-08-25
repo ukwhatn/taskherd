@@ -19,6 +19,7 @@ type fakePickerHerdr struct {
 	tokens      []struct {
 		paneID string
 		taskID int
+		title  string
 	}
 }
 
@@ -33,11 +34,12 @@ func (f *fakePickerHerdr) Snapshot(context.Context) (*herdrc.Snapshot, error) {
 	return &herdrc.Snapshot{Agents: agents}, nil
 }
 
-func (f *fakePickerHerdr) ReportTaskToken(_ context.Context, paneID string, taskID int) error {
+func (f *fakePickerHerdr) ReportTaskDisplay(_ context.Context, paneID string, taskID int, title string) error {
 	f.tokens = append(f.tokens, struct {
 		paneID string
 		taskID int
-	}{paneID, taskID})
+		title  string
+	}{paneID, taskID, title})
 	return nil
 }
 
@@ -126,8 +128,8 @@ func TestPickerLinksSelectedTaskToTargetPane(t *testing.T) {
 	if len(file.Tasks[0].Sessions) != 1 || file.Tasks[0].Sessions[0].SessionID != "sess-1" {
 		t.Errorf("sessions = %+v", file.Tasks[0].Sessions)
 	}
-	if len(herdr.tokens) != 1 || herdr.tokens[0].taskID != 1 {
-		t.Errorf("tokens = %+v, want #1 の刻印", herdr.tokens)
+	if len(herdr.tokens) != 1 || herdr.tokens[0].taskID != 1 || herdr.tokens[0].title != "設計" {
+		t.Errorf("tokens = %+v, want #1/設計 の刻印", herdr.tokens)
 	}
 }
 

@@ -305,8 +305,8 @@ func TestBoardStampsTaskTokensOnFirstSnapshot(t *testing.T) {
 	if len(herdrOps.tokens) != 1 {
 		t.Fatalf("tokens = %+v, want 1 件", herdrOps.tokens)
 	}
-	if herdrOps.tokens[0].paneID != "pane-1" || herdrOps.tokens[0].taskID != 7 {
-		t.Errorf("token = %+v, want pane-1/#7", herdrOps.tokens[0])
+	if herdrOps.tokens[0].paneID != "pane-1" || herdrOps.tokens[0].taskID != 7 || herdrOps.tokens[0].title != "t" {
+		t.Errorf("token = %+v, want pane-1/#7/t", herdrOps.tokens[0])
 	}
 
 	// Only once per board: a later snapshot must not re-stamp everything again.
@@ -379,8 +379,9 @@ func TestBoardJumpFocusesLivePane(t *testing.T) {
 	if len(herdrOps.focused) != 1 || herdrOps.focused[0] != "pane-9" {
 		t.Fatalf("focused = %v, want [pane-9]", herdrOps.focused)
 	}
-	if len(herdrOps.tokens) == 0 || herdrOps.tokens[len(herdrOps.tokens)-1].taskID != 3 {
-		t.Errorf("tokens = %+v, want #3 の記録", herdrOps.tokens)
+	last := herdrOps.tokens[len(herdrOps.tokens)-1]
+	if len(herdrOps.tokens) == 0 || last.taskID != 3 || last.title != "t" {
+		t.Errorf("tokens = %+v, want #3/t の記録", herdrOps.tokens)
 	}
 }
 
@@ -423,6 +424,9 @@ func TestBoardJumpConfirmsResume(t *testing.T) {
 	started := herdrOps.started[0]
 	if started.Kind != "claude" || strings.Join(started.Args, " ") != "--resume s-gone" {
 		t.Errorf("started = %+v, want claude --resume s-gone", started)
+	}
+	if len(herdrOps.tokens) != 1 || herdrOps.tokens[0].taskID != 4 || herdrOps.tokens[0].title != "resume 対象" {
+		t.Errorf("tokens = %+v, want #4/resume 対象 の記録", herdrOps.tokens)
 	}
 }
 

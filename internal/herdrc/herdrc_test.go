@@ -173,7 +173,7 @@ func TestSnapshotFallsBackToCLI(t *testing.T) {
 	}
 }
 
-// The task id stamped by ReportTaskToken comes back on the pane's tokens map.
+// The task id stamped by ReportTaskDisplay comes back on the pane's tokens map.
 func TestSnapshotDecodesPaneTokens(t *testing.T) {
 	body := `{"version":"0.8.2","protocol":20,"focused_workspace_id":"wS","focused_tab_id":"wS:t1",` +
 		`"focused_pane_id":"wS:p1","agents":[],"panes":[` +
@@ -542,16 +542,17 @@ func TestSendAgentPromptSendsExactText(t *testing.T) {
 	}
 }
 
-func TestReportTaskTokenStampsWithTTL(t *testing.T) {
+func TestReportTaskDisplayStampsTokenAndDisplayName(t *testing.T) {
 	runner := &fakeRunner{}
 	client := newClient(t, newFakeHerdr(t, snapshotJSON()), runner)
 
-	if err := client.ReportTaskToken(context.Background(), "wS:p1", 12); err != nil {
-		t.Fatalf("ReportTaskToken: %v", err)
+	if err := client.ReportTaskDisplay(context.Background(), "wS:p1", 12, "設計する"); err != nil {
+		t.Fatalf("ReportTaskDisplay: %v", err)
 	}
 
 	got := strings.Join(runner.Calls()[0], " ")
-	want := "pane report-metadata wS:p1 --source plugin:taskherd --token task=12 --ttl-ms 86400000"
+	want := "pane report-metadata wS:p1 --source plugin:taskherd --token task=12 --ttl-ms 86400000 " +
+		"--display-agent #12 設計する"
 	if got != want {
 		t.Errorf("呼び出し = %q, want %q", got, want)
 	}

@@ -25,7 +25,7 @@ type PickerTaskStore interface {
 // pane, and stamping the linked task id back onto it.
 type PickerHerdrOps interface {
 	Snapshot(ctx context.Context) (*herdrc.Snapshot, error)
-	ReportTaskToken(ctx context.Context, paneID string, taskID int) error
+	ReportTaskDisplay(ctx context.Context, paneID string, taskID int, title string) error
 }
 
 // PickerDeps are the picker's ports on the outside world.
@@ -291,7 +291,7 @@ func (p *picker) linkSelectedCmd() tea.Cmd {
 		}
 		// A failed stamp is only a missing convenience in herdr's own UI (§7.5), never a
 		// reason to report the link itself as failed.
-		_ = p.deps.Herdr.ReportTaskToken(p.ctx, targetPane, updated.ID)
+		_ = p.deps.Herdr.ReportTaskDisplay(p.ctx, targetPane, updated.ID, updated.Title)
 		return pickerLinkedMsg{task: updated}
 	}
 }

@@ -137,6 +137,7 @@ type promptCall struct {
 type tokenStamp struct {
 	paneID string
 	taskID int
+	title  string
 }
 
 func (f *fakeHerdr) Snapshot(context.Context) (*herdrc.Snapshot, error) {
@@ -204,8 +205,8 @@ func (f *fakeHerdr) SendAgentPrompt(ctx context.Context, paneID, text string) er
 	return f.promptErr
 }
 
-func (f *fakeHerdr) ReportTaskToken(_ context.Context, paneID string, taskID int) error {
-	f.tokens = append(f.tokens, tokenStamp{paneID: paneID, taskID: taskID})
+func (f *fakeHerdr) ReportTaskDisplay(_ context.Context, paneID string, taskID int, title string) error {
+	f.tokens = append(f.tokens, tokenStamp{paneID: paneID, taskID: taskID, title: title})
 	return nil
 }
 

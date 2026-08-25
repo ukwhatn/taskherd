@@ -250,9 +250,12 @@ func (c *Client) SendAgentPrompt(ctx context.Context, paneID, text string) error
 	return err
 }
 
-// ReportTaskToken stamps the task id onto the pane so herdr's own UI can show it.
-// herdr caps the TTL at 24h, so the stamp is a display convenience and never a source of truth.
-func (c *Client) ReportTaskToken(ctx context.Context, paneID string, taskID int) error {
+// ReportTaskDisplay stamps the task id onto the pane so herdr's own UI can show it, and sets the
+// sidebar's display name to "#<id> <title>" via --display-agent. Unlike the task id token, the
+// display name has no uniqueness constraint (it is not the agent's herdr-internal identifier), so
+// it carries the title as-is; herdr truncates it for display.
+// herdr caps the token TTL at 24h, so the stamp is a display convenience and never a source of truth.
+func (c *Client) ReportTaskDisplay(ctx context.Context, paneID string, taskID int, title string) error {
 	callCtx, cancel := requestContext(ctx, cliTimeout)
 	defer cancel()
 
@@ -261,6 +264,7 @@ func (c *Client) ReportTaskToken(ctx context.Context, paneID string, taskID int)
 		"--source", Source,
 		"--token", "task="+strconv.Itoa(taskID),
 		"--ttl-ms", strconv.Itoa(taskTokenTTL),
+		"--display-agent", fmt.Sprintf("#%d %s", taskID, title),
 	)
 	return err
 }

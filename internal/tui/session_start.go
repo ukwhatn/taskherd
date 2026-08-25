@@ -454,7 +454,7 @@ func (b *Board) linkSessionCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd
 		}
 		// Best-effort, same as the existing jump / session link paths: a failed stamp is only a
 		// missing convenience in herdr's own UI, never a reason to fail the launch.
-		_ = b.deps.Herdr.ReportTaskToken(ctx, msg.paneID, msg.taskID)
+		_ = b.deps.Herdr.ReportTaskDisplay(ctx, msg.paneID, msg.taskID, msg.title)
 		msg.stage = sessionStageLinked
 		return msg
 	}

@@ -15,7 +15,7 @@ import (
 // there is no way to run the full command past this branch in a test without hanging.
 
 // fakePaneHerdr stands in for tui.PickerHerdrOps: only the Snapshot half of the interface matters
-// to resolvePaneSessionID, so ReportTaskToken is a no-op.
+// to resolvePaneSessionID, so ReportTaskDisplay is a no-op.
 type fakePaneHerdr struct {
 	snapshot *herdrc.Snapshot
 	err      error
@@ -25,7 +25,7 @@ func (f *fakePaneHerdr) Snapshot(context.Context) (*herdrc.Snapshot, error) {
 	return f.snapshot, f.err
 }
 
-func (f *fakePaneHerdr) ReportTaskToken(context.Context, string, int) error { return nil }
+func (f *fakePaneHerdr) ReportTaskDisplay(context.Context, string, int, string) error { return nil }
 
 func TestResolvePaneSessionID(t *testing.T) {
 	tests := []struct {
