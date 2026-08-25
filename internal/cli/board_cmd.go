@@ -83,5 +83,6 @@ func (a *app) boardSettings(cfg *config.Config) tui.Settings {
 		RefreshInterval: time.Duration(cfg.Board.RefreshIntervalMinutes) * time.Minute,
 		Icons:           tui.IconMode(cfg.Board.Icons),
 		Hyperlinks:      cfg.Board.Hyperlinks,
+		SessionStart:    cfg.SessionStart,
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/ukwhatn/taskherd/internal/config"
 	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/model"
@@ -79,6 +80,10 @@ type Settings struct {
 	Icons IconMode
 	// Hyperlinks wraps link rows in OSC 8 so a terminal that understands it opens them on a click.
 	Hyperlinks bool
+	// SessionStart configures the prompt a session started from a task opens with. Held as-is
+	// (rather than pre-resolved) because which template applies depends on the task being started,
+	// decided at launch time rather than once when the board opens.
+	SessionStart config.SessionStart
 }
 
 func (d Deps) now() time.Time {

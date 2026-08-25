@@ -167,6 +167,33 @@ token_file = "~/.config/taskherd/jira_token"
 
 トークンは https://id.atlassian.com/manage-profile/security/api-tokens で発行する。Atlassian は発行したトークンを 1 年で失効させるため、401 が返るようになったら再発行する。
 
+### タスクからセッションを起こすプロンプト（`[session_start]`）
+
+タスクにまだセッションが紐づいていない状態で `board` の `g` を押す・`taskherd start` を実行すると、新しい pane で agent を起動し、初期プロンプトとして `prompt_template` を展開した文面を送る:
+
+```toml
+[session_start]
+prompt_template = """
+#{{id}} {{title}} に取り組んでほしい。
+
+現在のステータス: {{status}}
+
+{{note}}
+{{links}}"""
+```
+
+展開できるプレースホルダは `{{id}}` `{{title}}` `{{note}}` `{{status}}` `{{links}}`。`{{links}}` はリンクごとに `- <url>` の行になり、リンクが 1 つもなければその行ごと消える。
+
+列によって始め方が違う場合は、列 id ごとに上書きできる。`[session_start.templates]` に無い列は `prompt_template` を使う:
+
+```toml
+[session_start.templates]
+"review" = "#{{id}} {{title}} のレビュー観点を確認してほしい。\n\n{{links}}"
+"todo" = ""
+```
+
+列 id はキーを必ず引用符付きで書く（ドットを含む id が TOML の dotted key として誤解釈されるのを防ぐため）。`""` を指定すると、その列からの起動はプロンプトを送らず起動だけする。`prompt_template` 自体を `""` にすれば、列の上書きが無いすべての起動でプロンプトを送らなくなる。
+
 ### herdr integration の更新
 
 セッションバッジの精度（herdr が Claude Code のエージェント状態をどこまで細かく検出できるか）は herdr 側の統合フックのバージョンに依存する。古い統合のままだと `agent_status` の精度が落ちるため、次のコマンドで最新化しておくことを推奨する:
