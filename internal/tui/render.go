@@ -61,6 +61,10 @@ func (b *Board) renderBoard() string {
 // renderColumns lays the columns out side by side with a gutter between them, each already padded
 // to its own width.
 func (b *Board) renderColumns(bodyHeight int) string {
+	// Rebuilt every render rather than reconciled: a mode change, a scroll, or new data can move or
+	// remove a card between one render and the next, and a stale region is worse than a missing one
+	// (it would let a click land on a card that is no longer drawn where it says).
+	b.cardRegions = b.cardRegions[:0]
 	if len(b.columns) == 0 {
 		return b.styles.dim.Render("列が定義されていない")
 	}
@@ -91,13 +95,19 @@ func (b *Board) renderColumns(bodyHeight int) string {
 		bodyHeight--
 	}
 
+	// x tracks each column's left edge as it will read on screen once boardPad is applied below:
+	// PaddingLeft prepends boardPad cells to every line of the joined block, so starting the count
+	// there rather than adding it in afterwards keeps this the one place the offset is computed.
 	blocks := make([]string, 0, 2*len(layout.Widths)+2)
+	x := m.boardPad
 	for i, width := range layout.Widths {
 		if i > 0 && m.gap > 0 {
 			blocks = append(blocks, strings.Repeat(" ", m.gap))
+			x += m.gap
 		}
 		pos := layout.Start + i
-		blocks = append(blocks, b.renderColumn(expanded[pos], boardIndex[pos], width, bodyHeight, m))
+		blocks = append(blocks, b.renderColumn(expanded[pos], boardIndex[pos], x, width, bodyHeight, m))
+		x += width
 	}
 	if stackWidth > 0 {
 		if gap := collapsedStackGap(stackWidth, m); gap > 0 {
@@ -129,21 +139,29 @@ func (b *Board) renderColumns(bodyHeight int) string {
 
 // renderColumn draws one expanded column: its header, then whatever of its cards fits underneath.
 // index is the column's position in the whole set, which is what the board's focus is measured in.
-func (b *Board) renderColumn(col Column, index, width, height int, m metrics) string {
+// x is the column's left edge on screen and height is also the row past which the joined body gets
+// clipped (renderColumns), which is what tells renderCards how many of its own lines will actually
+// reach the screen.
+func (b *Board) renderColumn(col Column, index, x, width, height int, m metrics) string {
 	focused := index == b.colIdx
 	lines := []string{b.renderColumnHeader(col, focused, width), strings.Repeat(" ", width)}
 
 	if len(col.Tasks) == 0 {
 		lines = append(lines, b.renderEmptyColumn(width, m))
 	} else {
-		lines = append(lines, b.renderCards(col, focused, width, height-headerReserve, m)...)
+		lines = append(lines, b.renderCards(col, index, focused, x, width, height-headerReserve, height, m)...)
 	}
 	return strings.Join(lines, "\n")
 }
 
 // renderCards draws the run of cards that fits, with an indicator on either side reporting the
 // cards that did not: a column that runs out of room says so rather than cutting cards off.
-func (b *Board) renderCards(col Column, focused bool, width, avail int, m metrics) []string {
+//
+// Every column in one renderColumns pass starts at row 0 (JoinHorizontal aligns their tops), so the
+// row a card's first line lands on within this column is also its row in the final screen: that is
+// what lets clipHeight — the same bound renderColumns clips the whole joined body to — double as
+// the cutoff for how much of this card's rectangle is actually visible.
+func (b *Board) renderCards(col Column, index int, focused bool, x, width, avail, clipHeight int, m metrics) []string {
 	// avail is height-headerReserve, and height can be 0 (the notice took the terminal's one
 	// remaining line, §2.7): floor it here rather than at every caller, so make() below never sees
 	// a negative capacity.
@@ -162,14 +180,29 @@ func (b *Board) renderCards(col Column, focused bool, width, avail int, m metric
 	b.offsets[col.Key()] = window.Start
 
 	lines := make([]string, 0, avail)
+	y := headerReserve
 	if window.Above > 0 {
 		lines = append(lines, b.overflowIndicator(b.icons.ScrollUp, window.Above, width))
+		y++
 	}
 	for i := window.Start; i < window.End; i++ {
 		for g := 0; i > window.Start && g < m.cardGap; g++ {
 			lines = append(lines, strings.Repeat(" ", width))
+			y++
 		}
+		top := y
 		lines = append(lines, b.renderCard(cards[i], col, width, focused && i == selected, m))
+		// FitCards still returns one card even when it is taller than avail (§2.6), and the extra
+		// height is what the outer clip in renderColumns then cuts away. Recording heights[i]
+		// unclipped here would let a click past the visible bottom of the card open it anyway.
+		h := heights[i]
+		if visible := clipHeight - top; visible < h {
+			h = visible
+		}
+		if h > 0 {
+			b.cardRegions = append(b.cardRegions, cardRegion{columnIndex: index, taskID: cards[i].TaskID, x: x, y: top, w: width, h: h})
+		}
+		y += heights[i]
 	}
 	if window.Below > 0 {
 		lines = append(lines, b.overflowIndicator(b.icons.ScrollDown, window.Below, width))

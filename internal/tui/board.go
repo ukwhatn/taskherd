@@ -72,6 +72,10 @@ type Board struct {
 	// focusTaskID pulls the selection onto a specific task after the next rebuild, so a card
 	// stays under the cursor after it moves to another column.
 	focusTaskID int
+	// cardRegions are the on-screen rectangles the last renderColumns pass drew the cards in,
+	// rebuilt on every render. A mouse click maps a screen cell back to a task through this rather
+	// than through a second, independent layout computation.
+	cardRegions []cardRegion
 
 	width  int
 	height int
