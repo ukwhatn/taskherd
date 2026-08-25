@@ -153,12 +153,25 @@ func TestMouseIgnoredOutsideBoardMode(t *testing.T) {
 			if h.board.mode != tc.want {
 				t.Fatalf("前提: mode = %v, want %v（到達経路が変わった？）", h.board.mode, tc.want)
 			}
+
+			// render() always draws the board underneath before splicing whatever is open on top of
+			// it (render()'s own first line is renderBoard()), so this populates cardRegions with
+			// #1's real rectangle regardless of mode. Clicking an arbitrary (5, 5) instead of a real
+			// card's coordinates would make the gate untestable: hitCard on an empty cardRegions
+			// always misses, so the click would do nothing whether or not the mode guard actually
+			// worked, and reverting the guard to baseMode() would not be caught here.
+			h.board.render()
+			region, ok := findRegion(h.board.cardRegions, 1)
+			if !ok {
+				t.Fatalf("前提: #1 の矩形が見つからない（クリックが本当にカードへ当たるかを検証できない）: %+v", h.board.cardRegions)
+			}
+
 			colBefore := h.board.colIdx
 			selBefore := cloneSelected(h.board.selected)
 
-			h.dispatch(tea.MouseClickMsg{X: 5, Y: 5, Button: tea.MouseLeft})
-			h.dispatch(tea.MouseWheelMsg{X: 5, Y: 5, Button: tea.MouseWheelDown})
-			h.dispatch(tea.MouseWheelMsg{X: 5, Y: 5, Button: tea.MouseWheelRight})
+			h.dispatch(tea.MouseClickMsg{X: region.x, Y: region.y, Button: tea.MouseLeft})
+			h.dispatch(tea.MouseWheelMsg{X: region.x, Y: region.y, Button: tea.MouseWheelDown})
+			h.dispatch(tea.MouseWheelMsg{X: region.x, Y: region.y, Button: tea.MouseWheelRight})
 
 			if h.board.mode != tc.want {
 				t.Errorf("マウス操作後の mode = %v, want %v のまま", h.board.mode, tc.want)
