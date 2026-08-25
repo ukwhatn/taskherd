@@ -630,6 +630,69 @@ func TestStartProceedsFreshWhenRecoveryCheckCannotReachHerdr(t *testing.T) {
 	}
 }
 
+// --new is the one way to intentionally run a second session for a task: it must ignore a
+// perfectly reusable agent (idle, session already there, unlinked, same cwd) rather than recovering
+// it, and the fresh agent's NAME must be numbered so it never collides with the one --new skipped.
+func TestStartNewIgnoresExistingAgentAndStartsFresh(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr().withAgent("s-prev", fakeAgent{PaneID: "wS:p9", Name: "taskherd-1", Cwd: "/repo/a"})
+	fake.waitSessionID = "s-new"
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	res := h.mustRun(t, "start", "1", "--cwd", "/repo/a", "--new", "--json")
+
+	got := decodeStart(t, res.stdout)
+	if got.Reused {
+		t.Error("reused = true, want false（--new は既存を無視する）")
+	}
+	if !fake.called("tab create") {
+		t.Error("--new なのに tab create を呼んでいない")
+	}
+	start := fake.call("agent start")
+	if start == nil || !strings.Contains(strings.Join(start, " "), "taskherd-1-2") {
+		t.Errorf("agent start = %v, want NAME に連番（taskherd-1-2）", start)
+	}
+	task := h.tasks(t).Tasks[0]
+	if len(task.Sessions) != 1 || task.Sessions[0].SessionID != "s-new" {
+		t.Errorf("sessions = %+v", task.Sessions)
+	}
+}
+
+// The smallest unused suffix is picked, not the historical max+1: a gap left by an agent that has
+// since exited (taskherd-1-2 here) is filled before reaching for taskherd-1-3.
+func TestStartNewPicksSmallestAvailableSuffix(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr().
+		withAgent("s-1", fakeAgent{PaneID: "wS:p1", Name: "taskherd-1", Cwd: "/repo/a"}).
+		withAgent("s-3", fakeAgent{PaneID: "wS:p3", Name: "taskherd-1-3", Cwd: "/repo/a"})
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	h.mustRun(t, "start", "1", "--cwd", "/repo/a", "--new", "--json")
+
+	start := fake.call("agent start")
+	if start == nil || !strings.Contains(strings.Join(start, " "), "taskherd-1-2") {
+		t.Errorf("agent start = %v, want 空いている連番 taskherd-1-2（-3 は埋まっている）", start)
+	}
+}
+
+// The bare name is reserved for the one launch findReusableAgent is willing to recover, so --new
+// numbers from 2 even when nothing exists yet to collide with.
+func TestStartNewNumbersFromTwoEvenWithNoExistingAgent(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr()
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	h.mustRun(t, "start", "1", "--cwd", "/repo", "--new", "--json")
+
+	start := fake.call("agent start")
+	if start == nil || !strings.Contains(strings.Join(start, " "), "taskherd-1-2") {
+		t.Errorf("agent start = %v, want taskherd-1-2（既存が無くても連番から始める）", start)
+	}
+}
+
 var (
 	herdrcUnavailableErr = errors.New("herdr に到達できない")
 	errStartWait         = errors.New("wait タイムアウト")

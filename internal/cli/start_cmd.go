@@ -61,6 +61,7 @@ func (a *app) startCmd() *cobra.Command {
 	var (
 		cwdFlag    string
 		promptFlag string
+		newFlag    bool
 	)
 
 	cmd := &cobra.Command{
@@ -95,13 +96,15 @@ func (a *app) startCmd() *cobra.Command {
 				prompt = model.RenderPrompt(cfg.SessionStart.TemplateFor(task.Status), *task)
 			}
 
-			return a.startSession(cmd.Context(), task, cwd, prompt)
+			return a.startSession(cmd.Context(), task, cwd, prompt, newFlag)
 		},
 	}
 
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "起動する作業ディレクトリ（候補が定まらなければ必須）")
 	cmd.Flags().StringVar(&promptFlag, "prompt", "",
 		"起動直後に送るプロンプト（省略時は config のテンプレートを使う。空文字を明示すると送らない）")
+	cmd.Flags().BoolVar(&newFlag, "new", false,
+		"前回起動した agent があっても回収せず、新しく起こす（NAME に連番が付く）")
 	return cmd
 }
 
@@ -230,17 +233,45 @@ func (a *app) findReusableAgent(ctx context.Context, client *herdrc.Client, task
 	return agent, nil
 }
 
+// nextAgentName returns the smallest -<n> (n >= 2) suffix of agentName not already held by a live
+// agent in snapshot. --new is the only caller: the bare name is reserved for the one launch
+// findReusableAgent is willing to recover, so an intentional extra one is always numbered, even
+// when the bare name happens to be free (§4.3 of the design) — that keeps "the" launch and "an
+// additional" one told apart by name regardless of what state the bare one is currently in.
+func nextAgentName(snapshot *herdrc.Snapshot, agentName string) string {
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s-%d", agentName, n)
+		if _, ok := snapshot.AgentByName(candidate); !ok {
+			return candidate
+		}
+	}
+}
+
 // startSession runs the launch sequence: recover a previous attempt's agent when one exists,
 // otherwise a fresh tab and agent start, then wait for a session id, save the link, then the
 // prompt. Each step's failure is reported with whatever the result holds so far (§6).
-func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt string) error {
+//
+// forceNew (--new) skips the recovery check entirely and always starts a fresh pane, the one way
+// to intentionally run a second session for the same task (§4.3).
+func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt string, forceNew bool) error {
 	client := a.herdr()
 	result := startResult{TaskID: task.ID}
 	agentName := fmt.Sprintf("taskherd-%d", task.ID)
 
-	reused, err := a.findReusableAgent(ctx, client, task, agentName, cwd)
-	if err != nil {
-		return err
+	var reused *herdrc.Agent
+	if forceNew {
+		if snapshot, err := client.Snapshot(ctx); err == nil {
+			agentName = nextAgentName(snapshot, agentName)
+		}
+		// A snapshot fetch failure here falls back to the bare name: CreateTab/StartAgent right
+		// after hit the same unreachable herdr and are what actually report it, same as
+		// findReusableAgent's own fallback.
+	} else {
+		var err error
+		reused, err = a.findReusableAgent(ctx, client, task, agentName, cwd)
+		if err != nil {
+			return err
+		}
 	}
 
 	var paneID, sessionID, linkCwd string
@@ -295,7 +326,7 @@ func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt st
 	}
 
 	now := a.env.Now()
-	err = a.tasks().Update(ctx, func(f *model.File) error {
+	err := a.tasks().Update(ctx, func(f *model.File) error {
 		t, err := f.Task(task.ID)
 		if err != nil {
 			return err
