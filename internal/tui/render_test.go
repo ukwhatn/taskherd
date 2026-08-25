@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -212,6 +213,49 @@ func TestEmptyColumnShowsPlaceholder(t *testing.T) {
 
 // A narrow column drops the owner, then the repository, but never the number: the number is what
 // tells one PR from another, so it is the last thing to go.
+// A state too long for the cells left over is cut, not dropped: it was fetched, and a row with
+// nothing after the reference reads as a link whose state is unknown.
+func TestLinkRowCutsStateRatherThanDroppingIt(t *testing.T) {
+	h := newHarness(t, Deps{Tasks: newFakeStore()}, Settings{Classifier: testClassifier, Icons: IconASCII})
+	link := model.Link{URL: "https://x.atlassian.net/browse/ABC-1", Kind: model.LinkKindJira}
+	states := map[string]fetch.LinkState{
+		link.URL: {
+			Kind:    model.LinkKindJira,
+			Fetched: true,
+			Jira:    &fetch.JiraData{StatusName: "開発中(QAデプロイ待ち)", StatusCategory: "indeterminate"},
+		},
+	}
+	rows := BuildLinkRows(linkTask(link), states, h.board.cardStyle())
+
+	// 12 cells of reference plus the icon leave too little for the 22-cell status name.
+	whole := stripANSI(h.board.renderLinkRow(rows[0], 40))
+	if !strings.Contains(whole, "開発中(QAデプロイ待ち)") {
+		t.Fatalf("広い幅で状態が丸ごと出ていない: %q", whole)
+	}
+
+	for _, width := range []int{20, 24, 28} {
+		t.Run(fmt.Sprintf("width%d", width), func(t *testing.T) {
+			got := stripANSI(h.board.renderLinkRow(rows[0], width))
+			if !strings.Contains(got, "ABC-1") {
+				t.Fatalf("参照が消えている: %q", got)
+			}
+			if !strings.Contains(got, "開") {
+				t.Errorf("状態が丸ごと落ちている: %q", got)
+			}
+			if w := lipgloss.Width(h.board.renderLinkRow(rows[0], width)); w > width {
+				t.Errorf("表示幅 = %d, want <= %d", w, width)
+			}
+		})
+	}
+
+	// Below the point where even one wide character and the cut mark fit, the state is left out
+	// entirely rather than drawn as a bare mark that says nothing.
+	narrow := stripANSI(h.board.renderLinkRow(rows[0], 16))
+	if strings.HasSuffix(narrow, "~") && !strings.Contains(narrow, "開") {
+		t.Errorf("意味を持たない切り詰めが出ている: %q", narrow)
+	}
+}
+
 func TestLinkRowDegradesReferenceByWidth(t *testing.T) {
 	h := newHarness(t, Deps{Tasks: newFakeStore()}, Settings{Classifier: testClassifier, Icons: IconASCII})
 	rows := BuildLinkRows(
@@ -224,7 +268,9 @@ func TestLinkRowDegradesReferenceByWidth(t *testing.T) {
 	}{
 		{30, "PR owner/repo#123 未取得"},
 		{17, "PR owner/repo#123"},
-		{16, "PR repo#123"},
+		// The shorter reference leaves cells over, and a state that does not fit them whole is cut
+		// rather than dropped.
+		{16, "PR repo#123 未~"},
 		{11, "PR repo#123"},
 		{10, "PR #123"},
 		{7, "PR #123"},

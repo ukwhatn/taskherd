@@ -401,15 +401,28 @@ func (b *Board) renderLinkRow(row LinkRow, width int) string {
 	text += b.styles.segment(row.RefKind).Render(ref)
 
 	for _, segment := range row.Status {
-		segWidth := lipgloss.Width(segment.Text) + 1
-		if used+segWidth > width {
+		room := width - used - 1 // less the space that separates it from what precedes it
+		if room < minStatusCells {
 			break
 		}
-		used += segWidth
-		text += " " + b.styles.segment(segment.Kind).Render(segment.Text)
+		text += " " + b.styles.segment(segment.Kind).Render(truncate(segment.Text, room))
+		if lipgloss.Width(segment.Text) > room {
+			// It was cut to fit, so there is no room for whatever came after it either.
+			break
+		}
+		used += 1 + lipgloss.Width(segment.Text)
 	}
 	return b.linkText(row.URL, text)
 }
+
+// minStatusCells is the narrowest a state is still worth drawing in: one wide character and the
+// mark that says it was cut.
+//
+// A state that does not fit is cut rather than dropped. Dropping it reads as "this link has no
+// state", which is the one thing it never means — the state was fetched, it is simply long. Jira
+// status names in particular are per-project prose ("開発中(QAデプロイ待ち)") and routinely outrun
+// a column, and the tone the segment is drawn in carries the state even when the words are cut.
+const minStatusCells = 3
 
 // pickRef takes the widest reference that fits, falling back to a truncated shortest one when even
 // that does not.
