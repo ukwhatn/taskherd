@@ -45,13 +45,13 @@ herdr プラグインのマニフェスト（`herdr-plugin.toml`）は action �
 
 ```toml
 [[keys.command]]
-key = "prefix+t"
+key = "prefix+space"
 type = "plugin_action"
 command = "taskherd.open-board"
 description = "open task board"
 
 [[keys.command]]
-key = "prefix+shift+t"
+key = "prefix+t"
 type = "plugin_action"
 command = "taskherd.link-pane"
 description = "link pane to task"
