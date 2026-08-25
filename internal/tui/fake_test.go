@@ -116,12 +116,22 @@ type fakeHerdr struct {
 	focused     []string
 	tabs        []herdrc.TabSpec
 	started     []herdrc.AgentSpec
+	waited      []string
+	prompts     []promptCall
 	tokens      []tokenStamp
 	focusErr    error
 	startResult herdrc.StartResult
+	waitResult  herdrc.Agent
+	waitErr     error
+	promptErr   error
 	// snapshot is what Snapshot answers with; nil means an empty herdr.
 	snapshot    *herdrc.Snapshot
 	snapshotErr error
+}
+
+type promptCall struct {
+	PaneID string
+	Text   string
 }
 
 type tokenStamp struct {
@@ -159,6 +169,23 @@ func (f *fakeHerdr) StartAgent(_ context.Context, spec herdrc.AgentSpec) (herdrc
 		result.PaneID = spec.PaneID
 	}
 	return result, nil
+}
+
+func (f *fakeHerdr) WaitForAgentState(_ context.Context, paneID string, until []string, _ time.Duration) (herdrc.Agent, error) {
+	f.waited = append(f.waited, paneID)
+	if f.waitErr != nil {
+		return herdrc.Agent{}, f.waitErr
+	}
+	result := f.waitResult
+	if result.PaneID == "" {
+		result.PaneID = paneID
+	}
+	return result, nil
+}
+
+func (f *fakeHerdr) SendAgentPrompt(_ context.Context, paneID, text string) error {
+	f.prompts = append(f.prompts, promptCall{PaneID: paneID, Text: text})
+	return f.promptErr
 }
 
 func (f *fakeHerdr) ReportTaskToken(_ context.Context, paneID string, taskID int) error {

@@ -480,6 +480,8 @@ func (b *Board) renderOverlay() string {
 		return b.renderJump()
 	case modeConfirm:
 		return b.renderConfirm()
+	case modeSessionStart:
+		return b.renderSessionStart()
 	default:
 		return ""
 	}

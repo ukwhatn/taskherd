@@ -31,12 +31,15 @@ type SessionSource interface {
 	Close()
 }
 
-// HerdrOps are the herdr operations the jump flow performs. *herdrc.Client satisfies this.
+// HerdrOps are the herdr operations the jump and session-start flows perform. *herdrc.Client
+// satisfies this.
 type HerdrOps interface {
 	Snapshot(ctx context.Context) (*herdrc.Snapshot, error)
 	FocusAgent(ctx context.Context, paneID string) error
 	CreateTab(ctx context.Context, spec herdrc.TabSpec) (herdrc.Tab, error)
 	StartAgent(ctx context.Context, spec herdrc.AgentSpec) (herdrc.StartResult, error)
+	WaitForAgentState(ctx context.Context, paneID string, until []string, timeout time.Duration) (herdrc.Agent, error)
+	SendAgentPrompt(ctx context.Context, paneID, text string) error
 	ReportTaskToken(ctx context.Context, paneID string, taskID int) error
 }
 
