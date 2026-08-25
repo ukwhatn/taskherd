@@ -193,6 +193,152 @@ func TestBoardSessionStartEmptyPromptSendsNothing(t *testing.T) {
 	}
 }
 
+// A previous attempt's agent, idle with a session already but not yet linked to this task, at the
+// same cwd this launch asked for, must be recovered rather than piling a second pane on top of it
+// (§4 of the design).
+func TestBoardSessionStartReusesIdleUnlinkedAgentInsteadOfCreatingANewPane(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+	herdrOps := &fakeHerdr{snapshot: &herdrc.Snapshot{Agents: []herdrc.Agent{
+		{PaneID: "wS:p9", Name: "taskherd-1", AgentStatus: herdrc.StateIdle, Cwd: "/repo/reused",
+			Session: &herdrc.AgentSession{Agent: "claude", Kind: "id", Value: "s-prev"}},
+	}}}
+	h := newHarness(t, Deps{Tasks: store, Herdr: herdrOps}, Settings{})
+
+	h.key("g")
+	h.board.sessionStart.cwdInput.SetValue("/repo/reused")
+	h.board.sessionStart.prompt.SetValue("続きから")
+	h.key("enter")
+
+	if h.board.launch.pending {
+		t.Error("launch.pending が残っている")
+	}
+	if len(herdrOps.tabs) != 0 {
+		t.Error("回収したのに tab create を呼んでいる")
+	}
+	if len(herdrOps.started) != 0 {
+		t.Error("回収したのに agent start を呼んでいる")
+	}
+	if len(herdrOps.prompts) != 1 || herdrOps.prompts[0].Text != "続きから" || herdrOps.prompts[0].PaneID != "wS:p9" {
+		t.Errorf("prompts = %+v", herdrOps.prompts)
+	}
+	task := store.snapshot().Tasks[0]
+	if len(task.Sessions) != 1 || task.Sessions[0].SessionID != "s-prev" || task.Sessions[0].Cwd != "/repo/reused" {
+		t.Errorf("sessions = %+v", task.Sessions)
+	}
+	if !strings.Contains(h.board.status, "紐づけた") {
+		t.Errorf("status = %q, want 回収した旨", h.board.status)
+	}
+}
+
+// g itself only opens the launch modal for a task with zero linked sessions (beginJump), so the
+// only way this branch is reachable is a session landing on the same task through another path
+// (picker, CLI) between opening the modal and submitting it.
+func TestBoardSessionStartRefusesWhenExistingAgentAlreadyLinkedToTask(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+	herdrOps := &fakeHerdr{snapshot: &herdrc.Snapshot{Agents: []herdrc.Agent{
+		{PaneID: "wS:p9", Name: "taskherd-1", AgentStatus: herdrc.StateIdle, Cwd: "/repo/a",
+			Session: &herdrc.AgentSession{Agent: "claude", Kind: "id", Value: "s-linked"}},
+	}}}
+	h := newHarness(t, Deps{Tasks: store, Herdr: herdrOps}, Settings{})
+
+	h.key("g")
+	h.board.sessionStart.cwdInput.SetValue("/repo/a")
+
+	if err := store.Update(context.Background(), func(f *model.File) error {
+		task, err := f.Task(1)
+		if err != nil {
+			return err
+		}
+		_, err = task.AddSession(model.SessionRef{Agent: "claude", SessionID: "s-linked", Cwd: "/repo/a"}, boardNow)
+		return err
+	}); err != nil {
+		t.Fatalf("外部からの事前紐づけに失敗: %v", err)
+	}
+
+	h.key("enter")
+
+	if h.board.launch.pending {
+		t.Error("launch.pending が残っている")
+	}
+	if len(herdrOps.tabs) != 0 {
+		t.Error("既に紐づいているのに tab create を呼んでいる")
+	}
+	if !h.board.statusIsError {
+		t.Error("status がエラー扱いでない")
+	}
+	if !strings.Contains(h.board.status, "紐づいている") {
+		t.Errorf("status = %q, want 既に紐づいている旨", h.board.status)
+	}
+}
+
+// blocked and "idle だがまだ session が無い" are the two states a recovered agent can be stuck in
+// without being usable yet (§4 of the design); starting a second pane would only land on the same
+// stuck agent, so both must refuse and point at the existing pane instead.
+func TestBoardSessionStartRefusesWhenExistingAgentNotUsableYet(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+	}{
+		{"blocked", herdrc.StateBlocked},
+		{"idle だが session 未到着", herdrc.StateIdle},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+			herdrOps := &fakeHerdr{snapshot: &herdrc.Snapshot{Agents: []herdrc.Agent{
+				{PaneID: "wS:p9", Name: "taskherd-1", AgentStatus: tt.status, Cwd: "/repo/a"},
+			}}}
+			h := newHarness(t, Deps{Tasks: store, Herdr: herdrOps}, Settings{})
+
+			h.key("g")
+			h.board.sessionStart.cwdInput.SetValue("/repo/a")
+			h.key("enter")
+
+			if h.board.launch.pending {
+				t.Error("launch.pending が残っている")
+			}
+			if len(herdrOps.tabs) != 0 {
+				t.Error("使えない agent が居るのに tab create した")
+			}
+			if !h.board.statusIsError {
+				t.Error("status がエラー扱いでない")
+			}
+			if !strings.Contains(h.board.status, "wS:p9") {
+				t.Errorf("status = %q, want 既存 pane の案内", h.board.status)
+			}
+		})
+	}
+}
+
+// Retrying with a different cwd (the user realized the first attempt used the wrong directory)
+// must not silently link the old pane's cwd instead, and must not start a second agent under the
+// same name either — a second pane is only ever created explicitly (CLI's --new).
+func TestBoardSessionStartRefusesWhenExistingAgentIsInADifferentCwd(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+	herdrOps := &fakeHerdr{snapshot: &herdrc.Snapshot{Agents: []herdrc.Agent{
+		{PaneID: "wS:p9", Name: "taskherd-1", AgentStatus: herdrc.StateIdle, Cwd: "/repo/a",
+			Session: &herdrc.AgentSession{Agent: "claude", Kind: "id", Value: "s-prev"}},
+	}}}
+	h := newHarness(t, Deps{Tasks: store, Herdr: herdrOps}, Settings{})
+
+	h.key("g")
+	h.board.sessionStart.cwdInput.SetValue("/repo/b")
+	h.key("enter")
+
+	if h.board.launch.pending {
+		t.Error("launch.pending が残っている")
+	}
+	if len(herdrOps.tabs) != 0 {
+		t.Error("cwd が違うのに新規起動した")
+	}
+	if !h.board.statusIsError {
+		t.Error("status がエラー扱いでない")
+	}
+	if !strings.Contains(h.board.status, "wS:p9") {
+		t.Errorf("status = %q, want 既存 pane の案内", h.board.status)
+	}
+}
+
 // blocked is what an untrusted cwd's agent settles into (herdr's own trust-folder gate), and it
 // never carries a session id — the single most common way a wait ends without one. The status
 // message must name that instead of the generic "herdr がセッション id を報告しなかった".

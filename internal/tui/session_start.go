@@ -81,6 +81,10 @@ type sessionStartMsg struct {
 	stage     string
 	paneID    string
 	sessionID string
+	// reused reports that no new pane was created: launchOrRecoverCmd found a previous attempt's
+	// agent idle with a session already, at the cwd this launch asked for, and linked that pane
+	// instead (§4 of the design).
+	reused bool
 	// file is set only by the link step, right after a successful save: the board's own copy is
 	// stale until this is applied, since the save happened on Store's own re-read under its lock
 	// rather than through the model the board is holding.
@@ -267,7 +271,7 @@ func (b *Board) submitSessionStart() tea.Cmd {
 	b.closeOverlay()
 	b.setStatus(fmt.Sprintf("#%d を起動中...", taskID), false)
 
-	return b.createTabCmd(ctx, sessionStartMsg{opID: opID, taskID: taskID, cwd: cwd, title: title, prompt: prompt})
+	return b.launchOrRecoverCmd(ctx, sessionStartMsg{opID: opID, taskID: taskID, cwd: cwd, title: title, prompt: prompt})
 }
 
 // sessionStartMsgIsCurrent reports whether msg still belongs to the one session-start operation
@@ -307,8 +311,29 @@ func (b *Board) advanceSessionStart(msg sessionStartMsg) tea.Cmd {
 	}
 }
 
-func (b *Board) createTabCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd {
+// launchOrRecoverCmd is the first step of a launch: look for a previous attempt's agent under this
+// task's name and either recover it — skipping tab and agent creation entirely — or create a fresh
+// tab, the same branch CLI's start takes (§4 of the design). Folding both checks into one Cmd keeps
+// advanceSessionStart's dispatch on stage=="" meaning exactly one thing (a fresh pane now exists
+// and startAgentCmd is next); the recovered case sets stage to sessionStageWaited itself, since
+// pane creation, agent start and session lookup are all already done for it.
+func (b *Board) launchOrRecoverCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd {
 	return func() tea.Msg {
+		agent, err := b.findReusableAgent(ctx, msg)
+		if err != nil {
+			// The error text itself already names the existing pane and what to do about it
+			// (findReusableAgent), so no separate hint is added on top.
+			msg.err = err
+			return msg
+		}
+		if agent != nil {
+			msg.paneID = agent.PaneID
+			msg.sessionID = agent.SessionID()
+			msg.stage = sessionStageWaited
+			msg.reused = true
+			return msg
+		}
+
 		tab, err := b.deps.Herdr.CreateTab(ctx, herdrc.TabSpec{Cwd: msg.cwd, Label: msg.title})
 		if err != nil {
 			// Nothing was created: report it, but there is no pane to point at.
@@ -318,6 +343,43 @@ func (b *Board) createTabCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd {
 		msg.paneID = tab.PaneID
 		return msg
 	}
+}
+
+// findReusableAgent mirrors the CLI's own findReusableAgent (internal/cli/start_cmd.go): nil, nil
+// means no previous attempt exists — including when herdr could not even be asked, since
+// CreateTab/StartAgent right after hit the same unreachable herdr and are what actually report it —
+// and the caller should start fresh. A non-nil error means an agent does exist but launching now
+// would be wrong (already linked to this task, stuck at a different cwd, or not usable yet).
+func (b *Board) findReusableAgent(ctx context.Context, msg sessionStartMsg) (*herdrc.Agent, error) {
+	snapshot, err := b.deps.Herdr.Snapshot(ctx)
+	if err != nil {
+		return nil, nil
+	}
+	agent, ok := snapshot.AgentByName(fmt.Sprintf("taskherd-%d", msg.taskID))
+	if !ok {
+		return nil, nil
+	}
+
+	sessionID := agent.SessionID()
+	if sessionID == "" || agent.AgentStatus == herdrc.StateBlocked {
+		return nil, fmt.Errorf(
+			"#%d の前回の起動が pane %s に残っている（まだ使える状態ではない）。pane を確認する",
+			msg.taskID, agent.PaneID)
+	}
+	if file, loadErr := b.deps.Tasks.Load(); loadErr == nil {
+		if task, taskErr := file.Task(msg.taskID); taskErr == nil {
+			if _, linked := task.Session(sessionID); linked {
+				return nil, fmt.Errorf("#%d は既にこのセッションに紐づいている。detail から jump する", msg.taskID)
+			}
+		}
+	}
+	if strings.TrimSpace(agent.Cwd) != strings.TrimSpace(msg.cwd) {
+		return nil, fmt.Errorf(
+			"#%d の前回の起動が別の cwd（%s）の pane %s で動いている。詳細モーダルからそちらに紐づけるか、"+
+				"CLI の taskherd start %d --new --cwd %s で新しく起こす",
+			msg.taskID, agent.Cwd, agent.PaneID, msg.taskID, msg.cwd)
+	}
+	return agent, nil
 }
 
 func (b *Board) startAgentCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd {
@@ -420,6 +482,10 @@ func (b *Board) finishSessionStart(msg sessionStartMsg) {
 	b.launch.cancel = nil
 
 	if msg.err == nil {
+		if msg.reused {
+			b.setStatus(fmt.Sprintf("#%d を前回の pane %s に紐づけた", msg.taskID, msg.paneID), false)
+			return
+		}
 		b.setStatus(fmt.Sprintf("#%d を pane %s で起動した", msg.taskID, msg.paneID), false)
 		return
 	}
