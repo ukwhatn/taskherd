@@ -82,7 +82,7 @@ func (a *app) startCmd() *cobra.Command {
 				return err
 			}
 
-			cwd, err := a.resolveStartCwd(*f, cwdFlag, cmd.Flags().Changed("cwd"))
+			cwd, err := a.resolveStartCwd(cmd.Context(), *f, cwdFlag, cmd.Flags().Changed("cwd"), agentNameFor(task.ID))
 			if err != nil {
 				return err
 			}
@@ -113,11 +113,16 @@ func (a *app) startCmd() *cobra.Command {
 // An explicit --cwd wins outright, blank or not: a blank one is rejected here rather than treated
 // as "not given", since silently falling through to a candidate would start the agent somewhere
 // the caller did not ask for. Without --cwd the ranked candidates (frequency, then recency, then
-// name — model.RankSessionCwds) decide: none means there is nothing to default to and --cwd is
-// required, exactly one is unambiguous and used outright, and several are resolved the same way
-// jump resolves an ambiguous session — an explicit flag in --json mode, an interactive pick
-// otherwise.
-func (a *app) resolveStartCwd(f model.File, flag string, changed bool) (string, error) {
+// name — model.RankSessionCwds) decide: none normally means there is nothing to default to and
+// --cwd is required, but a task with no SessionRef yet has no ranked candidates even when a
+// previous attempt's agent is still alive and recoverable (its pane never reached the link step
+// that would have recorded one) — recoverableAgentCwd catches exactly that case, since without it
+// the launch that findReusableAgent exists to make retriable would instead stop one step earlier on
+// an unrelated "no cwd" error, right when a new user hitting a first-run failure (a trust-folder
+// prompt, say) needs the retry to just work. Exactly one candidate is unambiguous and used outright,
+// and several are resolved the same way jump resolves an ambiguous session — an explicit flag in
+// --json mode, an interactive pick otherwise.
+func (a *app) resolveStartCwd(ctx context.Context, f model.File, flag string, changed bool, agentName string) (string, error) {
 	if changed {
 		cwd := strings.TrimSpace(flag)
 		if cwd == "" {
@@ -132,6 +137,9 @@ func (a *app) resolveStartCwd(f model.File, flag string, changed bool) (string, 
 	candidates := model.RankSessionCwds(f)
 	switch len(candidates) {
 	case 0:
+		if cwd, ok := a.recoverableAgentCwd(ctx, agentName); ok {
+			return cwd, nil
+		}
 		return "", &UserError{
 			Msg:      "cwd の候補が無い（このタスクに紐づくセッションがまだ無い）",
 			HintText: "--cwd <path> で作業ディレクトリを指定する",
@@ -147,6 +155,26 @@ func (a *app) resolveStartCwd(f model.File, flag string, changed bool) (string, 
 		}
 	}
 	return a.promptStartCwd(candidates)
+}
+
+// recoverableAgentCwd looks up this task's own previous-attempt agent (see findReusableAgent) just
+// far enough to learn where it is running, for resolveStartCwd's no-candidates fallback. Whether it
+// is actually reusable in full (not already linked, not stuck) is left to findReusableAgent's own
+// check once startSession runs for real — that check needs the very cwd this one exists to supply,
+// so it cannot run here first.
+//
+// ok is false when there is no such agent, herdr could not be asked, or the agent is not usable yet;
+// resolveStartCwd's own "no candidates" error is accurate in all three cases.
+func (a *app) recoverableAgentCwd(ctx context.Context, agentName string) (string, bool) {
+	snapshot, err := a.herdr().Snapshot(ctx)
+	if err != nil {
+		return "", false
+	}
+	agent, ok := snapshot.AgentByName(agentName)
+	if !ok || !agentIsUsable(agent) {
+		return "", false
+	}
+	return agent.Cwd, true
 }
 
 func (a *app) promptStartCwd(candidates []string) (string, error) {
@@ -210,13 +238,13 @@ func (a *app) findReusableAgent(ctx context.Context, client *herdrc.Client, task
 		return nil, nil
 	}
 
-	sessionID := agent.SessionID()
-	if sessionID == "" || agent.AgentStatus == herdrc.StateBlocked {
+	if !agentIsUsable(agent) {
 		return nil, &UserError{
 			Msg:      fmt.Sprintf("#%d の前回の起動が pane %s に残っている（まだ使える状態ではない）", task.ID, agent.PaneID),
 			HintText: fmt.Sprintf("pane %s を確認する", agent.PaneID),
 		}
 	}
+	sessionID := agent.SessionID()
 	if _, linked := task.Session(sessionID); linked {
 		return nil, &UserError{
 			Msg:      fmt.Sprintf("#%d は既にこのセッションに紐づいている", task.ID),
@@ -231,6 +259,19 @@ func (a *app) findReusableAgent(ctx context.Context, client *herdrc.Client, task
 		}
 	}
 	return agent, nil
+}
+
+// agentNameFor is the herdr agent name a task's launch runs under, shared by resolveStartCwd's
+// recovery lookup and startSession's own so both ask about the same agent.
+func agentNameFor(taskID int) string {
+	return fmt.Sprintf("taskherd-%d", taskID)
+}
+
+// agentIsUsable reports whether agent is far enough along to recover: it has a session id and is
+// not stuck waiting for input. blocked never carries a session id either, but naming it separately
+// is what lets a caller's own error say which of the two it actually hit.
+func agentIsUsable(agent *herdrc.Agent) bool {
+	return agent.SessionID() != "" && agent.AgentStatus != herdrc.StateBlocked
 }
 
 // nextAgentName returns the smallest -<n> (n >= 2) suffix of agentName not already held by a live
@@ -256,7 +297,7 @@ func nextAgentName(snapshot *herdrc.Snapshot, agentName string) string {
 func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt string, forceNew bool) error {
 	client := a.herdr()
 	result := startResult{TaskID: task.ID}
-	agentName := fmt.Sprintf("taskherd-%d", task.ID)
+	agentName := agentNameFor(task.ID)
 
 	var reused *herdrc.Agent
 	if forceNew {

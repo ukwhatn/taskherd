@@ -356,6 +356,36 @@ func TestStartRequiresCwdWhenNoCandidateExists(t *testing.T) {
 	}
 }
 
+// A first attempt that never reached the link step (it failed before AddSession ran) leaves no
+// SessionRef, so RankSessionCwds has nothing to offer — but if that attempt's pane is still alive
+// and recoverable, its cwd is exactly where the retry belongs. Without this fallback, a brand-new
+// user's very first retry (task created, start, trust-folder prompt fails it, retry) would hit an
+// unrelated "no cwd" error instead of the recovery findReusableAgent exists to provide (§4.4 update
+// to the design).
+func TestStartUsesRecoveredAgentCwdWhenNoCandidateExists(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr().withAgent("s-prev", fakeAgent{PaneID: "wS:p9", Name: "taskherd-1", Cwd: "/repo/first-attempt"})
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	res := h.mustRun(t, "start", "1", "--json")
+
+	got := decodeStart(t, res.stdout)
+	if !got.Reused {
+		t.Errorf("reused = %v, want true", got.Reused)
+	}
+	if got.PaneID != "wS:p9" || got.SessionID != "s-prev" {
+		t.Errorf("start = %+v, want 前回の pane を回収", got)
+	}
+	if fake.called("tab create") {
+		t.Error("回収できるのに tab create を呼んでいる")
+	}
+	task := h.tasks(t).Tasks[0]
+	if len(task.Sessions) != 1 || task.Sessions[0].Cwd != "/repo/first-attempt" {
+		t.Errorf("sessions = %+v, want 回収した pane 自身の cwd で紐づく", task.Sessions)
+	}
+}
+
 // A change landed through another path (a concurrent taskherd process, say) while agent wait is
 // still running must survive the eventual save: AddSession is reached through Store.Update, which
 // re-reads under its own lock rather than from the *model.File this command loaded at the start.
