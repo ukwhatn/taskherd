@@ -157,12 +157,22 @@ func (f *fakeHerdr) FocusAgent(_ context.Context, paneID string) error {
 	return nil
 }
 
-func (f *fakeHerdr) CreateTab(_ context.Context, spec herdrc.TabSpec) (herdrc.Tab, error) {
+// Every method below checks ctx.Err() before doing anything else, the same way the real
+// execRunner's exec.CommandContext behaves when handed a context that is already done: the call
+// fails outright and nothing is recorded. Without this a test would have no way to tell a
+// cancelled context from a live one — the whole point of the ctx parameter would be decorative.
+func (f *fakeHerdr) CreateTab(ctx context.Context, spec herdrc.TabSpec) (herdrc.Tab, error) {
+	if err := ctx.Err(); err != nil {
+		return herdrc.Tab{}, err
+	}
 	f.tabs = append(f.tabs, spec)
 	return herdrc.Tab{TabID: "tab-1", PaneID: "pane-new", Cwd: spec.Cwd}, nil
 }
 
-func (f *fakeHerdr) StartAgent(_ context.Context, spec herdrc.AgentSpec) (herdrc.StartResult, error) {
+func (f *fakeHerdr) StartAgent(ctx context.Context, spec herdrc.AgentSpec) (herdrc.StartResult, error) {
+	if err := ctx.Err(); err != nil {
+		return herdrc.StartResult{}, err
+	}
 	f.started = append(f.started, spec)
 	result := f.startResult
 	if result.PaneID == "" {
@@ -171,7 +181,10 @@ func (f *fakeHerdr) StartAgent(_ context.Context, spec herdrc.AgentSpec) (herdrc
 	return result, nil
 }
 
-func (f *fakeHerdr) WaitForAgentState(_ context.Context, paneID string, until []string, _ time.Duration) (herdrc.Agent, error) {
+func (f *fakeHerdr) WaitForAgentState(ctx context.Context, paneID string, until []string, _ time.Duration) (herdrc.Agent, error) {
+	if err := ctx.Err(); err != nil {
+		return herdrc.Agent{}, err
+	}
 	f.waited = append(f.waited, paneID)
 	if f.waitErr != nil {
 		return herdrc.Agent{}, f.waitErr
@@ -183,7 +196,10 @@ func (f *fakeHerdr) WaitForAgentState(_ context.Context, paneID string, until []
 	return result, nil
 }
 
-func (f *fakeHerdr) SendAgentPrompt(_ context.Context, paneID, text string) error {
+func (f *fakeHerdr) SendAgentPrompt(ctx context.Context, paneID, text string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.prompts = append(f.prompts, promptCall{PaneID: paneID, Text: text})
 	return f.promptErr
 }

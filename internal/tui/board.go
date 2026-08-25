@@ -323,6 +323,16 @@ func (b *Board) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return b, tea.Quit
 	}
+	// Esc cancels a pending launch before any mode-specific handler runs, regardless of which one
+	// is current: submitSessionStart closes the launch modal the instant the operation starts, so
+	// by the time it is actually in flight the board can be back in any mode — bare board, detail
+	// (opened before g), whatever the launch was started from. Catching this only inside
+	// handleBoardKey missed every mode but the bare board, letting Esc there merely close the
+	// current overlay while the operation kept running underneath it.
+	if msg.String() == "esc" && b.launch.pending {
+		b.cancelSessionStart("起動を中止した")
+		return b, nil
+	}
 	switch b.mode {
 	case modeDetail:
 		return b.handleDetailKey(msg)
@@ -364,8 +374,6 @@ func (b *Board) handleBoardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
 		return b, tea.Quit
-	case "esc":
-		b.cancelSessionStart("起動を中止した")
 	case "left":
 		b.moveColumn(-1)
 	case "right":

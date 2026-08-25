@@ -406,6 +406,88 @@ func TestBoardSessionStartEscCancelsPendingLaunch(t *testing.T) {
 	}
 }
 
+// Reproduces the scenario the central Esc check exists for: opening the launch modal from inside
+// detail (g on a task with no linked session) leaves the board back in modeDetail once the launch
+// starts, since submitSessionStart closes its own modal immediately. An Esc caught only inside
+// handleBoardKey never sees this: it only closes detail, leaving the operation running underneath.
+func TestBoardSessionStartEscFromDetailStillCancelsPendingLaunch(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+	h := newHarness(t, Deps{Tasks: store, Herdr: &fakeHerdr{}}, Settings{})
+
+	h.key("enter") // open detail
+	if h.board.mode != modeDetail {
+		t.Fatalf("mode = %v, want modeDetail", h.board.mode)
+	}
+	h.key("g") // no linked session, so g opens the launch modal (via beginJump)
+	if h.board.mode != modeSessionStart {
+		t.Fatalf("mode = %v, want modeSessionStart", h.board.mode)
+	}
+	h.board.sessionStart.cwdInput.SetValue("/repo/work")
+	h.dispatch(keyMsg("enter")) // submit: modal closes back to modeDetail, operation left pending
+
+	if h.board.mode != modeDetail {
+		t.Fatalf("mode = %v, want modeDetail（起動はモーダルを閉じて呼び出し元に戻る）", h.board.mode)
+	}
+	if !h.board.launch.pending {
+		t.Fatal("launch.pending がセットされていない")
+	}
+
+	h.key("esc")
+
+	if h.board.launch.pending {
+		t.Error("detail 経由の esc で解除されていない")
+	}
+}
+
+// tui.Run derives one cancellable context and defers its cancel, so that everything the board has
+// in flight when the program exits — b.launch.ctx included, built as context.WithCancel(b.ctx) in
+// submitSessionStart — is cut regardless of why the program returned (q, ctrl+c, a signal). This
+// test stands in for that: it cancels what plays the role of tui.Run's own derived context and
+// checks the effect through the same two signals the real fix is judged by — context.Done(), not
+// a bool, and no further herdr call actually landing — rather than driving a real bubbletea program
+// loop, which nothing in this package's tests does (Run itself hard-codes tea.NewProgram with no
+// hook for injecting a fake terminal). fakeHerdr's ctx.Err() check above is what makes the second
+// half observable at all: without it, a call made after cancellation would still "succeed" and this
+// test would not fail even if submitSessionStart stopped deriving launch.ctx from b.ctx.
+func TestBoardRootContextCancellationStopsInFlightSessionStart(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+	herdrOps := &fakeHerdr{}
+	rootCtx, cancelRoot := context.WithCancel(context.Background())
+	h := newHarness(t, Deps{Tasks: store, Herdr: herdrOps}, Settings{})
+	h.board.ctx = rootCtx // stands in for the boardCtx tui.Run derives and defers cancel on
+
+	h.key("g")
+	h.board.sessionStart.cwdInput.SetValue("/repo/work")
+	tabCmd := h.dispatch(keyMsg("enter")) // op starts, left pending at the createTab stage
+
+	if !h.board.launch.pending {
+		t.Fatal("launch.pending がセットされていない")
+	}
+	launchCtx := h.board.launch.ctx
+
+	select {
+	case <-launchCtx.Done():
+		t.Fatal("launch.ctx がキャンセル前から Done になっている")
+	default:
+	}
+
+	cancelRoot() // stands in for tui.Run's deferred cancel firing on the way out
+
+	select {
+	case <-launchCtx.Done():
+	default:
+		t.Fatal("launch.ctx が親 context のキャンセルに追随していない")
+	}
+
+	// Nothing unsubscribes the createTab Cmd already in flight, so it still runs — but with its
+	// context now cancelled it must stop cold rather than reach herdr, the same way a real
+	// exec.CommandContext given an already-done context fails before ever spawning the process.
+	h.run(tabCmd)
+	if len(herdrOps.tabs) != 0 {
+		t.Error("cancel 後なのに CreateTab が herdr 呼び出しを記録した")
+	}
+}
+
 // A change made through another path (another taskherd process, or the file watcher) while the
 // launch's own wait step is still running must survive the eventual save: AddSession is reached
 // through Store.Update, which re-reads under its own lock rather than from whatever the board
