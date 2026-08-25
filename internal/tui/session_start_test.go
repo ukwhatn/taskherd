@@ -150,6 +150,31 @@ func TestBoardSessionStartEmptyPromptSendsNothing(t *testing.T) {
 	}
 }
 
+// blocked is what an untrusted cwd's agent settles into (herdr's own trust-folder gate), and it
+// never carries a session id — the single most common way a wait ends without one. The status
+// message must name that instead of the generic "herdr がセッション id を報告しなかった".
+func TestBoardSessionStartBlockedAgentReportsWaitingForInput(t *testing.T) {
+	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
+	herdrOps := &fakeHerdr{
+		waitResult: herdrc.Agent{PaneID: "pane-new", AgentStatus: herdrc.StateBlocked},
+	}
+	h := newHarness(t, Deps{Tasks: store, Herdr: herdrOps}, Settings{})
+
+	h.key("g")
+	h.board.sessionStart.cwdInput.SetValue("/repo/work")
+	h.key("enter")
+
+	if h.board.launch.pending {
+		t.Error("launch.pending が残っている")
+	}
+	if !h.board.statusIsError {
+		t.Error("status がエラー扱いでない")
+	}
+	if !strings.Contains(h.board.status, "入力待ち") {
+		t.Errorf("status = %q, want blocked を示す文言", h.board.status)
+	}
+}
+
 func TestBoardSessionStartBlankCwdIsRejectedBeforeLaunching(t *testing.T) {
 	store := newFakeStore(model.Task{ID: 1, Title: "t", Status: "todo"})
 	herdrOps := &fakeHerdr{}

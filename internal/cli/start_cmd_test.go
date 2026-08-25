@@ -240,6 +240,31 @@ func TestStartReportsMissingSessionIDAfterWait(t *testing.T) {
 	}
 }
 
+// blocked is what an untrusted cwd's agent settles into (herdr's own trust-folder gate), and it
+// never carries a session id — the single most common way TestStartReportsMissingSessionIDAfterWait
+// above's "no session id" wait ends. The message must name that instead of the generic one.
+func TestStartReportsBlockedStateAfterWait(t *testing.T) {
+	h := newHarness(t)
+	fake := newFakeHerdr()
+	fake.waitStatus = herdrc.StateBlocked
+	fake.waitSessionID = ""
+	h.herdr = fake
+	h.mustRun(t, "add", "a")
+
+	res := h.run(t, "start", "1", "--cwd", "/repo", "--json")
+
+	got := decodeStart(t, res.stdout)
+	if got.Stage != "started" || got.Linked {
+		t.Errorf("start = %+v, want started で止まる", got)
+	}
+	if !strings.Contains(got.Error, "入力待ち") {
+		t.Errorf("error = %q, want blocked を示す文言", got.Error)
+	}
+	if res.code == 0 {
+		t.Fatal("exit = 0, want 非 0")
+	}
+}
+
 // The same session already linked to the task makes AddSession fail (ErrSessionExists), which is
 // how "SessionRef の保存失敗" is exercised without needing to fake the store itself.
 func TestStartReportsSaveFailureKeepingSessionIDButNotLinked(t *testing.T) {

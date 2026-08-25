@@ -359,7 +359,15 @@ func (b *Board) waitAgentCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd {
 		}
 		sessionID := agent.SessionID()
 		if sessionID == "" {
-			msg.err = errors.New("herdr がセッション id を報告しなかった")
+			// blocked is the state an untrusted cwd's agent settles into (herdr is waiting on a
+			// trust-folder prompt or similar), and it never carries a session id. Naming that
+			// instead of the generic message matters here: it is the single most common way this
+			// wait ends without one.
+			if agent.AgentStatus == herdrc.StateBlocked {
+				msg.err = errors.New("入力待ちで止まっている（trust-folder の確認など）")
+			} else {
+				msg.err = errors.New("herdr がセッション id を報告しなかった")
+			}
 			msg.hint = fmt.Sprintf("pane %s を確認し、詳細モーダルの ＋セッションを紐づける で後から紐づける", msg.paneID)
 			return msg
 		}
