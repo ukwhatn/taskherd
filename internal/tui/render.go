@@ -470,7 +470,7 @@ func (b *Board) renderLinkRow(row LinkRow, width int) string {
 //
 // A state that does not fit is cut rather than dropped. Dropping it reads as "this link has no
 // state", which is the one thing it never means — the state was fetched, it is simply long. Jira
-// status names in particular are per-project prose ("開発中(QAデプロイ待ち)") and routinely outrun
+// status names in particular are per-project prose, often in a non-Latin script, and routinely outrun
 // a column, and the tone the segment is drawn in carries the state even when the words are cut.
 const minStatusCells = 3
 

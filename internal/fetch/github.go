@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -38,7 +39,7 @@ type checkRollupItem struct {
 func FoldStatusCheckRollupJSON(raw []byte) (CheckStatus, error) {
 	var items []checkRollupItem
 	if err := json.Unmarshal(raw, &items); err != nil {
-		return "", fmt.Errorf("statusCheckRollup を解析できない: %w", err)
+		return "", fmt.Errorf("cannot parse statusCheckRollup: %w", err)
 	}
 	return foldStatusCheckRollup(items), nil
 }
@@ -107,11 +108,15 @@ type GitHubData struct {
 // GHNotFoundError reports that the gh binary itself could not be found on PATH.
 type GHNotFoundError struct{}
 
-func (e *GHNotFoundError) Error() string { return "gh コマンドが見つからない" }
+func (e *GHNotFoundError) Error() string {
+	text, _ := e.Localize(i18n.For(i18n.LangEN))
+	return text
+}
 
-// Hint tells the user how to install gh.
-func (e *GHNotFoundError) Hint() string {
-	return "https://cli.github.com/ から GitHub CLI (gh) を導入する"
+// Localize states the problem and how to install gh.
+func (e *GHNotFoundError) Localize(t *i18n.Catalog) (string, string) {
+	entry := i18n.OrDefault(t).Err.Live.GHNotFound
+	return entry.Msg, entry.Hint
 }
 
 // GHRateLimitError reports that gh's stderr indicated a GitHub rate limit.
@@ -120,32 +125,83 @@ type GHRateLimitError struct {
 }
 
 func (e *GHRateLimitError) Error() string {
-	return "GitHub のレート制限に達した: " + strings.TrimSpace(e.Stderr)
+	text, _ := e.Localize(i18n.For(i18n.LangEN))
+	return text
 }
 
-// Hint tells the user to back off.
-func (e *GHRateLimitError) Hint() string {
-	return "しばらく待ってから再試行する（このサイクルの残りの GitHub 取得は中断した）"
+// Localize states the problem and how to get past it.
+func (e *GHRateLimitError) Localize(t *i18n.Catalog) (string, string) {
+	entry := i18n.OrDefault(t).Err.Live.GHRateLimited
+	return fmt.Sprintf(entry.Msg, strings.TrimSpace(e.Stderr)), entry.Hint
 }
 
 // GHCommandError reports that gh ran but exited non-zero for a reason other than a rate
 // limit (missing auth, no permission, unknown host, ...). stderr is shown verbatim because
 // which account or host needs attention is gh's call, not this program's guess.
+//
+// The parts are held apart instead of pre-joined into one string: gh's words are gh's, while
+// everything taskherd adds around them has to be read out of the catalog at display time.
 type GHCommandError struct {
+	// Stderr is gh's own output, with any resolved token removed.
 	Stderr string
+	// Creds is who the fetch ran as, described only when gh could not resolve the repository.
+	Creds tokenLookup
+	// RepoNotFound marks that failure, which the wrong account produces indistinguishably from
+	// a repository that really is gone.
+	RepoNotFound bool
 }
 
 func (e *GHCommandError) Error() string {
-	msg := strings.TrimSpace(e.Stderr)
-	if msg == "" {
-		msg = "gh コマンドが失敗した"
-	}
-	return msg
+	text, _ := e.Localize(i18n.For(i18n.LangEN))
+	return text
 }
 
-// Hint suggests the account-switch command without guessing which account to use.
-func (e *GHCommandError) Hint() string {
-	return "`gh auth switch --hostname <host>` でアカウントを切り替えるか、config の [github.accounts] に \"<host>/<owner>\" 形式でアカウントを指定する"
+// Localize joins gh's output with what taskherd knows about the account it ran as, and suggests
+// the account switch without guessing which account to use.
+func (e *GHCommandError) Localize(t *i18n.Catalog) (string, string) {
+	t = i18n.OrDefault(t)
+	entry := t.Err.Live.GHFailed
+
+	lines := make([]string, 0, 4)
+	if msg := strings.TrimSpace(e.Stderr); msg != "" {
+		lines = append(lines, msg)
+	} else {
+		lines = append(lines, entry.Msg)
+	}
+	// The account resolution failure is told here rather than when it happened: on its own it is
+	// not a problem, because gh's active account may well have been able to read the link.
+	if e.Creds.err != nil {
+		text, _ := i18n.Message(t, e.Creds.err)
+		lines = append(lines, text)
+	}
+	if e.RepoNotFound {
+		lines = append(lines, e.Creds.describe(t), t.Err.Live.GHAccountOwnerHint)
+	}
+	return strings.Join(lines, "\n"), entry.Hint
+}
+
+// ghTokenError reports a [github.accounts] entry gh would not resolve a token for. It is not a
+// failure on its own — the fetch goes ahead as gh's active account — so it is carried inside
+// GHCommandError and only told if that fetch then fails.
+type ghTokenError struct {
+	host    string
+	account string
+	stderr  string
+	// empty marks the case where gh succeeded but handed back nothing.
+	empty bool
+}
+
+func (e *ghTokenError) Error() string {
+	text, _ := e.Localize(i18n.For(i18n.LangEN))
+	return text
+}
+
+func (e *ghTokenError) Localize(t *i18n.Catalog) (string, string) {
+	live := i18n.OrDefault(t).Err.Live
+	if e.empty {
+		return fmt.Sprintf(live.GHTokenEmpty, e.host, e.account), ""
+	}
+	return fmt.Sprintf(live.GHTokenFailed, e.host, e.account, e.stderr), ""
 }
 
 // GitHubRunner executes gh and returns its stdout, stderr and process error. env holds extra
@@ -268,12 +324,11 @@ func normalizeAccountKey(key string) string {
 func (f *GitHubFetcher) resolveToken(ctx context.Context, host, account string) tokenLookup {
 	stdout, stderr, err := f.Run(ctx, nil, "auth", "token", "--hostname", host, "--user", account)
 	if err != nil {
-		return tokenLookup{err: fmt.Errorf("config の github.accounts が指定する %s のアカウント %q のトークンを取得できない（gh の active account で続行）: %s",
-			host, account, strings.TrimSpace(string(stderr)))}
+		return tokenLookup{err: &ghTokenError{host: host, account: account, stderr: strings.TrimSpace(string(stderr))}}
 	}
 	token := strings.TrimSpace(string(stdout))
 	if token == "" {
-		return tokenLookup{err: fmt.Errorf("config の github.accounts が指定する %s のアカウント %q に対して gh がトークンを返さなかった（gh の active account で続行）", host, account)}
+		return tokenLookup{err: &ghTokenError{host: host, account: account, empty: true}}
 	}
 	// GH_TOKEN is what gh reads for github.com and GH_ENTERPRISE_TOKEN for a GHES host. Both are
 	// set to the same host-specific token because each invocation addresses exactly one host, so
@@ -309,7 +364,7 @@ func (f *GitHubFetcher) FetchPR(ctx context.Context, url string) (*GitHubData, e
 		UpdatedAt         string            `json:"updatedAt"`
 	}
 	if err := json.Unmarshal(stdout, &raw); err != nil {
-		return nil, fmt.Errorf("gh pr view の出力を解析できない: %w", err)
+		return nil, fmt.Errorf("cannot parse the output of gh pr view: %w", err)
 	}
 
 	return &GitHubData{
@@ -338,7 +393,7 @@ func (f *GitHubFetcher) FetchIssue(ctx context.Context, url string) (*GitHubData
 		UpdatedAt   string `json:"updatedAt"`
 	}
 	if err := json.Unmarshal(stdout, &raw); err != nil {
-		return nil, fmt.Errorf("gh issue view の出力を解析できない: %w", err)
+		return nil, fmt.Errorf("cannot parse the output of gh issue view: %w", err)
 	}
 
 	return &GitHubData{
@@ -354,12 +409,6 @@ func (f *GitHubFetcher) FetchIssue(ctx context.Context, url string) (*GitHubData
 // from a repository that does not exist, so the message has to say which account was used.
 const ghRepoNotFound = "could not resolve to a repository"
 
-// accountOwnerHint is the way out of the failure above, spelled out because the host-form config
-// that causes it looks correct: it is the owner, not the host, that decides the account.
-const accountOwnerHint = `リポジトリが見えないアカウントで取得している可能性がある。` +
-	`config の [github.accounts] に "<host>/<owner>" 形式で owner ごとのアカウントを指定する（例: "github.com/some-org" = "work-account"）。` +
-	`同一ホストに個人と組織が混在する場合、ホスト単位の指定では解決できない`
-
 func classifyGHError(err error, stderr []byte, creds tokenLookup) error {
 	if errors.Is(err, exec.ErrNotFound) {
 		return &GHNotFoundError{}
@@ -368,27 +417,24 @@ func classifyGHError(err error, stderr []byte, creds tokenLookup) error {
 	if strings.Contains(strings.ToLower(msg), "rate limit") {
 		return &GHRateLimitError{Stderr: msg}
 	}
-	// The account resolution failure is told here rather than when it happened: on its own it is
-	// not a problem, because gh's active account may well have been able to read the link.
-	if creds.err != nil {
-		msg = strings.TrimSpace(msg) + "\n" + creds.err.Error()
+	return &GHCommandError{
+		Stderr:       msg,
+		Creds:        creds,
+		RepoNotFound: strings.Contains(strings.ToLower(msg), ghRepoNotFound),
 	}
-	if strings.Contains(strings.ToLower(msg), ghRepoNotFound) {
-		msg = strings.TrimSpace(msg) + "\n" + creds.describe() + "\n" + accountOwnerHint
-	}
-	return &GHCommandError{Stderr: msg}
 }
 
 // describe names the account a fetch ran as, and never the token: this text is written to
 // cache.json and shown on screen.
-func (l tokenLookup) describe() string {
+func (l tokenLookup) describe(t *i18n.Catalog) string {
+	live := i18n.OrDefault(t).Err.Live
 	switch {
 	case l.account == "":
-		return "取得に使ったアカウント: gh の active account（config の [github.accounts] に一致する指定がない）"
+		return live.GHAccountActive
 	case l.token == "":
-		return fmt.Sprintf("取得に使ったアカウント: gh の active account（config の [github.accounts] の %q = %q はトークンを解決できなかった）", l.key, l.account)
+		return fmt.Sprintf(live.GHAccountActiveFailed, l.key, l.account)
 	default:
-		return fmt.Sprintf("取得に使ったアカウント: %q（config の [github.accounts] の %q）", l.account, l.key)
+		return fmt.Sprintf(live.GHAccountNamed, l.account, l.key)
 	}
 }
 

@@ -11,6 +11,7 @@ var cliJA = CLI{
 		ErrorPrefix:     "エラー: %v\n",
 		HintPrefix:      "ヒント: %s\n",
 		NotifyTitle:     "taskherd: %sに失敗",
+		NotifyBody:      "%s（%s）",
 		ConfirmPrompt:   "%s [y/N]: ",
 		Cancelled:       "中止しました",
 		BadTaskID: Problem{

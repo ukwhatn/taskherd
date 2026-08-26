@@ -132,8 +132,8 @@ func TestParseFileValidationViolations(t *testing.T) {
 				if invalid.Violations[i].Path != want {
 					t.Errorf("Violations[%d].Path = %q, want %q", i, invalid.Violations[i].Path, want)
 				}
-				if invalid.Violations[i].Message == "" {
-					t.Errorf("Violations[%d].Message が空", i)
+				if invalid.Violations[i].Text(nil) == "" {
+					t.Errorf("Violations[%d] のメッセージが空", i)
 				}
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("Error() = %q に違反箇所 %q が含まれていない", err.Error(), want)

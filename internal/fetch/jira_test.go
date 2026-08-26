@@ -61,8 +61,8 @@ func TestJiraFetcherUnauthorized(t *testing.T) {
 	if !errors.As(err, &authErr) {
 		t.Fatalf("err = %v (%T), want *JiraAuthError", err, err)
 	}
-	if !strings.Contains(authErr.Hint(), "id.atlassian.com") {
-		t.Errorf("Hint() = %q, want トークン再発行 URL を含む", authErr.Hint())
+	if _, hint := authErr.Localize(nil); !strings.Contains(hint, "id.atlassian.com") {
+		t.Errorf("hint = %q, want トークン再発行 URL を含む", hint)
 	}
 }
 

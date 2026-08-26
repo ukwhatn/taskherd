@@ -53,7 +53,7 @@ func TestCacheNeverFetchedHasNullFetchedAt(t *testing.T) {
 	failedAt := time.Date(2026, 8, 24, 16, 40, 0, 0, time.UTC)
 
 	err := c.Update(context.Background(), func(f *fetch.CacheFile) {
-		f.SetFailure("https://github.com/o/r/pull/1", fmt.Errorf("network error"), failedAt)
+		f.SetFailure(nil, "https://github.com/o/r/pull/1", fmt.Errorf("network error"), failedAt)
 	})
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
@@ -96,7 +96,7 @@ func TestCacheFailureAfterSuccessKeepsLastSuccessValue(t *testing.T) {
 	}
 
 	if err := c.Update(context.Background(), func(f *fetch.CacheFile) {
-		f.SetFailure(url, fmt.Errorf("timeout"), successAt.Add(time.Minute))
+		f.SetFailure(nil, url, fmt.Errorf("timeout"), successAt.Add(time.Minute))
 	}); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -233,7 +233,7 @@ func TestCacheFailedSinceMarksStartOfRun(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		at := start.Add(time.Duration(i) * 10 * time.Minute)
 		if err := c.Update(context.Background(), func(f *fetch.CacheFile) {
-			f.SetFailure(url, fmt.Errorf("attempt %d", i), at)
+			f.SetFailure(nil, url, fmt.Errorf("attempt %d", i), at)
 		}); err != nil {
 			t.Fatalf("Update() error = %v", err)
 		}
@@ -257,7 +257,7 @@ func TestCacheSuccessClearsFailedSince(t *testing.T) {
 	start := time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
 
 	steps := []func(*fetch.CacheFile){
-		func(f *fetch.CacheFile) { f.SetFailure(url, fmt.Errorf("down"), start) },
+		func(f *fetch.CacheFile) { f.SetFailure(nil, url, fmt.Errorf("down"), start) },
 		func(f *fetch.CacheFile) {
 			_ = f.SetSuccess(url, fetch.GitHubData{State: "OPEN"}, start.Add(time.Minute))
 		},
@@ -274,7 +274,7 @@ func TestCacheSuccessClearsFailedSince(t *testing.T) {
 	}
 
 	if err := c.Update(context.Background(), func(f *fetch.CacheFile) {
-		f.SetFailure(url, fmt.Errorf("down again"), start.Add(2*time.Minute))
+		f.SetFailure(nil, url, fmt.Errorf("down again"), start.Add(2*time.Minute))
 	}); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}

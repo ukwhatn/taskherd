@@ -4,12 +4,24 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/ukwhatn/taskherd/internal/i18n"
 )
 
-// Violation is one validation failure. Path locates it in the document (e.g. tasks[0].due).
+// Violation is one validation failure. Path locates it in the document (e.g. tasks[0].due), Code
+// says which rule was broken, and Args carries the values that rule's message names.
+//
+// The code is kept instead of the finished sentence because a violation can be raised while writing
+// and shown much later — by another command, in another language.
 type Violation struct {
-	Path    string
-	Message string
+	Path string
+	Code i18n.ViolationCode
+	Args []any
+}
+
+// Text renders the violation in the catalog's language.
+func (v Violation) Text(t *i18n.Catalog) string {
+	return i18n.OrDefault(t).ViolationText(v.Code, v.Args...)
 }
 
 // ValidationError collects every violation, so a refused write can report all of them.
@@ -19,16 +31,23 @@ type ValidationError struct {
 }
 
 func (e *ValidationError) Error() string {
+	text, _ := e.Localize(i18n.For(i18n.LangEN))
+	return text
+}
+
+// Localize renders the whole list in the catalog's language.
+func (e *ValidationError) Localize(t *i18n.Catalog) (string, string) {
+	t = i18n.OrDefault(t)
 	subject := e.Subject
 	if subject == "" {
-		subject = "入力"
+		subject = t.Err.Data.InvalidSubject
 	}
 	lines := make([]string, 0, len(e.Violations)+1)
-	lines = append(lines, fmt.Sprintf("%s の検証に失敗した（%d 件）:", subject, len(e.Violations)))
+	lines = append(lines, fmt.Sprintf(t.Err.Data.Invalid, subject, len(e.Violations)))
 	for _, v := range e.Violations {
-		lines = append(lines, fmt.Sprintf("  %s: %s", v.Path, v.Message))
+		lines = append(lines, fmt.Sprintf(t.Err.Data.Violation, v.Path, v.Text(t)))
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), ""
 }
 
 // VersionMismatchError reports a version this binary does not handle.
@@ -38,8 +57,17 @@ type VersionMismatchError struct {
 }
 
 func (e *VersionMismatchError) Error() string {
-	return fmt.Sprintf("tasks.json の version が %d（このバイナリの対応は %d）", e.Got, e.Want)
+	text, _ := e.Localize(i18n.For(i18n.LangEN))
+	return text
 }
+
+// Localize renders the mismatch in the catalog's language.
+func (e *VersionMismatchError) Localize(t *i18n.Catalog) (string, string) {
+	return fmt.Sprintf(i18n.OrDefault(t).Err.Data.VersionMismatch, e.Got, e.Want), ""
+}
+
+// addViolation is the shape every check uses to record a failure.
+type addViolation func(path string, code i18n.ViolationCode, args ...any)
 
 // Validate applies the read-time rules. Unknown status values pass; they render as an (unknown) column.
 func Validate(f *File) error {
@@ -48,8 +76,8 @@ func Validate(f *File) error {
 	}
 
 	var violations []Violation
-	add := func(path, format string, args ...any) {
-		violations = append(violations, Violation{Path: path, Message: fmt.Sprintf(format, args...)})
+	add := func(path string, code i18n.ViolationCode, args ...any) {
+		violations = append(violations, Violation{Path: path, Code: code, Args: args})
 	}
 
 	maxID := 0
@@ -59,16 +87,16 @@ func Validate(f *File) error {
 		}
 	}
 	if f.NextID <= maxID || f.NextID < 1 {
-		add("next_id", "next_id は max(id)=%d より大きい正の整数でなければならない（実際: %d）", maxID, f.NextID)
+		add("next_id", i18n.ViolationNextIDTooSmall, maxID, f.NextID)
 	}
 
 	seen := make(map[int]int, len(f.Tasks))
 	for i, task := range f.Tasks {
 		switch prev, dup := seen[task.ID]; {
 		case task.ID < 1:
-			add(fmt.Sprintf("tasks[%d].id", i), "id は正の整数でなければならない（実際: %d）", task.ID)
+			add(fmt.Sprintf("tasks[%d].id", i), i18n.ViolationTaskIDNotPositive, task.ID)
 		case dup:
-			add(fmt.Sprintf("tasks[%d].id", i), "id %d が tasks[%d] と重複している", task.ID, prev)
+			add(fmt.Sprintf("tasks[%d].id", i), i18n.ViolationTaskIDDuplicate, task.ID, prev)
 		default:
 			seen[task.ID] = i
 		}
@@ -77,7 +105,7 @@ func Validate(f *File) error {
 		checkTimestamp(add, fmt.Sprintf("tasks[%d].updated_at", i), task.UpdatedAt)
 		if task.Due != nil {
 			if _, err := time.Parse(dateLayout, string(*task.Due)); err != nil {
-				add(fmt.Sprintf("tasks[%d].due", i), "YYYY-MM-DD 形式でなければならない（実際: %q）", string(*task.Due))
+				add(fmt.Sprintf("tasks[%d].due", i), i18n.ViolationTaskDueFormat, string(*task.Due))
 			}
 		}
 		for j, link := range task.Links {
@@ -94,8 +122,8 @@ func Validate(f *File) error {
 	return nil
 }
 
-func checkTimestamp(add func(path, format string, args ...any), path string, ts Timestamp) {
+func checkTimestamp(add addViolation, path string, ts Timestamp) {
 	if _, err := ts.Time(); err != nil {
-		add(path, "RFC 3339 形式でなければならない（実際: %q）", string(ts))
+		add(path, i18n.ViolationTimestampFormat, string(ts))
 	}
 }

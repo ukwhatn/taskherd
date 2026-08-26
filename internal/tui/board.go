@@ -691,6 +691,13 @@ func (b *Board) rebuild() {
 	b.colIdx = nearestExpanded(b.columns, b.colIdx)
 }
 
+// message renders err in the board's language. The advice an error carries is dropped: the status
+// line is one line, and every hint here names a fix that belongs at a shell prompt, not in the TUI.
+func (b *Board) message(err error) string {
+	text, _ := i18n.Message(b.text, err)
+	return text
+}
+
 func (b *Board) setStatus(text string, isError bool) {
 	b.status, b.statusIsError = text, isError
 }
@@ -699,7 +706,7 @@ func (b *Board) setStatus(text string, isError bool) {
 
 func (b *Board) applyTasks(msg tasksLoadedMsg) tea.Cmd {
 	if msg.err != nil {
-		b.setStatus(msg.err.Error(), true)
+		b.setStatus(b.message(msg.err), true)
 		return nil
 	}
 	b.file = msg.file
@@ -814,7 +821,7 @@ func (b *Board) applyRefresh(msg refreshDoneMsg) tea.Cmd {
 	b.applyCache(msg.cache)
 
 	if msg.err != nil {
-		b.setStatus(msg.err.Error(), true)
+		b.setStatus(b.message(msg.err), true)
 		return nil
 	}
 	if msg.result == nil {
@@ -842,7 +849,7 @@ func (b *Board) applyRefresh(msg refreshDoneMsg) tea.Cmd {
 		// The reason is included rather than just the count: a count alone is what let a run of
 		// wrong-account 404s look like ordinary noise for as long as it did.
 		b.setStatus(fmt.Sprintf(b.text.Board.RefreshedSome,
-			len(msg.result.Outcomes)-failed, failed, firstFailureReason(msg.result)), true)
+			len(msg.result.Outcomes)-failed, failed, b.firstFailureReason(msg.result)), true)
 	case msg.manual:
 		b.setStatus(fmt.Sprintf(b.text.Board.Refreshed, len(msg.result.Outcomes)), false)
 	}
@@ -851,12 +858,12 @@ func (b *Board) applyRefresh(msg refreshDoneMsg) tea.Cmd {
 
 // firstFailureReason is the first line of the first failure in a cycle, which is the part of a gh
 // or Jira error that says what went wrong; the rest is the guidance the CLI prints in full.
-func firstFailureReason(result *fetch.RefreshResult) string {
+func (b *Board) firstFailureReason(result *fetch.RefreshResult) string {
 	for _, outcome := range result.Outcomes {
 		if outcome.Err == nil {
 			continue
 		}
-		line, _, _ := strings.Cut(outcome.Err.Error(), "\n")
+		line, _, _ := strings.Cut(b.message(outcome.Err), "\n")
 		return strings.TrimSpace(line)
 	}
 	return ""
@@ -1061,7 +1068,7 @@ func (b *Board) setDueCmd(taskID int, raw string) tea.Cmd {
 	if trimmed := strings.TrimSpace(raw); trimmed != "" {
 		parsed, err := model.ParseDate(trimmed)
 		if err != nil {
-			return status(err.Error(), true)
+			return status(b.message(err), true)
 		}
 		due = &parsed
 	}
@@ -1177,7 +1184,7 @@ func (b *Board) editNoteCmd() tea.Cmd {
 
 	path, err := writeTempNote(task.ID, task.Note)
 	if err != nil {
-		return status(err.Error(), true)
+		return status(b.message(err), true)
 	}
 	argv := strings.Fields(editor)
 	taskID := task.ID

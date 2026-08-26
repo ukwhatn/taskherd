@@ -130,7 +130,7 @@ func (a *app) listCmd() *cobra.Command {
 					Tasks         []model.Task            `json:"tasks"`
 					Herdr         *herdrStatusJSON        `json:"herdr,omitempty"`
 					SessionStates map[string]sessionState `json:"session_states,omitempty"`
-				}{Tasks: tasks, Herdr: live.statusJSON(), SessionStates: live.forTasks(tasks)})
+				}{Tasks: tasks, Herdr: live.statusJSON(a.text), SessionStates: live.forTasks(tasks)})
 			}
 			live.note(a)
 			if len(tasks) == 0 {
@@ -186,7 +186,7 @@ func (a *app) showCmd() *cobra.Command {
 					LinkStates    map[string]fetch.LinkState `json:"link_states,omitempty"`
 				}{
 					Task:          task,
-					Herdr:         live.statusJSON(),
+					Herdr:         live.statusJSON(a.text),
 					SessionStates: live.forTasks([]model.Task{*task}),
 					LinkStates:    links,
 				})

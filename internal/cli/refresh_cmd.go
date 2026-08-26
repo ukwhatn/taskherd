@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/ukwhatn/taskherd/internal/fetch"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -108,7 +109,8 @@ func (a *app) emitRefreshResult(result *fetch.RefreshResult) error {
 			updated = append(updated, outcome.URL)
 			continue
 		}
-		failed = append(failed, refreshFailure{URL: outcome.URL, Error: outcome.Err.Error()})
+		text, _ := i18n.Message(a.text, outcome.Err)
+		failed = append(failed, refreshFailure{URL: outcome.URL, Error: text})
 	}
 
 	if a.jsonOut {

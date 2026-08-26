@@ -3,7 +3,7 @@ package herdrc
 import (
 	"bufio"
 	"context"
-	"fmt"
+	"errors"
 	"time"
 )
 
@@ -156,7 +156,7 @@ func (w *Watcher) subscribeSession(ctx context.Context, snapshot *Snapshot) (*Sn
 				if err := <-readErr; err != nil {
 					return nil, err
 				}
-				return nil, fmt.Errorf("herdr のイベント購読が切断された")
+				return nil, errors.New("the herdr event subscription was cut off")
 			}
 			if timer == nil {
 				timer = time.NewTimer(eventDebounce)

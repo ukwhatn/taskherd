@@ -7,12 +7,20 @@ import (
 
 	"github.com/ukwhatn/taskherd/internal/cli"
 	"github.com/ukwhatn/taskherd/internal/config"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 )
 
 func main() {
 	paths, err := config.ResolvePaths(os.Getenv)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "エラー: %v\n", err)
+		// Only the environment can be consulted for the language here: the failure is that there
+		// is nowhere to look for config.toml.
+		text := i18n.For(i18n.Resolve(os.Getenv, ""))
+		msg, hint := i18n.Message(text, err)
+		fmt.Fprintf(os.Stderr, text.CLI.Root.ErrorPrefix, msg)
+		if hint != "" {
+			fmt.Fprintf(os.Stderr, text.CLI.Root.HintPrefix, hint)
+		}
 		os.Exit(1)
 	}
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 )
 
 const (
@@ -61,7 +62,7 @@ func (f *CacheFile) Get(url string) (CacheEntry, bool) {
 func (f *CacheFile) SetSuccess(url string, data any, now time.Time) error {
 	raw, err := json.Marshal(data)
 	if err != nil {
-		return fmt.Errorf("%s の取得結果を直列化できない: %w", url, err)
+		return fmt.Errorf("cannot serialize the fetched state of %s: %w", url, err)
 	}
 	ts := now.Format(time.RFC3339)
 	f.Entries[url] = CacheEntry{FetchedAt: &ts, OK: true, Error: "", Data: raw}
@@ -73,14 +74,18 @@ func (f *CacheFile) SetSuccess(url string, data any, now time.Time) error {
 //
 // failed_since is set only by the failure that starts a run, so a link failing every cycle keeps
 // reporting how long it has been broken instead of resetting to "just now" each time.
-func (f *CacheFile) SetFailure(url string, fetchErr error, now time.Time) {
+//
+// The message is rendered here rather than at display time because cache.json holds text, not
+// errors. A cached failure therefore stays in the language it was fetched in until the next
+// refresh rewrites it — which is the same freshness the rest of the entry already has.
+func (f *CacheFile) SetFailure(t *i18n.Catalog, url string, fetchErr error, now time.Time) {
 	existing := f.Entries[url]
 	if existing.FailedSince == nil {
 		ts := now.Format(time.RFC3339)
 		existing.FailedSince = &ts
 	}
 	existing.OK = false
-	existing.Error = fetchErr.Error()
+	existing.Error, _ = i18n.Message(t, fetchErr)
 	f.Entries[url] = existing
 }
 
@@ -139,7 +144,7 @@ func (c *Cache) Load() *CacheFile {
 // other's entries: each Update re-reads the latest file before fn mutates it.
 func (c *Cache) Update(ctx context.Context, fn func(*CacheFile)) error {
 	if err := os.MkdirAll(c.dir, dirPerm); err != nil {
-		return fmt.Errorf("%s を作成できない: %w", c.dir, err)
+		return fmt.Errorf("cannot create %s: %w", c.dir, err)
 	}
 
 	lock := flock.New(c.LockPath())
@@ -151,7 +156,7 @@ func (c *Cache) Update(ctx context.Context, fn func(*CacheFile)) error {
 	}
 	locked, err := lock.TryLockContext(lockCtx, cacheLockRetryDelay)
 	if err != nil || !locked {
-		return fmt.Errorf("%s のロックを取得できなかった: %w", c.LockPath(), err)
+		return fmt.Errorf("could not take the lock on %s: %w", c.LockPath(), err)
 	}
 	defer func() {
 		_ = lock.Unlock()
@@ -162,12 +167,12 @@ func (c *Cache) Update(ctx context.Context, fn func(*CacheFile)) error {
 
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
-		return fmt.Errorf("cache.json を生成できない: %w", err)
+		return fmt.Errorf("cannot build cache.json: %w", err)
 	}
 	data = append(data, '\n')
 
 	if err := writeFileAtomic(c.Path(), data); err != nil {
-		return fmt.Errorf("%s を書けない: %w", c.Path(), err)
+		return fmt.Errorf("cannot write %s: %w", c.Path(), err)
 	}
 	return nil
 }

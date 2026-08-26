@@ -3,6 +3,8 @@ package model
 import (
 	"fmt"
 	"strings"
+
+	"github.com/ukwhatn/taskherd/internal/i18n"
 )
 
 // ColumnKind marks how a column behaves. Terminal columns collapse on the board and are hidden from list by default.
@@ -39,12 +41,12 @@ func DefaultColumns() Columns {
 // Validate detects duplicate ids, empty definitions and unknown kinds.
 func (cs Columns) Validate() error {
 	var violations []Violation
-	add := func(path, format string, args ...any) {
-		violations = append(violations, Violation{Path: path, Message: fmt.Sprintf(format, args...)})
+	add := func(path string, code i18n.ViolationCode, args ...any) {
+		violations = append(violations, Violation{Path: path, Code: code, Args: args})
 	}
 
 	if len(cs) == 0 {
-		add("columns", "列が 1 つも定義されていない")
+		add("columns", i18n.ViolationColumnsEmpty)
 	}
 
 	seen := make(map[string]int, len(cs))
@@ -52,17 +54,17 @@ func (cs Columns) Validate() error {
 		path := fmt.Sprintf("columns[%d]", i)
 		switch prev, dup := seen[col.ID]; {
 		case strings.TrimSpace(col.ID) == "":
-			add(path+".id", "id が空")
+			add(path+".id", i18n.ViolationColumnIDEmpty)
 		case dup:
-			add(path+".id", "id %q が columns[%d] と重複している", col.ID, prev)
+			add(path+".id", i18n.ViolationColumnIDDuplicate, col.ID, prev)
 		default:
 			seen[col.ID] = i
 		}
 		if strings.TrimSpace(col.Label) == "" {
-			add(path+".label", "label が空")
+			add(path+".label", i18n.ViolationColumnLabelEmpty)
 		}
 		if col.Kind != ColumnKindOpen && col.Kind != ColumnKindTerminal {
-			add(path+".kind", "kind は %q か %q（実際: %q）", ColumnKindOpen, ColumnKindTerminal, col.Kind)
+			add(path+".kind", i18n.ViolationColumnKindInvalid, ColumnKindOpen, ColumnKindTerminal, col.Kind)
 		}
 	}
 

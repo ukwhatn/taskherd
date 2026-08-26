@@ -366,7 +366,7 @@ func (b *Board) submitDetailEdit(kind detailEditKind, ref, value string) tea.Cmd
 	case editAddLink:
 		urls, err := parseLinkURLs(b.text, value)
 		if err != nil {
-			return status(err.Error(), true)
+			return status(b.message(err), true)
 		}
 		return b.addLinksCmd(taskID, urls)
 	}

@@ -79,7 +79,7 @@ func TestPeekLanguage(t *testing.T) {
 
 // The generated config must survive its own Load, language included.
 func TestDefaultFileContentLoadsWithADefinedLanguage(t *testing.T) {
-	cfg, err := config.Load(writeConfig(t, config.DefaultFileContent()))
+	cfg, err := config.Load(writeConfig(t, config.DefaultFileContent("ja")))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}

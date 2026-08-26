@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ukwhatn/taskherd/internal/herdrc"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -93,13 +94,13 @@ func (l liveState) forTasks(tasks []model.Task) map[string]sessionState {
 	return states
 }
 
-func (l liveState) statusJSON() *herdrStatusJSON {
+func (l liveState) statusJSON(t *i18n.Catalog) *herdrStatusJSON {
 	if !l.consulted {
 		return nil
 	}
 	payload := &herdrStatusJSON{Available: l.available}
 	if l.err != nil {
-		payload.Error = l.err.Error()
+		payload.Error, _ = i18n.Message(t, l.err)
 	}
 	return payload
 }

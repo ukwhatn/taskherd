@@ -27,11 +27,11 @@ func (s *Store) Watch() (*Watcher, error) {
 
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
-		return nil, fmt.Errorf("ファイル監視を開始できない: %w", err)
+		return nil, fmt.Errorf("cannot start the file watcher: %w", err)
 	}
 	if err := fsw.Add(s.dir); err != nil {
 		_ = fsw.Close()
-		return nil, fmt.Errorf("%s を監視できない: %w", s.dir, err)
+		return nil, fmt.Errorf("cannot watch %s: %w", s.dir, err)
 	}
 
 	w := &Watcher{

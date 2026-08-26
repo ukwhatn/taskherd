@@ -166,4 +166,5 @@ var jaCatalog = Catalog{
 		Help:         "%s 選択  enter 紐づけ  esc 中止",
 	},
 	CLI: cliJA,
+	Err: errJA,
 }

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net"
 	"time"
+
+	"github.com/ukwhatn/taskherd/internal/i18n"
 )
 
 // requestTimeout bounds a single request/response exchange. Subscriptions are not bounded by it.
@@ -21,10 +23,18 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
+	text, _ := e.Localize(i18n.For(i18n.LangEN))
+	return text
+}
+
+// Localize names the code herdr returned, and its message when there is one. The code is left
+// untranslated: it is herdr's identifier, and the thing worth searching for.
+func (e *APIError) Localize(t *i18n.Catalog) (string, string) {
+	herd := i18n.OrDefault(t).Err.Herd
 	if e.Message == "" {
-		return fmt.Sprintf("herdr エラー (%s)", e.Code)
+		return fmt.Sprintf(herd.APICode, e.Code), ""
 	}
-	return fmt.Sprintf("herdr エラー (%s): %s", e.Code, e.Message)
+	return fmt.Sprintf(herd.APIMessage, e.Code, e.Message), ""
 }
 
 // UnavailableError reports that herdr could not be reached at all, which is the signal
@@ -35,14 +45,16 @@ type UnavailableError struct {
 }
 
 func (e *UnavailableError) Error() string {
-	return fmt.Sprintf("herdr に接続できない (%s): %v", e.SocketPath, e.Err)
+	text, _ := e.Localize(i18n.For(i18n.LangEN))
+	return text
 }
 
 func (e *UnavailableError) Unwrap() error { return e.Err }
 
-// Hint implements the hinter interface consumed by the CLI error reporter.
-func (e *UnavailableError) Hint() string {
-	return "herdr が起動していない可能性がある。herdr 連携機能（セッション状態・jump・--session current）以外は herdr なしで動作する"
+// Localize states the failure and what still works without herdr.
+func (e *UnavailableError) Localize(t *i18n.Catalog) (string, string) {
+	entry := i18n.OrDefault(t).Err.Herd.Unavailable
+	return fmt.Sprintf(entry.Msg, e.SocketPath, e.Err), entry.Hint
 }
 
 // envelope is one line of the NDJSON protocol, in either direction.
@@ -86,10 +98,10 @@ func writeRequest(conn net.Conn, method string, params any) error {
 	}
 	data, err := json.Marshal(envelope{ID: "taskherd:" + method, Method: method, Params: params})
 	if err != nil {
-		return fmt.Errorf("リクエストを生成できない: %w", err)
+		return fmt.Errorf("cannot build the request: %w", err)
 	}
 	if _, err := conn.Write(append(data, '\n')); err != nil {
-		return fmt.Errorf("%s を送信できない: %w", method, err)
+		return fmt.Errorf("cannot send %s: %w", method, err)
 	}
 	return nil
 }
@@ -97,12 +109,12 @@ func writeRequest(conn net.Conn, method string, params any) error {
 func readResponse(reader *bufio.Reader) (json.RawMessage, error) {
 	line, err := reader.ReadBytes('\n')
 	if err != nil && len(line) == 0 {
-		return nil, fmt.Errorf("応答を読めない: %w", err)
+		return nil, fmt.Errorf("cannot read the response: %w", err)
 	}
 
 	var env envelope
 	if err := json.Unmarshal(line, &env); err != nil {
-		return nil, fmt.Errorf("応答を解析できない: %w", err)
+		return nil, fmt.Errorf("cannot parse the response: %w", err)
 	}
 	if env.Error != nil {
 		return nil, &APIError{Code: env.Error.Code, Message: env.Error.Message}

@@ -88,7 +88,7 @@ func TestLinkStateFailureKeepsLastSuccess(t *testing.T) {
 		if err := cf.SetSuccess(url, fetch.GitHubData{State: "MERGED"}, stateNow.Add(-time.Minute)); err != nil {
 			t.Fatalf("SetSuccess: %v", err)
 		}
-		cf.SetFailure(url, errString("gh がタイムアウトした"), stateNow.Add(-30*time.Second))
+		cf.SetFailure(nil, url, errString("gh がタイムアウトした"), stateNow.Add(-30*time.Second))
 	})
 
 	state := file.LinkState(prLink(url), stateNow, stateTTL)
@@ -109,7 +109,7 @@ func TestLinkStateFailureKeepsLastSuccess(t *testing.T) {
 func TestLinkStateNeverSucceeded(t *testing.T) {
 	url := "https://github.com/o/r/pull/1"
 	file := cacheWith(t, func(cf *fetch.CacheFile) {
-		cf.SetFailure(url, errString("認証されていない"), stateNow.Add(-time.Minute))
+		cf.SetFailure(nil, url, errString("認証されていない"), stateNow.Add(-time.Minute))
 	})
 
 	state := file.LinkState(prLink(url), stateNow, stateTTL)
@@ -199,7 +199,7 @@ func TestLinkStateReportsFailureDuration(t *testing.T) {
 		if err := cf.SetSuccess(url, fetch.GitHubData{State: "OPEN"}, stateNow.Add(-30*time.Minute)); err != nil {
 			t.Fatalf("SetSuccess: %v", err)
 		}
-		cf.SetFailure(url, errString("gh: Could not resolve to a Repository"), failedAt)
+		cf.SetFailure(nil, url, errString("gh: Could not resolve to a Repository"), failedAt)
 	})
 
 	state := file.LinkState(prLink(url), stateNow, stateTTL)

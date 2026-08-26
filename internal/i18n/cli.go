@@ -35,6 +35,9 @@ type CLIRoot struct {
 	HintPrefix  string
 	// NotifyTitle is the herdr notification a detached launch raises. Takes the operation's label.
 	NotifyTitle string
+	// NotifyBody is that notification's body when the failure carries advice. Takes the message
+	// and the advice.
+	NotifyBody string
 	// ConfirmPrompt wraps a question with the answer key. Takes the question.
 	ConfirmPrompt string
 	// Cancelled acknowledges a confirmation answered with no.

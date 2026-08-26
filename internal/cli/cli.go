@@ -49,12 +49,8 @@ type UserError struct {
 
 func (e *UserError) Error() string { return e.Msg }
 
-// Hint implements the hinter interface consumed by the error reporter.
+// Hint implements the interface i18n.Message reads advice through.
 func (e *UserError) Hint() string { return e.HintText }
-
-type hinter interface {
-	Hint() string
-}
 
 type app struct {
 	env Env
@@ -117,10 +113,9 @@ func (a *app) notifyError(err error) {
 	if a.notifyLabel == "" {
 		return
 	}
-	body := err.Error()
-	var h hinter
-	if errors.As(err, &h) && h.Hint() != "" {
-		body += "（" + h.Hint() + "）"
+	body, hint := i18n.Message(a.text, err)
+	if hint != "" {
+		body = fmt.Sprintf(a.text.CLI.Root.NotifyBody, body, hint)
 	}
 	_ = a.herdr().Notify(context.Background(), fmt.Sprintf(a.text.CLI.Root.NotifyTitle, a.notifyLabel), body)
 }
@@ -163,27 +158,23 @@ func (a *app) rootCmd() *cobra.Command {
 }
 
 func (a *app) report(err error) {
-	hint := ""
-	var h hinter
-	if errors.As(err, &h) {
-		hint = h.Hint()
-	}
+	text, hint := i18n.Message(a.text, err)
 
 	if a.jsonOut {
 		payload := struct {
 			Error string `json:"error"`
 			Hint  string `json:"hint,omitempty"`
-		}{Error: err.Error(), Hint: hint}
+		}{Error: text, Hint: hint}
 		data, marshalErr := json.Marshal(payload)
 		if marshalErr != nil {
-			fmt.Fprintf(a.env.Err, a.text.CLI.Root.ErrorPrefix, err)
+			fmt.Fprintf(a.env.Err, a.text.CLI.Root.ErrorPrefix, text)
 			return
 		}
 		fmt.Fprintln(a.env.Err, string(data))
 		return
 	}
 
-	fmt.Fprintf(a.env.Err, a.text.CLI.Root.ErrorPrefix, err)
+	fmt.Fprintf(a.env.Err, a.text.CLI.Root.ErrorPrefix, text)
 	if hint != "" {
 		fmt.Fprintf(a.env.Err, a.text.CLI.Root.HintPrefix, hint)
 	}
@@ -228,6 +219,7 @@ func (a *app) fetcher(cfg *config.Config) *fetch.Fetcher {
 		Classifier: cfg.Classifier(),
 		JiraCreds:  a.jiraCredentials(cfg),
 		Now:        a.env.Now,
+		Text:       a.text,
 	}
 }
 
@@ -333,7 +325,8 @@ func (a *app) parseDueFlag(raw string) (*model.Date, error) {
 	}
 	due, err := model.ParseDate(raw)
 	if err != nil {
-		return nil, &UserError{Msg: err.Error(), HintText: a.text.CLI.Root.BadDueHint}
+		text, _ := i18n.Message(a.text, err)
+		return nil, &UserError{Msg: text, HintText: a.text.CLI.Root.BadDueHint}
 	}
 	return &due, nil
 }

@@ -164,4 +164,5 @@ var enCatalog = Catalog{
 		Help:         "%s select  enter attach  esc cancel",
 	},
 	CLI: cliEN,
+	Err: errEN,
 }
