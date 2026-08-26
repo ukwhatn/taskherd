@@ -166,6 +166,12 @@ func (f *fakeHerdr) Run(_ context.Context, args ...string) ([]byte, error) {
 	case strings.HasPrefix(joined, "pane report-metadata"):
 		return nil, nil
 
+	case strings.HasPrefix(joined, "notification show"):
+		if f.unavailable {
+			return nil, errors.New("herdr に到達できない")
+		}
+		return nil, nil
+
 	case strings.HasPrefix(joined, "plugin pane open"):
 		if f.unavailable {
 			return nil, errors.New("herdr に到達できない")
@@ -210,6 +216,18 @@ func (f *fakeHerdr) promptSent() (promptCall, bool) {
 		return promptCall{}, false
 	}
 	return f.prompts[0], true
+}
+
+// notification returns the first notification show call, or ok=false if there was none.
+func (f *fakeHerdr) notification() ([]string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.calls {
+		if strings.HasPrefix(strings.Join(c, " "), "notification show") {
+			return c, true
+		}
+	}
+	return nil, false
 }
 
 // call returns the first invocation starting with prefix.

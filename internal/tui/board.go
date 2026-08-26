@@ -99,13 +99,8 @@ type Board struct {
 	jump         jumpState
 	confirm      confirmState
 	sessionStart sessionStartState
-	// launch tracks the one session-start operation in flight, independent of the modal: the
-	// modal closes as soon as the launch starts, but the operation keeps running.
-	launch launchState
 	// sessionStartProbe is the id of a task whose launch modal is deferred behind one herdr snapshot
-	// (probeRecoverableCwdCmd, session_start.go), 0 when none is in flight. It exists a step before
-	// launch: the modal has not opened yet, so there is nothing there for launch's own bookkeeping
-	// to track.
+	// (probeRecoverableCwdCmd, session_start.go), 0 when none is in flight.
 	sessionStartProbe int
 
 	collapseTerminal bool
@@ -334,22 +329,6 @@ func (b *Board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusMsg:
 		b.setStatus(msg.text, msg.isError)
 		return b, nil
-
-	case sessionStartMsg:
-		// The currency check runs before msg.file is ever applied, not after: a stale message can
-		// still carry a file from a save that happened before it was cancelled or superseded, and
-		// applying that first would let a dropped operation's data reach the board regardless of
-		// what advanceSessionStart itself goes on to do with the message.
-		if !b.sessionStartMsgIsCurrent(msg) {
-			return b, nil
-		}
-		if msg.file != nil {
-			b.file = msg.file
-			b.rebuild()
-			b.rebuildLinks()
-			b.rebuildSessions()
-		}
-		return b, b.advanceSessionStart(msg)
 	}
 	return b, nil
 }
@@ -357,16 +336,6 @@ func (b *Board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (b *Board) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return b, tea.Quit
-	}
-	// Esc cancels a pending launch before any mode-specific handler runs, regardless of which one
-	// is current: submitSessionStart closes the launch modal the instant the operation starts, so
-	// by the time it is actually in flight the board can be back in any mode — bare board, detail
-	// (opened before g), whatever the launch was started from. Catching this only inside
-	// handleBoardKey missed every mode but the bare board, letting Esc there merely close the
-	// current overlay while the operation kept running underneath it.
-	if msg.String() == "esc" && b.launch.pending {
-		b.cancelSessionStart("起動を中止した")
-		return b, nil
 	}
 	switch b.mode {
 	case modeDetail:
@@ -571,7 +540,7 @@ func (b *Board) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		state := b.confirm
 		b.closeOverlay()
 		return b, b.runConfirm(state)
-	case "n", "esc":
+	case "n", "q":
 		b.closeOverlay()
 		b.setStatus("中止した", false)
 		return b, nil
@@ -765,10 +734,6 @@ func (b *Board) applyTasks(msg tasksLoadedMsg) tea.Cmd {
 	// Likewise the launch modal, still open at the cwd/prompt step.
 	if b.mode == modeSessionStart && b.taskByID(b.sessionStart.taskID) == nil {
 		b.closeOverlay()
-	}
-	// And an operation already past the modal, running against a task that just vanished.
-	if b.launch.pending && b.taskByID(b.launch.taskID) == nil {
-		b.cancelSessionStart(fmt.Sprintf("#%d が削除されたため起動を中止した", b.launch.taskID))
 	}
 	// And a probe already in flight one step before the modal, against a task that just vanished:
 	// the probe itself keeps running (there is nothing to cancel it with), but its result is dropped

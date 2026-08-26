@@ -31,16 +31,28 @@ type SessionSource interface {
 	Close()
 }
 
-// HerdrOps are the herdr operations the jump and session-start flows perform. *herdrc.Client
-// satisfies this.
+// HerdrOps are the herdr operations the board performs itself. *herdrc.Client satisfies this.
+//
+// Creating panes and starting agents is deliberately absent: both take long enough that the board
+// cannot be the process doing them (see submitSessionStart), so every such operation goes out to
+// SessionLauncher instead. What is left is reading state, moving focus, and stamping a pane —
+// all of which finish in one round trip.
 type HerdrOps interface {
 	Snapshot(ctx context.Context) (*herdrc.Snapshot, error)
 	FocusAgent(ctx context.Context, paneID string) error
-	CreateTab(ctx context.Context, spec herdrc.TabSpec) (herdrc.Tab, error)
-	StartAgent(ctx context.Context, spec herdrc.AgentSpec) (herdrc.StartResult, error)
-	WaitForAgentSession(ctx context.Context, paneID string, timeout time.Duration) (herdrc.Agent, error)
-	SendAgentPrompt(ctx context.Context, paneID, text string) error
 	ReportTaskDisplay(ctx context.Context, paneID string, taskID int, title string) error
+}
+
+// SessionLauncher hands pane-creating work to a process outside the board's own, so that closing
+// the board cannot cut it short. Both operations return once the work has been handed off, not
+// once it has finished: the launch itself runs for around half a minute afterwards, reporting
+// through its own log and a herdr notification rather than back to here.
+type SessionLauncher interface {
+	// StartSession starts a fresh session for the task and links it, then sends prompt (empty
+	// prompt means start without sending one).
+	StartSession(taskID int, cwd, prompt string) error
+	// ResumeSession reopens an already-linked session whose pane is gone.
+	ResumeSession(taskID int, sessionID string) error
 }
 
 // CacheLoader reads the live-status cache. *fetch.Cache satisfies this.
@@ -61,6 +73,7 @@ type Deps struct {
 	Files    FileWatcher
 	Sessions SessionSource
 	Herdr    HerdrOps
+	Launcher SessionLauncher
 	Cache    CacheLoader
 	Links    LinkRefresher
 	Now      func() time.Time

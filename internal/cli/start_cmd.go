@@ -32,11 +32,24 @@ const sessionStartWaitTimeout = 30 * time.Second
 // only the exit code remains open. cli.Run skips report() for this type: printing report()'s own
 // {error,hint} envelope on top of an already-emitted object would give a machine reader two
 // different things to parse for one invocation.
-type partialResultError struct{}
+//
+// It still carries the failure's own text and hint. Nothing prints them — the emitted result
+// already did — but --notify-error reads them off the returned error like it does for every other
+// failure, which is what keeps cli.Run's notification path free of a special case for this one.
+type partialResultError struct {
+	msg  string
+	hint string
+}
 
 func (e *partialResultError) Error() string {
-	return "start が起動を開始した後に失敗した（結果は stdout に出力済み）"
+	if e.msg == "" {
+		return "start が起動を開始した後に失敗した（結果は stdout に出力済み）"
+	}
+	return e.msg
 }
+
+// Hint implements the hinter interface consumed by the error reporter and by notifyError.
+func (e *partialResultError) Hint() string { return e.hint }
 
 // startResult is a session-start attempt's outcome, reported in the same shape whether it fully
 // succeeded or stopped partway through: Stage says how far it got, and Error/Hint are empty on
@@ -407,7 +420,7 @@ func (a *app) emitStart(result startResult, err error, hint string) error {
 			return emitErr
 		}
 		if err != nil {
-			return &partialResultError{}
+			return &partialResultError{msg: result.Error, hint: result.Hint}
 		}
 		return nil
 	}
@@ -434,5 +447,5 @@ func (a *app) emitStart(result startResult, err error, hint string) error {
 	if hint != "" {
 		fmt.Fprintf(a.env.Err, "ヒント: %s\n", hint)
 	}
-	return &partialResultError{}
+	return &partialResultError{msg: err.Error(), hint: hint}
 }

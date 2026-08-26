@@ -128,13 +128,13 @@ func TestBoardStatusSelectorCancels(t *testing.T) {
 	h := newHarness(t, Deps{Tasks: store}, Settings{})
 
 	h.key("tab")
-	h.key("esc")
+	h.key("q")
 
 	if h.board.mode != modeBoard {
 		t.Fatalf("mode = %v, want modeBoard", h.board.mode)
 	}
 	if got := store.snapshot().Tasks[0].Status; got != "todo" {
-		t.Errorf("status = %q, want todo（esc で取消）", got)
+		t.Errorf("status = %q, want todo（q で閉じた）", got)
 	}
 	if store.updates != 0 {
 		t.Errorf("updates = %d, want 0", store.updates)
@@ -383,69 +383,92 @@ func TestBoardJumpFocusesLivePane(t *testing.T) {
 	if len(herdrOps.tokens) == 0 || last.taskID != 3 || last.title != "t" {
 		t.Errorf("tokens = %+v, want #3/t の記録", herdrOps.tokens)
 	}
+	// The board is a full-screen herdr overlay: leaving it open after a jump would leave it
+	// covering the very pane the jump moved to.
+	if !h.quit {
+		t.Error("board が終了していない（pane へ移ったら閉じる）")
+	}
 }
 
-// A pane that is gone means a resume, and a resume creates a pane: that gets a confirmation.
+// A focus that fails moved nothing, so the board stays where it is and reports why.
+func TestBoardJumpFocusFailureKeepsBoardOpen(t *testing.T) {
+	store := newFakeStore(model.Task{
+		ID: 3, Title: "t", Status: "todo",
+		Sessions: []model.SessionRef{{Agent: "claude", SessionID: "s-1", Cwd: "/tmp/work"}},
+	})
+	sessions := newFakeSessions(t)
+	herdrOps := &fakeHerdr{focusErr: errUnavailable}
+	h := newHarness(t, Deps{Tasks: store, Sessions: sessions, Herdr: herdrOps}, Settings{})
+	h.dispatch(snapshotUpdate(agent("pane-9", "s-1", herdrc.StateWorking)))
+
+	h.key("g")
+
+	if h.quit {
+		t.Fatal("focus に失敗したのに board が終了した")
+	}
+	if !h.board.statusIsError {
+		t.Errorf("status = %q, want エラー扱い", h.board.status)
+	}
+}
+
+// A pane that is gone means a resume, and a resume creates a pane: that gets a confirmation, and
+// then goes out to a process of its own rather than running here (§3.1 of the PR-15 plan).
 func TestBoardJumpConfirmsResume(t *testing.T) {
 	store := newFakeStore(model.Task{
 		ID: 4, Title: "resume 対象", Status: "todo",
 		Sessions: []model.SessionRef{{Agent: "claude", SessionID: "s-gone", Cwd: "/tmp/work"}},
 	})
 	sessions := newFakeSessions(t)
-	herdrOps := &fakeHerdr{}
-	h := newHarness(t, Deps{Tasks: store, Sessions: sessions, Herdr: herdrOps}, Settings{})
+	launcher := &fakeLauncher{}
+	h := newHarness(t, Deps{Tasks: store, Sessions: sessions, Herdr: &fakeHerdr{}, Launcher: launcher}, Settings{})
 	h.dispatch(snapshotUpdate())
 
 	h.key("g")
 	if h.board.mode != modeConfirm {
 		t.Fatalf("mode = %v, want modeConfirm", h.board.mode)
 	}
-	if len(herdrOps.tabs) != 0 {
-		t.Fatal("確認前に tab が作られた")
+	if len(launcher.resumes) != 0 {
+		t.Fatal("確認前に resume が走った")
 	}
 
 	h.key("n")
-	if len(herdrOps.tabs) != 0 {
-		t.Fatal("n で中止したのに tab が作られた")
+	if len(launcher.resumes) != 0 {
+		t.Fatal("n で中止したのに resume が走った")
 	}
 
 	h.key("g")
 	h.key("y")
 
-	if len(herdrOps.tabs) != 1 || herdrOps.tabs[0].Cwd != "/tmp/work" {
-		t.Fatalf("tabs = %+v, want cwd=/tmp/work", herdrOps.tabs)
+	if len(launcher.resumes) != 1 {
+		t.Fatalf("resumes = %+v, want 1 件", launcher.resumes)
 	}
-	if herdrOps.tabs[0].Label != "resume 対象" {
-		t.Errorf("label = %q, want タスクタイトル", herdrOps.tabs[0].Label)
+	if got := launcher.resumes[0]; got.taskID != 4 || got.sessionID != "s-gone" {
+		t.Errorf("resume = %+v, want {4 s-gone}", got)
 	}
-	if len(herdrOps.started) != 1 {
-		t.Fatalf("started = %+v, want 1 件", herdrOps.started)
-	}
-	started := herdrOps.started[0]
-	if started.Kind != "claude" || strings.Join(started.Args, " ") != "--resume s-gone" {
-		t.Errorf("started = %+v, want claude --resume s-gone", started)
-	}
-	if len(herdrOps.tokens) != 1 || herdrOps.tokens[0].taskID != 4 || herdrOps.tokens[0].title != "resume 対象" {
-		t.Errorf("tokens = %+v, want #4/resume 対象 の記録", herdrOps.tokens)
+	if !h.quit {
+		t.Error("board が終了していない（resume を渡したら閉じる）")
 	}
 }
 
-// agent_not_ready is not a failed jump: the pane exists and only a human can answer the prompt.
-func TestBoardResumeReportsNeedsAttention(t *testing.T) {
+// A resume that could not even be handed off leaves the board up, so the failure is readable.
+func TestBoardResumeFailureKeepsBoardOpen(t *testing.T) {
 	store := newFakeStore(model.Task{
 		ID: 1, Title: "t", Status: "todo",
 		Sessions: []model.SessionRef{{Agent: "claude", SessionID: "s-gone", Cwd: "/tmp/work"}},
 	})
 	sessions := newFakeSessions(t)
-	herdrOps := &fakeHerdr{startResult: herdrc.StartResult{PaneID: "pane-new", NeedsAttention: true}}
-	h := newHarness(t, Deps{Tasks: store, Sessions: sessions, Herdr: herdrOps}, Settings{})
+	launcher := &fakeLauncher{err: errUnavailable}
+	h := newHarness(t, Deps{Tasks: store, Sessions: sessions, Herdr: &fakeHerdr{}, Launcher: launcher}, Settings{})
 	h.dispatch(snapshotUpdate())
 
 	h.key("g")
 	h.key("y")
 
-	if !strings.Contains(h.board.status, "入力待ち") {
-		t.Errorf("status = %q, want 入力待ちの案内", h.board.status)
+	if h.quit {
+		t.Fatal("resume を渡せなかったのに board が終了した")
+	}
+	if !strings.Contains(h.board.status, "resume を開始できない") {
+		t.Errorf("status = %q, want resume を開始できない旨", h.board.status)
 	}
 }
 

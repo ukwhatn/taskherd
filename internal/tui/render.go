@@ -566,7 +566,7 @@ func (b *Board) renderJump() string {
 	return b.renderModal(modal{
 		title:   fmt.Sprintf("#%d の移動先セッション", b.jump.taskID),
 		body:    lines,
-		help:    fmt.Sprintf("%s 選択 / enter 決定 / esc 取消", b.icons.verticalKeys()),
+		help:    fmt.Sprintf("%s 選択 / enter 決定 / q 閉じる", b.icons.verticalKeys()),
 		width:   width,
 		focused: true,
 	})

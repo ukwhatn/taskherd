@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -36,7 +35,7 @@ func (b *Board) handleJumpKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return b, nil
 	}
 	switch msg.String() {
-	case "esc":
+	case "q":
 		b.closeOverlay()
 	case "down":
 		if b.jump.cursor < len(b.jump.sessions)-1 {
@@ -84,43 +83,37 @@ func (b *Board) jumpTo(taskID int, title string, session model.SessionRef) tea.C
 	return nil
 }
 
-// focusCmd moves herdr's focus to the pane. One focus call moves workspace, tab and pane together.
+// focusCmd moves herdr's focus to the pane and closes the board behind it. One focus call moves
+// workspace, tab and pane together.
+//
+// The board is a herdr overlay drawn over the whole workspace, so leaving it open after a jump
+// would leave it covering the very pane the jump moved to. A failed focus keeps it open instead:
+// the status line is the only place that error can be read.
 func (b *Board) focusCmd(taskID int, title, paneID string) tea.Cmd {
 	return func() tea.Msg {
 		if err := b.deps.Herdr.FocusAgent(b.ctx, paneID); err != nil {
 			return statusMsg{text: fmt.Sprintf("pane %s へ移動できない: %v", paneID, err), isError: true}
 		}
 		_ = b.deps.Herdr.ReportTaskDisplay(b.ctx, paneID, taskID, title)
-		return statusMsg{text: fmt.Sprintf("#%d のセッションへ移動した（pane %s）", taskID, paneID)}
+		return tea.QuitMsg{}
 	}
 }
 
-// resumeCmd opens a new tab in the session's original cwd and resumes the agent there. The cwd
-// matters: Claude Code stores its sessions per working directory.
+// resumeCmd reopens a session whose pane is gone, in a process of its own, and closes the board.
+//
+// The work itself is the CLI's jump (internal/cli/session_cmd.go), not a second copy of it here:
+// a resume creates a tab and starts an agent, and herdr's readiness wait for a resumed transcript
+// runs long enough that the board — closed by the user as soon as the new tab shows up — cannot be
+// the process waiting on it.
 func (b *Board) resumeCmd(state confirmState) tea.Cmd {
-	taskID, session := state.taskID, state.session
+	taskID, sessionID := state.taskID, state.session.SessionID
 	return func() tea.Msg {
-		tab, err := b.deps.Herdr.CreateTab(b.ctx, herdrc.TabSpec{Cwd: session.Cwd, Label: state.title})
-		if err != nil {
-			return statusMsg{text: fmt.Sprintf("タブを作成できない: %v", err), isError: true}
+		if b.deps.Launcher == nil {
+			return statusMsg{text: "セッションを起動する経路が無い", isError: true}
 		}
-		started, err := b.deps.Herdr.StartAgent(b.ctx, herdrc.AgentSpec{
-			Name:   fmt.Sprintf("taskherd-%d", taskID),
-			Kind:   resumeAgent,
-			PaneID: tab.PaneID,
-			Args:   []string{"--resume", session.SessionID},
-		})
-		if err != nil {
-			return statusMsg{text: fmt.Sprintf("resume 起動に失敗した: %v", err), isError: true}
+		if err := b.deps.Launcher.ResumeSession(taskID, sessionID); err != nil {
+			return statusMsg{text: fmt.Sprintf("#%d の resume を開始できない: %v", taskID, err), isError: true}
 		}
-		_ = b.deps.Herdr.ReportTaskDisplay(b.ctx, started.PaneID, taskID, state.title)
-
-		if started.NeedsAttention {
-			return statusMsg{
-				text:    fmt.Sprintf("pane %s で resume 起動した。入力待ち。pane を開いて応答する", started.PaneID),
-				isError: true,
-			}
-		}
-		return statusMsg{text: fmt.Sprintf("#%d を pane %s で resume 起動した", taskID, started.PaneID)}
+		return tea.QuitMsg{}
 	}
 }

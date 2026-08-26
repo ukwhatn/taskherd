@@ -14,7 +14,7 @@ import (
 
 // detailHelp is the modal's key list, with the arrow keys named by the icon set in use.
 func (b *Board) detailHelp() string {
-	return fmt.Sprintf("%s 項目  enter 編集  %s ステータス  delete 解除  g jump  r 取得  esc 戻る",
+	return fmt.Sprintf("%s 項目  enter 編集  %s ステータス  delete 解除  g jump  r 取得  q 閉じる",
 		b.icons.verticalKeys(), b.icons.horizontalKeys())
 }
 
@@ -203,7 +203,7 @@ func (b *Board) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	item := b.currentDetailItem(items)
 
 	switch msg.String() {
-	case "esc":
+	case "q":
 		if b.detail.quitOnClose {
 			return b, tea.Quit
 		}
