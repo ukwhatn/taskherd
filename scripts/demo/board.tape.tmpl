@@ -1,0 +1,38 @@
+# Template for the board screenshots. record.sh fills in the __PLACEHOLDERS__ and runs it.
+#
+# The environment is set up inside Hide/Show so the published image starts at the board rather than
+# at a screenful of exports.
+
+Output "__WORK__/board.gif"
+
+Set Shell "bash"
+Set FontFamily "JetBrainsMono Nerd Font Mono"
+Set FontSize 15
+Set Width 1500
+Set Height 470
+Set Padding 24
+
+Hide
+Type "export XDG_STATE_HOME=__WORK__/state TASKHERD_CONFIG=__WORK__/config/config.toml"
+Enter
+Type "export PATH=__BIN__:$PATH PS1='$ ' TERM=xterm-256color"
+Enter
+Type "clear"
+Enter
+Show
+
+Type "taskherd board"
+Enter
+Sleep 4s
+Screenshot "__OUT__/board-__LANG__.png"
+
+# The detail modal is the other screen worth showing, opened on the one task that has both a pull
+# request and a ticket attached — an empty one would not show what the screen is for.
+Right 3
+Sleep 500ms
+Enter
+Sleep 2s
+Screenshot "__OUT__/detail-__LANG__.png"
+
+Type "q"
+Sleep 1s
