@@ -36,6 +36,7 @@ type Config struct {
 	GitHub       GitHub
 	Jira         Jira
 	SessionStart SessionStart
+	Update       Update
 }
 
 // Board configures the board TUI and the live fetch cadence.
@@ -73,6 +74,14 @@ type Jira struct {
 	// TokenFile is a path to a file holding the token and nothing else. A leading ~/ is expanded
 	// against HOME. Surrounding whitespace and the trailing newline are stripped when read.
 	TokenFile string
+}
+
+// Update configures the look at the releases page.
+type Update struct {
+	// Check is whether the board may ask GitHub, at most once a day, whether a newer release
+	// exists. Turning it off stops taskherd contacting anything on its own; `taskherd update`
+	// still works, because that is someone asking on purpose.
+	Check bool
 }
 
 // SessionStart configures the prompt a session started from a task opens with.
@@ -120,6 +129,9 @@ type fileConfig struct {
 		TokenEnv  *string `toml:"token_env"`
 		TokenFile *string `toml:"token_file"`
 	} `toml:"jira"`
+	Update struct {
+		Check *bool `toml:"check"`
+	} `toml:"update"`
 	SessionStart struct {
 		// PromptTemplate is a pointer so that an explicit "" (send no prompt) is distinguishable
 		// from the key being absent (use the built-in default).
@@ -140,6 +152,7 @@ func Default() *Config {
 		Board:        Board{RefreshIntervalMinutes: 10, CacheTTLMinutes: 5, Icons: "nerd", Hyperlinks: true},
 		Columns:      model.DefaultColumns(),
 		Jira:         Jira{TokenEnv: "TASKHERD_JIRA_TOKEN"},
+		Update:       Update{Check: true},
 		SessionStart: SessionStart{PromptTemplate: promptTemplate(string(i18n.Default))},
 	}
 }
@@ -225,6 +238,9 @@ func Load(path string) (*Config, error) {
 	}
 	if raw.Jira.TokenFile != nil {
 		cfg.Jira.TokenFile = *raw.Jira.TokenFile
+	}
+	if raw.Update.Check != nil {
+		cfg.Update.Check = *raw.Update.Check
 	}
 	if raw.SessionStart.PromptTemplate != nil {
 		cfg.SessionStart.PromptTemplate = *raw.SessionStart.PromptTemplate

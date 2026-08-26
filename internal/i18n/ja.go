@@ -26,6 +26,7 @@ var jaCatalog = Catalog{
 		AllCollapsed:    "すべての列が折り畳まれています（t で展開）",
 		TooNarrow:       "端末の幅が足りず列を表示できません",
 		ColumnWindow:    "%s 列 %d-%d / %d（%s で移動）",
+		UpdateAvailable: "%s が公開されています（現在 %s）。taskherd update で更新できます",
 		MoreCount:       "%d 件",
 		MoreLinks:       "ほか %d 件",
 		EmptyColumn:     "カードなし",

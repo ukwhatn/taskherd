@@ -58,6 +58,9 @@ type Board struct {
 	// ColumnWindow says which slice of the columns is on screen. Takes the ellipsis mark, the
 	// first and last visible column numbers, the total, and the horizontal arrow glyphs.
 	ColumnWindow string
+	// UpdateAvailable announces a newer release on the status line. Takes the new version and
+	// the running one.
+	UpdateAvailable string
 	// MoreCount labels the cards scrolled out of a column. Takes the count.
 	MoreCount string
 	// MoreLinks labels the links that did not fit on a card. Takes the count.

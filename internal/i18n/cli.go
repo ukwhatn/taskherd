@@ -23,6 +23,7 @@ type CLI struct {
 	Plugin  CLIPlugin
 	Picker  CLIPicker
 	Version CLIVersion
+	Update  CLIUpdate
 }
 
 // CLIRoot is the root command plus everything shared between subcommands.
@@ -277,6 +278,34 @@ type CLIRefresh struct {
 	FailedSuffix  string
 	GitHubLimited string
 	JiraLimited   string
+}
+
+// CLIUpdate is the update command and the notice other commands print.
+type CLIUpdate struct {
+	Short     string
+	FlagCheck string
+	FlagYes   string
+	// Available reports a newer release. Takes the new version and the running one.
+	Available string
+	// UpToDate says the running version is the newest. Takes that version.
+	UpToDate string
+	// Confirm asks before replacing the binary. Takes the new version.
+	Confirm string
+	// Downloading is printed before the transfer. Takes the new version.
+	Downloading string
+	// Done reports the replacement. Takes the old version, the new one and the path.
+	Done string
+	// NotReleased refuses to replace a build that has no counterpart on the releases page.
+	NotReleased Problem
+	// NoRelease reports that nothing has been published yet.
+	NoRelease Problem
+	// NotWritable reports a binary this user cannot replace. Msg takes the path.
+	NotWritable Problem
+	// Failed reports any other failure. Msg takes the cause.
+	Failed Problem
+	// Notice is the one line other commands print when a newer release is known. Takes the new
+	// version and the running one.
+	Notice string
 }
 
 // CLIVersion is the version command.
