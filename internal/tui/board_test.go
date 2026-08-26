@@ -128,13 +128,13 @@ func TestBoardStatusSelectorCancels(t *testing.T) {
 	h := newHarness(t, Deps{Tasks: store}, Settings{})
 
 	h.key("tab")
-	h.key("esc")
+	h.key("q")
 
 	if h.board.mode != modeBoard {
 		t.Fatalf("mode = %v, want modeBoard", h.board.mode)
 	}
 	if got := store.snapshot().Tasks[0].Status; got != "todo" {
-		t.Errorf("status = %q, want todo（esc で取消）", got)
+		t.Errorf("status = %q, want todo（q で閉じた）", got)
 	}
 	if store.updates != 0 {
 		t.Errorf("updates = %d, want 0", store.updates)

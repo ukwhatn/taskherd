@@ -58,7 +58,7 @@ func (b *Board) handleStatusSelectKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		return b, nil
 	}
 	switch msg.String() {
-	case "esc", "tab":
+	case "q", "tab":
 		b.closeOverlay()
 	case "left":
 		if b.statusSel.cursor > 0 {
@@ -96,7 +96,7 @@ func (b *Board) renderStatusSelect() string {
 	return b.renderModal(modal{
 		title:   fmt.Sprintf("#%d の移行先", b.statusSel.taskID),
 		body:    []string{strings.Join(cells, " ")},
-		help:    fmt.Sprintf("%s 選択 / enter 確定 / esc 取消", b.icons.horizontalKeys()),
+		help:    fmt.Sprintf("%s 選択 / enter 確定 / q 閉じる", b.icons.horizontalKeys()),
 		width:   width,
 		focused: true,
 	})
@@ -169,7 +169,7 @@ func (b *Board) handleSessionSelectKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		return b, nil
 	}
 	switch msg.String() {
-	case "esc":
+	case "q":
 		b.closeOverlay()
 	case "up":
 		if b.sessionSel.cursor > 0 {
@@ -242,7 +242,7 @@ func (b *Board) renderSessionSelect() string {
 	return b.renderModal(modal{
 		title:   fmt.Sprintf("#%d に紐づけるセッション", b.sessionSel.taskID),
 		body:    lines,
-		help:    fmt.Sprintf("%s 選択 / enter 紐づけ / esc 取消", b.icons.verticalKeys()),
+		help:    fmt.Sprintf("%s 選択 / enter 紐づけ / q 閉じる", b.icons.verticalKeys()),
 		width:   width,
 		focused: true,
 	})

@@ -46,7 +46,7 @@ func TestDetailOpensAndReturns(t *testing.T) {
 		}
 	}
 
-	h.key("esc")
+	h.key("q")
 	if h.board.mode != modeBoard {
 		t.Errorf("mode = %v, want modeBoard", h.board.mode)
 	}
@@ -452,9 +452,9 @@ func TestDetailClosesWhenTaskDisappears(t *testing.T) {
 	}
 }
 
-// The Esc that opens quitOnClose has to end the program, not fall back to the board: the board
-// behind it was never the point of a detail opened straight from prefix+t.
-func TestDetailEscQuitsWhenOpenedFromStart(t *testing.T) {
+// The q that closes a quitOnClose detail has to end the program, not fall back to the board: the
+// board behind it was never the point of a detail opened straight from prefix+t.
+func TestDetailCloseQuitsWhenOpenedFromStart(t *testing.T) {
 	store := newFakeStore(task(1, "todo"))
 	h := newHarness(t, Deps{Tasks: store}, Settings{DetailTaskID: 1})
 	if h.board.mode != modeDetail || !h.board.detail.quitOnClose {
@@ -462,27 +462,27 @@ func TestDetailEscQuitsWhenOpenedFromStart(t *testing.T) {
 			h.board.mode, h.board.detail.quitOnClose)
 	}
 
-	cmd := h.dispatch(keyMsg("esc"))
+	cmd := h.dispatch(keyMsg("q"))
 
 	if cmd == nil {
-		t.Fatal("esc がコマンドを返していない、want tea.Quit")
+		t.Fatal("q がコマンドを返していない、want tea.Quit")
 	}
 	if h.board.mode != modeDetail {
 		t.Errorf("mode = %v, want modeDetail のまま（quit する前に board へ落ちない）", h.board.mode)
 	}
 }
 
-// The ordinary board-opened detail is the contrast case: its Esc returns to the board and quits
+// The ordinary board-opened detail is the contrast case: its q returns to the board and quits
 // nothing.
-func TestDetailEscReturnsToBoardWhenOpenedNormally(t *testing.T) {
+func TestDetailCloseReturnsToBoardWhenOpenedNormally(t *testing.T) {
 	store := newFakeStore(task(1, "todo"))
 	h := newHarness(t, Deps{Tasks: store}, Settings{})
 
 	h.key("enter")
-	cmd := h.dispatch(keyMsg("esc"))
+	cmd := h.dispatch(keyMsg("q"))
 
 	if cmd != nil {
-		t.Error("通常に開いた detail の esc が何かコマンドを返している、want nil")
+		t.Error("通常に開いた detail の q が何かコマンドを返している、want nil")
 	}
 	if h.board.mode != modeBoard {
 		t.Errorf("mode = %v, want modeBoard", h.board.mode)
@@ -513,10 +513,10 @@ func TestDetailReopenedAfterQuitOnCloseTargetDisappearsDoesNotQuit(t *testing.T)
 	if h.board.mode != modeDetail || h.board.detail.quitOnClose {
 		t.Fatalf("mode=%v quitOnClose=%v, want modeDetail かつ quitOnClose=false", h.board.mode, h.board.detail.quitOnClose)
 	}
-	cmd := h.dispatch(keyMsg("esc"))
+	cmd := h.dispatch(keyMsg("q"))
 
 	if cmd != nil {
-		t.Error("#2 の detail の esc が何かコマンドを返している（プログラムが終了してはいけない）")
+		t.Error("#2 の detail の q が何かコマンドを返している（プログラムが終了してはいけない）")
 	}
 	if h.board.mode != modeBoard {
 		t.Errorf("mode = %v, want modeBoard", h.board.mode)

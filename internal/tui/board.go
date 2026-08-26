@@ -540,7 +540,7 @@ func (b *Board) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		state := b.confirm
 		b.closeOverlay()
 		return b, b.runConfirm(state)
-	case "n", "esc":
+	case "n", "q":
 		b.closeOverlay()
 		b.setStatus("中止した", false)
 		return b, nil
