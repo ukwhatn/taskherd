@@ -1,11 +1,8 @@
 package tui
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
@@ -13,21 +10,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/model"
-)
-
-// sessionStartWaitTimeout bounds agent wait once StartAgent itself has returned. StartAgent's own
-// timeout covers herdr's trust-folder gate; this one covers the shorter settle time between a
-// freshly started agent process and herdr's integration hook reporting its session id. Mirrors the
-// CLI's own constant of the same name (internal/cli/start_cmd.go).
-const sessionStartWaitTimeout = 30 * time.Second
-
-// Session-start stages mirror the CLI's own names (start_cmd.go) so the same launch reads the same
-// way from board or CLI. Each names the last step completed, not the one being attempted.
-const (
-	sessionStageStarted  = "started"
-	sessionStageWaited   = "waited"
-	sessionStageLinked   = "linked"
-	sessionStagePrompted = "prompted"
 )
 
 // promptVisibleLines is how many rows the prompt textarea shows inside the modal.
@@ -55,45 +37,6 @@ type sessionStartState struct {
 	err        string
 }
 
-// launchState tracks the one session-start operation in flight, if any.
-//
-// opID lets a stage message be matched against the operation it belongs to: the wait step alone
-// can run for sessionStartWaitTimeout, during which the task can be deleted or another launch
-// started, and a message that arrives after either must be dropped rather than acted on.
-type launchState struct {
-	pending bool
-	opID    int
-	taskID  int
-	ctx     context.Context
-	cancel  context.CancelFunc
-}
-
-// sessionStartMsg is one type reused for every stage of a launch rather than one type per
-// transition: each stage only adds a field or two to what the previous one already gathered, and
-// advanceSessionStart's dispatch on stage decides which Cmd runs next.
-type sessionStartMsg struct {
-	opID   int
-	taskID int
-	title  string
-	cwd    string
-	prompt string
-
-	stage     string
-	paneID    string
-	sessionID string
-	// reused reports that no new pane was created: launchOrRecoverCmd found a previous attempt's
-	// agent idle with a session already, at the cwd this launch asked for, and linked that pane
-	// instead (§4 of the design).
-	reused bool
-	// file is set only by the link step, right after a successful save: the board's own copy is
-	// stale until this is applied, since the save happened on Store's own re-read under its lock
-	// rather than through the model the board is holding.
-	file *model.File
-
-	err  error
-	hint string
-}
-
 func newFieldTextarea() textarea.Model {
 	ta := textarea.New()
 	ta.ShowLineNumbers = false
@@ -110,13 +53,13 @@ func newFieldTextarea() textarea.Model {
 // other herdr call in this file: opening the modal is deferred behind probeRecoverableCwdCmd rather
 // than probed synchronously, since a herdr call blocking the update loop would freeze the whole
 // board's key handling for however long it takes (including the CLI-fallback path, which can run to
-// several seconds) — every other call in this file already runs as a tea.Cmd for that reason.
+// several seconds).
 func (b *Board) beginSessionStart(task *model.Task) tea.Cmd {
+	if b.deps.Launcher == nil {
+		return status("セッションを起動する経路が無い", true)
+	}
 	if b.deps.Herdr == nil {
 		return status("herdr に接続できないため起動できない", true)
-	}
-	if b.launch.pending {
-		return status("起動処理中...", true)
 	}
 	if b.sessionStartProbe != 0 {
 		return status("cwd の候補を確認中...", true)
@@ -160,14 +103,13 @@ func (b *Board) openSessionStartModal(task model.Task, candidates []string) {
 type sessionStartProbedMsg struct {
 	task model.Task
 	// recoveredCwd is the previous attempt's agent's cwd, or empty when there is none to recover (or
-	// herdr could not be asked) — findReusableAgent decides the rest once the real launch runs.
+	// herdr could not be asked) — the launch itself decides the rest once it runs.
 	recoveredCwd string
 }
 
 // probeRecoverableCwdCmd is beginSessionStart's no-candidates fallback: one snapshot read for this
-// task's own previous-attempt agent (findReusableAgent's own lookup, minus the checks that need a
-// cwd this is what supplies), so the modal can offer a leftover pane's cwd as a candidate instead of
-// asking the user to already know it.
+// task's own previous-attempt agent, so the modal can offer a leftover pane's cwd as a candidate
+// instead of asking the user to already know it.
 func (b *Board) probeRecoverableCwdCmd(task model.Task) tea.Cmd {
 	return func() tea.Msg {
 		snapshot, err := b.deps.Herdr.Snapshot(b.ctx)
@@ -180,6 +122,12 @@ func (b *Board) probeRecoverableCwdCmd(task model.Task) tea.Cmd {
 		}
 		return sessionStartProbedMsg{task: task, recoveredCwd: agent.Cwd}
 	}
+}
+
+// agentIsUsable mirrors the CLI's own helper of the same name (internal/cli/start_cmd.go): agent has
+// a session id and is not stuck waiting for input.
+func agentIsUsable(agent *herdrc.Agent) bool {
+	return agent.SessionID() != "" && agent.AgentStatus != herdrc.StateBlocked
 }
 
 // applySessionStartProbe is sessionStartProbedMsg's handler (Board.Update's only call site): a
@@ -305,9 +253,14 @@ func (b *Board) copySessionStartPrompt() tea.Cmd {
 	)
 }
 
-// submitSessionStart validates the modal's fields, then starts the launch and hands the board back
-// to the caller: the modal closes immediately, and progress from here on is reported on the status
-// line, four stages at a time (§7.4).
+// submitSessionStart validates the modal's fields and hands the launch to a process outside this
+// one, then quits the board.
+//
+// The launch is not run here. Reaching a linked session with a prompt in it takes around half a
+// minute — herdr's own readiness wait, then claude's integration hook reporting a session id — and
+// the board is a herdr overlay that the user closes as soon as the new tab appears, which killed
+// the launch partway through every time: the pane and the agent existed, but the link and the
+// prompt never happened. Nothing that outlives the board may run inside it.
 func (b *Board) submitSessionStart() tea.Cmd {
 	s := b.sessionStart
 
@@ -322,265 +275,18 @@ func (b *Board) submitSessionStart() tea.Cmd {
 		b.sessionStart.err = "作業ディレクトリを入力するか候補から選ぶ"
 		return nil
 	}
-
-	taskID, title, prompt := s.taskID, s.title, s.prompt.Value()
-
-	b.launch.opID++
-	opID := b.launch.opID
-	ctx, cancel := context.WithCancel(b.ctx)
-	b.launch.pending = true
-	b.launch.taskID = taskID
-	b.launch.ctx = ctx
-	b.launch.cancel = cancel
-
-	b.closeOverlay()
-	b.setStatus(fmt.Sprintf("#%d を起動中...", taskID), false)
-
-	return b.launchOrRecoverCmd(ctx, sessionStartMsg{opID: opID, taskID: taskID, cwd: cwd, title: title, prompt: prompt})
-}
-
-// sessionStartMsgIsCurrent reports whether msg still belongs to the one session-start operation
-// the board considers in flight. A stale message — superseded by cancellation, a newer launch, or
-// the target task disappearing — must be dropped before any of its payload, including the *File
-// it may carry, ever touches board state.
-func (b *Board) sessionStartMsgIsCurrent(msg sessionStartMsg) bool {
-	return b.launch.pending && msg.opID == b.launch.opID
-}
-
-// advanceSessionStart decides what happens next for one stage message, already known current by
-// the caller (Board.Update, its only call site): report and stop on any error, or move on to the
-// next stage.
-func (b *Board) advanceSessionStart(msg sessionStartMsg) tea.Cmd {
-	if msg.err != nil {
-		b.finishSessionStart(msg)
+	if b.deps.Launcher == nil {
+		b.sessionStart.err = "セッションを起動する経路が無い"
 		return nil
 	}
 
-	ctx := b.launch.ctx
-	switch msg.stage {
-	case "":
-		return b.startAgentCmd(ctx, msg)
-	case sessionStageStarted:
-		return b.waitAgentCmd(ctx, msg)
-	case sessionStageWaited:
-		return b.linkSessionCmd(ctx, msg)
-	case sessionStageLinked:
-		if msg.prompt == "" {
-			b.finishSessionStart(msg)
-			return nil
-		}
-		return b.sendPromptCmd(ctx, msg)
-	default: // sessionStagePrompted
-		b.finishSessionStart(msg)
-		return nil
+	if err := b.deps.Launcher.StartSession(s.taskID, cwd, s.prompt.Value()); err != nil {
+		// The board stays open: this failed before anything was created, so the status line is
+		// still the only place the user would ever see it.
+		b.closeOverlay()
+		return status(fmt.Sprintf("#%d の起動を開始できない: %v", s.taskID, err), true)
 	}
-}
-
-// launchOrRecoverCmd is the first step of a launch: look for a previous attempt's agent under this
-// task's name and either recover it — skipping tab and agent creation entirely — or create a fresh
-// tab, the same branch CLI's start takes (§4 of the design). Folding both checks into one Cmd keeps
-// advanceSessionStart's dispatch on stage=="" meaning exactly one thing (a fresh pane now exists
-// and startAgentCmd is next); the recovered case sets stage to sessionStageWaited itself, since
-// pane creation, agent start and session lookup are all already done for it.
-func (b *Board) launchOrRecoverCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd {
-	return func() tea.Msg {
-		agent, err := b.findReusableAgent(ctx, msg)
-		if err != nil {
-			// The error text itself already names the existing pane and what to do about it
-			// (findReusableAgent), so no separate hint is added on top.
-			msg.err = err
-			return msg
-		}
-		if agent != nil {
-			msg.paneID = agent.PaneID
-			msg.sessionID = agent.SessionID()
-			msg.stage = sessionStageWaited
-			msg.reused = true
-			return msg
-		}
-
-		tab, err := b.deps.Herdr.CreateTab(ctx, herdrc.TabSpec{Cwd: msg.cwd, Label: msg.title})
-		if err != nil {
-			// Nothing was created: report it, but there is no pane to point at.
-			msg.err = err
-			return msg
-		}
-		msg.paneID = tab.PaneID
-		return msg
-	}
-}
-
-// findReusableAgent mirrors the CLI's own findReusableAgent (internal/cli/start_cmd.go): nil, nil
-// means no previous attempt exists — including when herdr could not even be asked, since
-// CreateTab/StartAgent right after hit the same unreachable herdr and are what actually report it —
-// and the caller should start fresh. A non-nil error means an agent does exist but launching now
-// would be wrong (already linked to this task, stuck at a different cwd, or not usable yet).
-func (b *Board) findReusableAgent(ctx context.Context, msg sessionStartMsg) (*herdrc.Agent, error) {
-	snapshot, err := b.deps.Herdr.Snapshot(ctx)
-	if err != nil {
-		return nil, nil
-	}
-	agent, ok := snapshot.AgentByName(fmt.Sprintf("taskherd-%d", msg.taskID))
-	if !ok {
-		return nil, nil
-	}
-
-	if !agentIsUsable(agent) {
-		return nil, fmt.Errorf(
-			"#%d の前回の起動が pane %s に残っている（まだ使える状態ではない）。pane を確認する",
-			msg.taskID, agent.PaneID)
-	}
-	sessionID := agent.SessionID()
-	if file, loadErr := b.deps.Tasks.Load(); loadErr == nil {
-		if task, taskErr := file.Task(msg.taskID); taskErr == nil {
-			if _, linked := task.Session(sessionID); linked {
-				return nil, fmt.Errorf("#%d は既にこのセッションに紐づいている。detail から jump する", msg.taskID)
-			}
-		}
-	}
-	if strings.TrimSpace(agent.Cwd) != strings.TrimSpace(msg.cwd) {
-		return nil, fmt.Errorf(
-			"#%d の前回の起動が別の cwd（%s）の pane %s で動いている。詳細モーダルからそちらに紐づけるか、"+
-				"CLI の taskherd start %d --new --cwd %s で新しく起こす",
-			msg.taskID, agent.Cwd, agent.PaneID, msg.taskID, msg.cwd)
-	}
-	return agent, nil
-}
-
-// agentIsUsable mirrors the CLI's own helper of the same name (internal/cli/start_cmd.go): agent has
-// a session id and is not stuck waiting for input.
-func agentIsUsable(agent *herdrc.Agent) bool {
-	return agent.SessionID() != "" && agent.AgentStatus != herdrc.StateBlocked
-}
-
-func (b *Board) startAgentCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd {
-	return func() tea.Msg {
-		result, err := b.deps.Herdr.StartAgent(ctx, herdrc.AgentSpec{
-			Name:   fmt.Sprintf("taskherd-%d", msg.taskID),
-			Kind:   resumeAgent,
-			PaneID: msg.paneID,
-		})
-		if err != nil {
-			msg.err = err
-			msg.hint = fmt.Sprintf("pane %s を確認する（起動に失敗した）", msg.paneID)
-			return msg
-		}
-		msg.paneID = result.PaneID
-		msg.stage = sessionStageStarted
-		if result.NeedsAttention {
-			msg.err = fmt.Errorf("起動直後に入力待ちになっている（%s）", result.Code)
-			msg.hint = fmt.Sprintf("pane %s を開いて応答してから、詳細モーダルの ＋セッションを紐づける で後から紐づける", result.PaneID)
-		}
-		return msg
-	}
-}
-
-func (b *Board) waitAgentCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd {
-	return func() tea.Msg {
-		agent, err := b.deps.Herdr.WaitForAgentSession(ctx, msg.paneID, sessionStartWaitTimeout)
-		if err != nil {
-			msg.err = err
-			msg.hint = fmt.Sprintf("pane %s を確認し、詳細モーダルの ＋セッションを紐づける で後から紐づける", msg.paneID)
-			return msg
-		}
-		sessionID := agent.SessionID()
-		if sessionID == "" {
-			// See the CLI's own startSession for why blocked gets its own message (start_cmd.go).
-			if agent.AgentStatus == herdrc.StateBlocked {
-				msg.err = errors.New("入力待ちで止まっている（trust-folder の確認など）")
-			} else {
-				msg.err = errors.New("herdr がセッション id を報告しなかった")
-			}
-			msg.hint = fmt.Sprintf("pane %s を確認し、詳細モーダルの ＋セッションを紐づける で後から紐づける", msg.paneID)
-			return msg
-		}
-		msg.sessionID = sessionID
-		msg.stage = sessionStageWaited
-		return msg
-	}
-}
-
-// linkSessionCmd saves the session through the store's own Update, the same path session link and
-// the detail modal's add-session use: the task is re-read from disk under the lock rather than
-// from whatever the board is holding, so a change made elsewhere while the launch was in flight
-// (StartAgent and WaitForAgentState together can run for well over a minute) is not overwritten.
-func (b *Board) linkSessionCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd {
-	return func() tea.Msg {
-		now := b.deps.now()
-		err := b.deps.Tasks.Update(ctx, func(f *model.File) error {
-			t, err := f.Task(msg.taskID)
-			if err != nil {
-				return err
-			}
-			_, err = t.AddSession(model.SessionRef{Agent: resumeAgent, SessionID: msg.sessionID, Cwd: msg.cwd}, now)
-			return err
-		})
-		if err != nil {
-			msg.err = err
-			msg.hint = fmt.Sprintf("pane %s / session %s を詳細モーダルの ＋セッションを紐づける で手動で紐づける", msg.paneID, msg.sessionID)
-			return msg
-		}
-		if file, loadErr := b.deps.Tasks.Load(); loadErr == nil {
-			msg.file = file
-		}
-		// Best-effort, same as the existing jump / session link paths: a failed stamp is only a
-		// missing convenience in herdr's own UI, never a reason to fail the launch.
-		_ = b.deps.Herdr.ReportTaskDisplay(ctx, msg.paneID, msg.taskID, msg.title)
-		msg.stage = sessionStageLinked
-		return msg
-	}
-}
-
-func (b *Board) sendPromptCmd(ctx context.Context, msg sessionStartMsg) tea.Cmd {
-	return func() tea.Msg {
-		if err := b.deps.Herdr.SendAgentPrompt(ctx, msg.paneID, msg.prompt); err != nil {
-			msg.err = err
-			msg.hint = "起動と紐づけは済んでいる。プロンプトの送信だけ失敗した"
-			return msg
-		}
-		msg.stage = sessionStagePrompted
-		return msg
-	}
-}
-
-// finishSessionStart ends the operation, successfully or not, and releases its context: this is
-// one of the four points (success, any error, Esc, target task gone) that must all cancel it.
-func (b *Board) finishSessionStart(msg sessionStartMsg) {
-	b.launch.pending = false
-	if b.launch.cancel != nil {
-		b.launch.cancel()
-	}
-	b.launch.cancel = nil
-
-	if msg.err == nil {
-		if msg.reused {
-			b.setStatus(fmt.Sprintf("#%d を前回の pane %s に紐づけた", msg.taskID, msg.paneID), false)
-			return
-		}
-		b.setStatus(fmt.Sprintf("#%d を pane %s で起動した", msg.taskID, msg.paneID), false)
-		return
-	}
-	text := fmt.Sprintf("#%d の起動でエラー: %v", msg.taskID, msg.err)
-	if msg.hint != "" {
-		text += "（" + msg.hint + "）"
-	}
-	b.setStatus(text, true)
-}
-
-// cancelSessionStart stops the in-flight operation from outside its own stage chain: Esc on the
-// board, or the target task disappearing out from under it.
-func (b *Board) cancelSessionStart(reason string) {
-	if !b.launch.pending {
-		return
-	}
-	if b.launch.cancel != nil {
-		b.launch.cancel()
-	}
-	b.launch.pending = false
-	b.launch.cancel = nil
-	if reason != "" {
-		b.setStatus(reason, true)
-	}
+	return tea.Quit
 }
 
 func (b *Board) renderSessionStart() string {

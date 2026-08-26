@@ -113,25 +113,12 @@ func (f *fakeSessions) Updates() <-chan herdrc.Update { return f.updates }
 func (f *fakeSessions) Close()                        { f.closed = true }
 
 type fakeHerdr struct {
-	focused     []string
-	tabs        []herdrc.TabSpec
-	started     []herdrc.AgentSpec
-	waited      []string
-	prompts     []promptCall
-	tokens      []tokenStamp
-	focusErr    error
-	startResult herdrc.StartResult
-	waitResult  herdrc.Agent
-	waitErr     error
-	promptErr   error
+	focused  []string
+	tokens   []tokenStamp
+	focusErr error
 	// snapshot is what Snapshot answers with; nil means an empty herdr.
 	snapshot    *herdrc.Snapshot
 	snapshotErr error
-}
-
-type promptCall struct {
-	PaneID string
-	Text   string
 }
 
 type tokenStamp struct {
@@ -158,55 +145,44 @@ func (f *fakeHerdr) FocusAgent(_ context.Context, paneID string) error {
 	return nil
 }
 
-// Every method below checks ctx.Err() before doing anything else, the same way the real
-// execRunner's exec.CommandContext behaves when handed a context that is already done: the call
-// fails outright and nothing is recorded. Without this a test would have no way to tell a
-// cancelled context from a live one — the whole point of the ctx parameter would be decorative.
-func (f *fakeHerdr) CreateTab(ctx context.Context, spec herdrc.TabSpec) (herdrc.Tab, error) {
-	if err := ctx.Err(); err != nil {
-		return herdrc.Tab{}, err
-	}
-	f.tabs = append(f.tabs, spec)
-	return herdrc.Tab{TabID: "tab-1", PaneID: "pane-new", Cwd: spec.Cwd}, nil
-}
-
-func (f *fakeHerdr) StartAgent(ctx context.Context, spec herdrc.AgentSpec) (herdrc.StartResult, error) {
-	if err := ctx.Err(); err != nil {
-		return herdrc.StartResult{}, err
-	}
-	f.started = append(f.started, spec)
-	result := f.startResult
-	if result.PaneID == "" {
-		result.PaneID = spec.PaneID
-	}
-	return result, nil
-}
-
-func (f *fakeHerdr) WaitForAgentSession(ctx context.Context, paneID string, _ time.Duration) (herdrc.Agent, error) {
-	if err := ctx.Err(); err != nil {
-		return herdrc.Agent{}, err
-	}
-	f.waited = append(f.waited, paneID)
-	if f.waitErr != nil {
-		return herdrc.Agent{}, f.waitErr
-	}
-	result := f.waitResult
-	if result.PaneID == "" {
-		result.PaneID = paneID
-	}
-	return result, nil
-}
-
-func (f *fakeHerdr) SendAgentPrompt(ctx context.Context, paneID, text string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	f.prompts = append(f.prompts, promptCall{PaneID: paneID, Text: text})
-	return f.promptErr
-}
-
 func (f *fakeHerdr) ReportTaskDisplay(_ context.Context, paneID string, taskID int, title string) error {
 	f.tokens = append(f.tokens, tokenStamp{paneID: paneID, taskID: taskID, title: title})
+	return nil
+}
+
+// fakeLauncher records what the board handed off instead of doing itself. Both methods return as
+// soon as they are called, which is what the real one does too: a detached launch reports through
+// its own log, never back to the board.
+type fakeLauncher struct {
+	starts  []startCall
+	resumes []resumeCall
+	err     error
+}
+
+type startCall struct {
+	taskID int
+	cwd    string
+	prompt string
+}
+
+type resumeCall struct {
+	taskID    int
+	sessionID string
+}
+
+func (f *fakeLauncher) StartSession(taskID int, cwd, prompt string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.starts = append(f.starts, startCall{taskID: taskID, cwd: cwd, prompt: prompt})
+	return nil
+}
+
+func (f *fakeLauncher) ResumeSession(taskID int, sessionID string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.resumes = append(f.resumes, resumeCall{taskID: taskID, sessionID: sessionID})
 	return nil
 }
 
@@ -251,6 +227,9 @@ type harness struct {
 	t     *testing.T
 	board *Board
 	store *fakeStore
+	// quit records that a command asked the program to exit. The board closes itself after
+	// handing work to a pane, so several tests turn on this having happened.
+	quit bool
 }
 
 func newHarness(t *testing.T, deps Deps, settings Settings) *harness {
@@ -332,6 +311,7 @@ func (h *harness) run(cmd tea.Cmd) {
 			h.run(inner)
 		}
 	case tea.QuitMsg:
+		h.quit = true
 		return
 	default:
 		h.run(h.dispatch(msg))

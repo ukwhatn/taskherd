@@ -181,7 +181,7 @@ func boardWithSessionStart(t *testing.T, mode IconMode) *harness {
 			Sessions: []model.SessionRef{{Agent: "claude", SessionID: "s-1", Cwd: "/tmp/existing", LinkedAt: "2026-08-20T10:00:00+09:00"}}},
 		{ID: 2, Title: "task without a session yet", Status: "working"},
 	}
-	h := newHarness(t, Deps{Tasks: newFakeStore(tasks...), Herdr: &fakeHerdr{}},
+	h := newHarness(t, Deps{Tasks: newFakeStore(tasks...), Herdr: &fakeHerdr{}, Launcher: &fakeLauncher{}},
 		Settings{Columns: model.DefaultColumns(), Icons: mode, Classifier: testClassifier})
 	h.key("right") // todo -> planning
 	h.key("right") // planning -> working, selecting the task with no session

@@ -26,10 +26,12 @@ func Run(ctx context.Context, deps Deps, settings Settings) error {
 
 	// Derived rather than passed straight through: cobra's own context lives until the process
 	// exits, so without a cancel here anything the board still has in flight when the user quits
-	// — the wait step of a session-start launch, most visibly — keeps running past the point where
-	// nothing is left to report its result to. Every per-operation context the board creates is
-	// derived from this one (Board.ctx, in turn Board.launch.ctx), so cancelling it here reaches
-	// all of them without each cancellation path having to call its own cancel explicitly.
+	// keeps running past the point where nothing is left to report its result to. Every herdr call
+	// the board makes is derived from this one (Board.ctx), so cancelling it here reaches all of
+	// them without each path having to call its own cancel explicitly.
+	//
+	// A detached launch is deliberately outside this: it is a separate process in a session of its
+	// own (internal/cli/launcher.go), and outliving the board is the whole point of it.
 	boardCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

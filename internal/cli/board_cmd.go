@@ -68,6 +68,9 @@ func (a *app) boardDeps(ctx context.Context, cfg *config.Config) tui.Deps {
 	if watcher, err := a.tasks().Watch(); err == nil {
 		deps.Files = watcher
 	}
+	if launcher, err := newDetachedLauncher(a.env.Paths.StateDir, a.env.Now); err == nil {
+		deps.Launcher = launcher
+	}
 	client := a.herdr()
 	deps.Herdr = client
 	deps.Sessions = client.Watch(ctx)

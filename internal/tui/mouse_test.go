@@ -140,7 +140,11 @@ func TestMouseIgnoredOutsideBoardMode(t *testing.T) {
 		{
 			name: "session-start",
 			open: func(t *testing.T) *harness {
-				h := newHarness(t, Deps{Tasks: newFakeStore(task(1, "todo"), task(2, "todo")), Herdr: &fakeHerdr{}}, Settings{})
+				h := newHarness(t, Deps{
+					Tasks:    newFakeStore(task(1, "todo"), task(2, "todo")),
+					Herdr:    &fakeHerdr{},
+					Launcher: &fakeLauncher{},
+				}, Settings{})
 				h.key("g")
 				return h
 			},
