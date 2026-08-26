@@ -374,7 +374,10 @@ func (a *app) jumpTo(ctx context.Context, task *model.Task, target *model.Sessio
 		}
 	}
 
-	tab, err := client.CreateTab(ctx, herdrc.TabSpec{Cwd: target.Cwd, Label: task.Title})
+	// Focused as it is created, matching the live-pane branch above: jump means "take me there"
+	// either way, and a resumed session left in a background tab would be the one case where it
+	// silently does not.
+	tab, err := client.CreateTab(ctx, herdrc.TabSpec{Cwd: target.Cwd, Label: task.Title, Focus: true})
 	if err != nil {
 		return err
 	}

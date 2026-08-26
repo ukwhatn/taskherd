@@ -218,9 +218,12 @@ board の `g` は起動そのものを実行しない。`taskherd start <id> --c
 
 board 自身は herdr の overlay pane であり、起動したタブを見に行くために閉じられる。一方、pane 作成から紐づけ・プロンプト送信までは agent が入力可能になるまでの待ちと、claude の integration hook がセッション id を報告するまでの待ちで **30 秒前後かかる**。board の中で走らせると、その途中で board が閉じられた時点で紐づけもプロンプト送信も失われる（pane と agent だけが残る）。切り離しているのはこのため。
 
+- **起こした pane へは即座に移動する**（`tab create --focus`）。agent の起動やセッション id の検出を待たないので、board が閉じたあと 1 秒ほどで新しいタブに着地する。前回の pane を回収した場合は `agent focus` でそこへ移る
 - 起動の出力は `$XDG_STATE_HOME/taskherd/detached.log`（既定 `~/.local/state/taskherd/detached.log`）に追記される
 - 失敗したときは herdr の通知に理由が出る。pane はそのまま残るので、詳細モーダルの ＋セッションを紐づける から手動で追いつくか、もう一度 `g` を押して前回の pane を回収できる
 - 生存している pane への jump だけは board の中で実行する（`agent focus` 1 回で終わるため）。成功したら board は閉じる
+
+`taskherd start` を手で叩くときも既定で移動する。背景で起こしたい（今の作業から離れたくない）ときは `--no-focus` を付ける。
 
 ### herdr integration の更新
 
@@ -243,7 +246,7 @@ herdr integration install claude
 | `taskherd link <id> <url> [--note N]` / `taskherd unlink <id> <url>` | 外部リンクの付け外し |
 | `taskherd session link <id> [--current\|--session-id UUID\|--pane PANE_ID]` | エージェントセッションを紐づける |
 | `taskherd jump <id> [--session UUID]` | 紐づいたセッションへ移動する（消滅していれば resume 起動） |
-| `taskherd start <id> [--cwd PATH] [--prompt TEXT] [--new]` | 新しいエージェントセッションを起こし、紐づける（cwd 候補が定まらなければ `--cwd` が必須）。前回の起動が同名で残っていれば回収する（`--new` で無視して新しく起こす） |
+| `taskherd start <id> [--cwd PATH] [--prompt TEXT] [--new] [--no-focus]` | 新しいエージェントセッションを起こし、紐づける（cwd 候補が定まらなければ `--cwd` が必須）。前回の起動が同名で残っていれば回収する（`--new` で無視して新しく起こす）。起こした pane へ移動する（`--no-focus` で移動しない） |
 | `taskherd refresh [<id>] [--all]` | リンクのライブ状態を即時取得する |
 | `taskherd board` | kanban ボード（TUI）を開く |
 | `taskherd rm <id> [--yes]` | タスクを削除する |
