@@ -22,6 +22,7 @@ type CLI struct {
 	Board   CLIBoard
 	Plugin  CLIPlugin
 	Picker  CLIPicker
+	Version CLIVersion
 }
 
 // CLIRoot is the root command plus everything shared between subcommands.
@@ -276,6 +277,11 @@ type CLIRefresh struct {
 	FailedSuffix  string
 	GitHubLimited string
 	JiraLimited   string
+}
+
+// CLIVersion is the version command.
+type CLIVersion struct {
+	Short string
 }
 
 // CLIConfig covers config path / init.

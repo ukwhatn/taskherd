@@ -1,0 +1,62 @@
+version: 2
+
+project_name: taskherd
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/taskherd
+    binary: taskherd
+    env:
+      - CGO_ENABLED=0
+    # taskherd runs inside a terminal multiplexer on a Unix host; there is no Windows story to
+    # build for.
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -X github.com/ukwhatn/taskherd/internal/buildinfo.Version={{ .Version }}
+      - -X github.com/ukwhatn/taskherd/internal/buildinfo.Commit={{ .FullCommit }}
+      - -X github.com/ukwhatn/taskherd/internal/buildinfo.Date={{ .CommitDate }}
+
+archives:
+  - formats: [tar.gz]
+    # The version is deliberately left out of the name: install.sh and `taskherd update` both build
+    # this URL from a tag they already have, and a name that does not repeat the tag keeps that a
+    # string concatenation rather than a parse of the release payload.
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^merge:"
+
+release:
+  draft: false
+  # A tag carrying a prerelease part is published as one, which keeps it out of
+  # /releases/latest — the endpoint `taskherd update` asks.
+  prerelease: auto
+  footer: |
+    ## Install
+
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/ukwhatn/taskherd/main/install.sh | sh
+    ```
+
+    Already installed? `taskherd update`.

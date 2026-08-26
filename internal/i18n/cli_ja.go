@@ -254,6 +254,9 @@ var cliJA = CLI{
 		GitHubLimited: "GitHub のレート制限のため残りの取得を中断しました",
 		JiraLimited:   "Jira のレート制限のため残りの取得を中断しました",
 	},
+	Version: CLIVersion{
+		Short: "バージョンを表示する",
+	},
 	Config: CLIConfig{
 		Short:     "設定ファイルとデータファイルを扱う",
 		PathShort: "config・データファイルのパスを表示する",
