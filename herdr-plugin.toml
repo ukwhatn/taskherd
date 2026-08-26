@@ -1,12 +1,12 @@
 id = "taskherd"
 name = "Taskherd"
-version = "0.2.0"
+version = "1.0.0"
 min_herdr_version = "0.8.0"
 description = "Task board linked to herdr agent sessions, PRs, and Jira tickets"
 platforms = ["macos", "linux"]
 
 [[build]]
-command = ["go", "build", "-o", "bin/taskherd", "./cmd/taskherd"]
+command = ["sh", "scripts/plugin-build.sh"]
 
 [[panes]]
 id = "board"

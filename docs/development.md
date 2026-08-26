@@ -57,7 +57,14 @@ network and no real task, repository or ticket can end up in a published image. 
 ## Releasing
 
 A tag starting with `v` triggers `.github/workflows/release.yml`, which runs the tests and then
-GoReleaser. Check the config before tagging:
+GoReleaser.
+
+`herdr-plugin.toml`'s `version` has to match the tag, because the plugin's build step downloads the
+release that version names; the workflow refuses to publish otherwise. Bump the manifest in the
+commit you tag, and tag it as soon as that lands — between the bump reaching `main` and the release
+existing, `herdr plugin install` has nothing to download.
+
+Check the config before tagging:
 
 ```sh
 goreleaser check

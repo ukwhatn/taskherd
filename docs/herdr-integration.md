@@ -11,10 +11,13 @@ Requires herdr 0.8.0 or newer.
 herdr plugin install ukwhatn/taskherd
 ```
 
-The manifest's `[[build]]` runs `go build`, so **a Go toolchain has to be on the installing
-machine**. A failed build aborts the install and registers nothing.
+Nothing gets compiled: the manifest's `[[build]]` downloads the release matching the version it
+declares, checks its sha256, and puts it at `bin/taskherd`. A failure there aborts the install and
+registers nothing, so a plugin herdr lists is one whose binary is the release it says it is.
 
-To try local changes, use `plugin link` instead. It does not build, so build first:
+herdr has no `plugin update` — reinstalling is how a managed plugin moves to a newer release.
+
+To try local changes, use `plugin link` instead. It runs no build commands, so build first:
 
 ```sh
 go build -o bin/taskherd ./cmd/taskherd
