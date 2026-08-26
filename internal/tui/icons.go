@@ -220,8 +220,11 @@ var noneIcons = IconSet{
 	SessionIdle:    "",
 	SessionOffline: "",
 
-	ScrollUp:        "上",
-	ScrollDown:      "下",
+	// Spelled the same way as the arrow names below: this mode replaces glyphs with the direction's
+	// name, and one direction named in Japanese while the four beside it were named in English was
+	// an oversight rather than a choice.
+	ScrollUp:        "up",
+	ScrollDown:      "down",
 	Cursor:          ">",
 	Collapsed:       ">",
 	CardEdge:        "|",
@@ -304,14 +307,16 @@ func (s IconSet) linkGlyph(kind model.LinkKind, phase linkPhase) string {
 }
 
 // failureMark says that refreshing a link is failing, and for how long. The nerd glyph carries the
-// meaning by itself; the other modes have no glyph that does, so they spell the word out.
-func (s IconSet) failureMark(age string) string {
+// meaning by itself; the other modes have no glyph that does, so they spell the word out — failed
+// is passed in rather than read from a catalog here, because an icon set knows about glyphs and
+// nothing about language.
+func (s IconSet) failureMark(failed, age string) string {
 	parts := make([]string, 0, 3)
 	if s.Alert != "" {
 		parts = append(parts, s.Alert)
 	}
 	if s.Mode != IconNerd {
-		parts = append(parts, "失敗")
+		parts = append(parts, failed)
 	}
 	if age != "" {
 		parts = append(parts, age)

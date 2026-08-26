@@ -7,6 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/ukwhatn/taskherd/internal/fetch"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -56,12 +57,17 @@ type Segment struct {
 // CardStyle is the presentation a card is built with: which glyph vocabulary to draw, how to read
 // a link URL, and how many link rows a card may spend.
 type CardStyle struct {
-	Icons      IconSet
+	Icons IconSet
+	// Text is the language the rows are worded in. Nil falls back to the default catalog.
+	Text       *i18n.Catalog
 	Classifier model.URLClassifier
 	// MaxLinks caps the link rows before the rest fold into one summary row. Zero means the
 	// default, maxCardLinkRows.
 	MaxLinks int
 }
+
+// text is the catalog the rows are worded from, never nil.
+func (s CardStyle) text() *i18n.Catalog { return catalogOrDefault(s.Text) }
 
 // Card is the text of one card, split so the view can style each part independently.
 type Card struct {

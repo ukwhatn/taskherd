@@ -9,13 +9,13 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
 // detailHelp is the modal's key list, with the arrow keys named by the icon set in use.
 func (b *Board) detailHelp() string {
-	return fmt.Sprintf("%s 項目  enter 編集  %s ステータス  delete 解除  g jump  r 取得  q 閉じる",
-		b.icons.verticalKeys(), b.icons.horizontalKeys())
+	return fmt.Sprintf(b.text.Detail.Help, b.icons.verticalKeys(), b.icons.horizontalKeys())
 }
 
 // detailItemKind is what one row of the detail modal stands for.
@@ -106,23 +106,23 @@ func (b *Board) detailItems(task model.Task) []detailItem {
 	if col, ok := b.settings.Columns.Find(task.Status); ok {
 		statusLabel = col.Label
 	}
-	due := "(なし)"
+	due := b.text.Common.None
 	if task.Due != nil {
 		due = string(*task.Due)
 		if isOverdue(*task.Due, b.deps.now()) {
-			due += " 超過"
+			due += b.text.Detail.Overdue
 		}
 	}
-	note := "(なし)"
+	note := b.text.Common.None
 	if task.Note != "" {
-		note = fmt.Sprintf("%d 行", len(strings.Split(task.Note, "\n")))
+		note = fmt.Sprintf(b.text.Detail.NoteLines, len(strings.Split(task.Note, "\n")))
 	}
 
 	items := []detailItem{
-		{kind: itemTitle, label: "タイトル", value: task.Title},
-		{kind: itemStatus, label: "ステータス", value: fmt.Sprintf("%s (%s)", statusLabel, task.Status)},
-		{kind: itemDue, label: "期限", value: due},
-		{kind: itemNote, label: "note", value: note},
+		{kind: itemTitle, label: b.text.Detail.LabelTitle, value: task.Title},
+		{kind: itemStatus, label: b.text.Detail.LabelStatus, value: fmt.Sprintf("%s (%s)", statusLabel, task.Status)},
+		{kind: itemDue, label: b.text.Detail.LabelDue, value: due},
+		{kind: itemNote, label: b.text.Detail.LabelNote, value: note},
 	}
 
 	for _, link := range task.Links {
@@ -130,22 +130,22 @@ func (b *Board) detailItems(task model.Task) []detailItem {
 		if link.Note != "" {
 			value += "  - " + link.Note
 		}
-		items = append(items, detailItem{kind: itemLink, ref: link.URL, label: "リンク", value: value})
+		items = append(items, detailItem{kind: itemLink, ref: link.URL, label: b.text.Detail.LabelLink, value: value})
 	}
-	items = append(items, detailItem{kind: itemAddLink, label: "リンク", value: "＋リンクを追加"})
+	items = append(items, detailItem{kind: itemAddLink, label: b.text.Detail.LabelLink, value: b.text.Detail.AddLink})
 
 	for _, session := range task.Sessions {
 		items = append(items, detailItem{
 			kind:  itemSession,
 			ref:   session.SessionID,
-			label: "セッション",
+			label: b.text.Detail.LabelSession,
 			value: b.sessionRow(session),
 		})
 	}
-	sessionAdd := detailItem{kind: itemAddSession, label: "セッション", value: "＋セッションを紐づける"}
+	sessionAdd := detailItem{kind: itemAddSession, label: b.text.Detail.LabelSession, value: b.text.Detail.AddSession}
 	if b.deps.Herdr == nil || !b.sessions.Available {
 		sessionAdd.disabled = true
-		sessionAdd.value += "（herdr 不達）"
+		sessionAdd.value += b.text.Detail.HerdrSuffix
 	}
 	items = append(items, sessionAdd)
 
@@ -237,7 +237,7 @@ func (b *Board) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (b *Board) shiftStatus(task model.Task, delta int) tea.Cmd {
 	targets := selectableColumns(b.columns)
 	if len(targets) == 0 {
-		return status("列が定義されていない", true)
+		return status(b.text.Common.NoColumns, true)
 	}
 	idx := statusIndex(targets, task.Status)
 	if idx < 0 {
@@ -270,7 +270,7 @@ func (b *Board) activateDetailItem(task model.Task, item detailItem) tea.Cmd {
 	case itemLink:
 		link, ok := linkByURL(task.Links, item.ref)
 		if !ok {
-			return status("リンクが見つからない", true)
+			return status(b.text.Detail.LinkNotFound, true)
 		}
 		b.beginDetailEdit(editLinkNote, link.URL, link.Note)
 	case itemAddLink:
@@ -278,7 +278,7 @@ func (b *Board) activateDetailItem(task model.Task, item detailItem) tea.Cmd {
 	case itemSession:
 		session, ok := task.Session(item.ref)
 		if !ok {
-			return status("セッションが見つからない", true)
+			return status(b.text.Detail.SessionNotFound, true)
 		}
 		return b.jumpTo(task.ID, task.Title, *session)
 	case itemAddSession:
@@ -292,19 +292,19 @@ func (b *Board) unlinkDetailItem(task model.Task, item detailItem) tea.Cmd {
 	case itemLink:
 		b.openConfirm(confirmState{
 			kind:   confirmUnlinkLink,
-			prompt: fmt.Sprintf("#%d から %s を解除する", task.ID, item.ref),
+			prompt: fmt.Sprintf(b.text.Detail.ConfirmRemoveLink, task.ID, item.ref),
 			taskID: task.ID,
 			ref:    item.ref,
 		})
 	case itemSession:
 		b.openConfirm(confirmState{
 			kind:   confirmUnlinkSession,
-			prompt: fmt.Sprintf("#%d から セッション %s を解除する", task.ID, shortID(item.ref)),
+			prompt: fmt.Sprintf(b.text.Detail.ConfirmDetachSession, task.ID, shortID(item.ref)),
 			taskID: task.ID,
 			ref:    item.ref,
 		})
 	default:
-		return status("この項目は delete で解除できない（リンク行・セッション行を選ぶ）", true)
+		return status(b.text.Detail.OnlyLinkOrSession, true)
 	}
 	return nil
 }
@@ -364,7 +364,7 @@ func (b *Board) submitDetailEdit(kind detailEditKind, ref, value string) tea.Cmd
 	case editLinkNote:
 		return b.setLinkNoteCmd(taskID, ref, value)
 	case editAddLink:
-		urls, err := parseLinkURLs(value)
+		urls, err := parseLinkURLs(b.text, value)
 		if err != nil {
 			return status(err.Error(), true)
 		}
@@ -411,7 +411,7 @@ func (b *Board) renderDetail(focused bool) string {
 
 	help := b.detailHelp()
 	if b.detail.editing {
-		help = "enter 確定 / esc 取消"
+		help = b.text.Detail.HelpEditing
 	}
 	return b.renderModal(modal{
 		title:   fmt.Sprintf("#%d %s", task.ID, task.Title),
@@ -431,7 +431,7 @@ func (b *Board) detailPromptLines(inner int) []string {
 	b.detail.input.SetWidth(inner - 2)
 	return []string{
 		"",
-		b.styles.prompt.Render(truncate(detailEditPrompt(b.detail.editKind), inner)),
+		b.styles.prompt.Render(truncate(detailEditPrompt(b.text, b.detail.editKind), inner)),
 		b.detail.input.View(),
 	}
 }
@@ -497,9 +497,10 @@ func (b *Board) decorateLinkRow(url string, room int) string {
 
 	if !state.Fetched {
 		if state.Err != "" {
-			return "  " + b.styles.segment(SegAlert).Render(truncate(b.icons.failureMark(failingAge(state)), room))
+			mark := b.icons.failureMark(b.text.Common.Failed, failingAge(state))
+			return "  " + b.styles.segment(SegAlert).Render(truncate(mark, room))
 		}
-		return "  " + b.styles.segment(SegMuted).Render(truncate("未取得", room))
+		return "  " + b.styles.segment(SegMuted).Render(truncate(b.text.Common.NotFetched, room))
 	}
 
 	// The marks are measured before the summary is trimmed, so a long PR title gives way to them
@@ -507,36 +508,39 @@ func (b *Board) decorateLinkRow(url string, room int) string {
 	// able to refresh it, outrank the title here.
 	var marks []Segment
 	if state.Stale {
-		marks = append(marks, Segment{Text: fmt.Sprintf("%s前 / TTL 超過", FormatAge(state.Age)), Kind: SegDim})
+		marks = append(marks, Segment{Text: fmt.Sprintf(b.text.Detail.StaleMark, FormatAge(state.Age)), Kind: SegDim})
 	}
 	if state.Err != "" {
-		marks = append(marks, Segment{Text: b.icons.failureMark(failingAge(state)), Kind: SegAlert})
+		marks = append(marks, Segment{Text: b.icons.failureMark(b.text.Common.Failed, failingAge(state)), Kind: SegAlert})
 	}
 	rendered, used := "", 0
 	for _, mark := range marks {
 		used += lipgloss.Width(mark.Text) + 1
 		rendered += " " + b.styles.segment(mark.Kind).Render(mark.Text)
 	}
-	return "  " + b.styles.segment(linkTone(state)).Render(truncate(DescribeLink(state), room-used)) + rendered
+	return "  " + b.styles.segment(linkTone(state)).Render(truncate(DescribeLink(b.text, state), room-used)) + rendered
 }
 
-func detailEditPrompt(kind detailEditKind) string {
+func detailEditPrompt(text *i18n.Catalog, kind detailEditKind) string {
 	switch kind {
 	case editTitle:
-		return "タイトル"
+		return text.Detail.PromptTitle
 	case editDue:
-		return "期限（YYYY-MM-DD。空で削除）"
+		return text.Detail.PromptDue
 	case editLinkNote:
-		return "リンクメモ（空で削除）"
+		return text.Detail.PromptLinkNote
 	case editAddLink:
-		return "追加するリンクの URL（空白・改行区切りで複数可）"
+		return text.Detail.PromptAddLink
 	default:
 		return ""
 	}
 }
 
 // DescribeLink spells out a fetched link's state in full, for the detail view and `show`.
-func DescribeLink(state fetch.LinkState) string {
+//
+// The state words themselves (open, draft, review=…) are GitHub's and Jira's own vocabulary and
+// stay as they are in every language; only the fallback for an unclassifiable state is translated.
+func DescribeLink(text *i18n.Catalog, state fetch.LinkState) string {
 	switch {
 	case state.GitHub != nil && state.Kind == model.LinkKindGitHubPR:
 		parts := []string{strings.ToLower(state.GitHub.State)}
@@ -555,7 +559,7 @@ func DescribeLink(state fetch.LinkState) string {
 	case state.Jira != nil:
 		return fmt.Sprintf("%s (%s)%s", state.Jira.StatusName, state.Jira.StatusCategory, titleSuffix(state.Jira.Summary))
 	default:
-		return "不明"
+		return catalogOrDefault(text).Common.Unknown
 	}
 }
 

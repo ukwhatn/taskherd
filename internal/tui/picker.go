@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -35,7 +37,9 @@ type PickerDeps struct {
 	Columns model.Columns
 	// Icons is the glyph vocabulary the popup draws with, shared with the board.
 	Icons IconMode
-	Now   func() time.Time
+	// Text is the language the popup draws in. Nil falls back to the default catalog.
+	Text *i18n.Catalog
+	Now  func() time.Time
 }
 
 func (d PickerDeps) now() time.Time {
@@ -48,15 +52,15 @@ func (d PickerDeps) now() time.Time {
 // RunPicker starts the picker popup and blocks until it links a task or the user cancels.
 func RunPicker(ctx context.Context, deps PickerDeps, targetPane string) error {
 	if deps.Tasks == nil {
-		return fmt.Errorf("タスクストアが設定されていない")
+		return errors.New("no task store is configured")
 	}
 	if targetPane == "" {
-		return fmt.Errorf("対象 pane が指定されていない")
+		return errors.New("no target pane was given")
 	}
 
 	program := tea.NewProgram(newPicker(ctx, deps, targetPane), tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
-		return fmt.Errorf("picker を実行できない: %w", err)
+		return fmt.Errorf("cannot run the picker: %w", err)
 	}
 	return nil
 }
@@ -69,6 +73,7 @@ type picker struct {
 	deps       PickerDeps
 	styles     styles
 	icons      IconSet
+	text       *i18n.Catalog
 	targetPane string
 
 	filter textinput.Model
@@ -90,7 +95,8 @@ type picker struct {
 
 func newPicker(ctx context.Context, deps PickerDeps, targetPane string) *picker {
 	filter := textinput.New()
-	filter.Prompt = "絞り込み: "
+	text := catalogOrDefault(deps.Text)
+	filter.Prompt = text.Picker.FilterPrompt
 	filter.Focus()
 
 	return &picker{
@@ -98,6 +104,7 @@ func newPicker(ctx context.Context, deps PickerDeps, targetPane string) *picker 
 		deps:       deps,
 		styles:     newStyles(),
 		icons:      Icons(deps.Icons),
+		text:       text,
 		targetPane: targetPane,
 		filter:     filter,
 		width:      60,
@@ -166,7 +173,7 @@ func (p *picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return p, nil
 		}
 		p.linked = true
-		p.status = fmt.Sprintf("#%d に紐づけた", msg.task.ID)
+		p.status = fmt.Sprintf(p.text.Picker.Attached, msg.task.ID)
 		return p, tea.Quit
 	}
 	return p, nil
@@ -258,19 +265,18 @@ func (p *picker) linkSelectedCmd() tea.Cmd {
 
 	return func() tea.Msg {
 		if p.deps.Herdr == nil {
-			return pickerLinkedMsg{err: fmt.Errorf("herdr に接続できない")}
+			return pickerLinkedMsg{err: errors.New(p.text.Common.HerdrUnreachable)}
 		}
 		snapshot, err := p.deps.Herdr.Snapshot(p.ctx)
 		if err != nil {
-			return pickerLinkedMsg{err: fmt.Errorf("herdr に接続できない: %w", err)}
+			return pickerLinkedMsg{err: fmt.Errorf(p.text.Picker.HerdrError, err)}
 		}
 		agent, ok := snapshot.AgentByPaneID(targetPane)
 		if !ok {
-			return pickerLinkedMsg{err: fmt.Errorf("pane %s でエージェントが検出されていない", targetPane)}
+			return pickerLinkedMsg{err: fmt.Errorf(p.text.Picker.NoAgent, targetPane)}
 		}
 		if agent.SessionID() == "" {
-			return pickerLinkedMsg{err: fmt.Errorf(
-				"pane %s ではセッション ID を検出できない。herdr integration install claude を実行して再試行する", targetPane)}
+			return pickerLinkedMsg{err: fmt.Errorf(p.text.Picker.NoSessionID, targetPane)}
 		}
 
 		ref := model.SessionRef{Agent: agent.Agent, SessionID: agent.SessionID(), Cwd: agent.Cwd}
@@ -320,7 +326,7 @@ func columnOrder(status string, columns model.Columns) int {
 func (p *picker) View() tea.View {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "%s\n", p.styles.heading.Render(fmt.Sprintf("pane %s をタスクに紐づける", p.targetPane)))
+	fmt.Fprintf(&b, "%s\n", p.styles.heading.Render(fmt.Sprintf(p.text.Picker.Title, p.targetPane)))
 	b.WriteString(p.filter.View())
 	b.WriteString("\n\n")
 
@@ -329,10 +335,10 @@ func (p *picker) View() tea.View {
 		b.WriteString(p.styles.alert.Render(p.loadErr.Error()))
 		b.WriteString("\n")
 	case !p.loaded:
-		b.WriteString(p.styles.dim.Render("読み込み中..."))
+		b.WriteString(p.styles.dim.Render(p.text.Picker.Loading))
 		b.WriteString("\n")
 	case len(p.filtered) == 0:
-		b.WriteString(p.styles.dim.Render("一致するタスクがない"))
+		b.WriteString(p.styles.dim.Render(p.text.Picker.NoMatch))
 		b.WriteString("\n")
 	default:
 		for i, idx := range p.filtered {
@@ -350,14 +356,14 @@ func (p *picker) View() tea.View {
 	b.WriteString("\n")
 	switch {
 	case p.linking:
-		b.WriteString(p.styles.dim.Render("紐づけ中..."))
+		b.WriteString(p.styles.dim.Render(p.text.Picker.Attaching))
 	case p.status != "" && p.isError:
 		b.WriteString(p.styles.alert.Render(p.status))
 	case p.status != "":
 		b.WriteString(p.styles.status.Render(p.status))
 	}
 	b.WriteString("\n")
-	b.WriteString(p.styles.footer.Render(fmt.Sprintf("%s 選択  enter 紐づけ  esc 中止", p.icons.verticalKeys())))
+	b.WriteString(p.styles.footer.Render(fmt.Sprintf(p.text.Picker.Help, p.icons.verticalKeys())))
 
 	return tea.NewView(b.String())
 }

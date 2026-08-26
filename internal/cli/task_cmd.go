@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/ukwhatn/taskherd/internal/fetch"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 	"github.com/ukwhatn/taskherd/internal/tui"
 )
@@ -191,7 +192,7 @@ func (a *app) showCmd() *cobra.Command {
 				})
 			}
 			live.note(a)
-			fmt.Fprint(a.env.Out, formatTaskDetail(task, cfg.Columns, live, links))
+			fmt.Fprint(a.env.Out, formatTaskDetail(a.text, task, cfg.Columns, live, links))
 			return nil
 		},
 	}
@@ -428,7 +429,7 @@ func sortTasks(tasks []model.Task, columns model.Columns) {
 
 // formatLinkState renders one link's cached live state. The value shown is always the last
 // success; a failing refresh is reported alongside it rather than replacing it.
-func formatLinkState(state fetch.LinkState) string {
+func formatLinkState(text *i18n.Catalog, state fetch.LinkState) string {
 	if !state.Fetched {
 		if state.Err != "" {
 			return "取得失敗: " + state.Err
@@ -436,7 +437,7 @@ func formatLinkState(state fetch.LinkState) string {
 		return "未取得（refresh で取得する）"
 	}
 
-	line := fmt.Sprintf("%s（%s前", tui.DescribeLink(state), tui.FormatAge(state.Age))
+	line := fmt.Sprintf("%s（%s前", tui.DescribeLink(text, state), tui.FormatAge(state.Age))
 	if state.Stale {
 		line += " / TTL 超過"
 	}
@@ -459,7 +460,7 @@ func formatTaskLine(task model.Task, badge string) string {
 	return fmt.Sprintf("#%-4d %-10s %-10s %-7s %-8s %s", task.ID, task.Status, due, counts, badge, task.Title)
 }
 
-func formatTaskDetail(task *model.Task, columns model.Columns, live liveState, links map[string]fetch.LinkState) string {
+func formatTaskDetail(text *i18n.Catalog, task *model.Task, columns model.Columns, live liveState, links map[string]fetch.LinkState) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#%d %s\n", task.ID, task.Title)
 
@@ -481,7 +482,7 @@ func formatTaskDetail(task *model.Task, columns model.Columns, live liveState, l
 			fmt.Fprintf(&b, "    note: %s\n", link.Note)
 		}
 		if state, ok := links[link.URL]; ok && state.Fetchable() {
-			fmt.Fprintf(&b, "    live: %s\n", formatLinkState(state))
+			fmt.Fprintf(&b, "    live: %s\n", formatLinkState(text, state))
 		}
 		fmt.Fprintf(&b, "    added: %s\n", link.AddedAt)
 	}

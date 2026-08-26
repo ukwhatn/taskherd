@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -50,6 +51,8 @@ type Board struct {
 	styles   styles
 
 	icons IconSet
+	// text is every word the board draws, in the language the settings resolved to.
+	text *i18n.Catalog
 
 	file     *model.File
 	sessions SessionStates
@@ -204,6 +207,7 @@ func New(ctx context.Context, deps Deps, settings Settings) *Board {
 		settings: settings,
 		styles:   newStyles(),
 		icons:    Icons(settings.Icons),
+		text:     catalogOrDefault(settings.Text),
 		file:     model.NewFile(),
 		cache:    &fetch.CacheFile{Version: 1, Entries: map[string]fetch.CacheEntry{}},
 		links:    map[string]fetch.LinkState{},
@@ -218,9 +222,18 @@ func New(ctx context.Context, deps Deps, settings Settings) *Board {
 	}
 }
 
+// catalogOrDefault keeps a nil catalog from reaching the render path, where every field read off
+// it would draw an empty string and the screen would lose its labels without failing.
+func catalogOrDefault(text *i18n.Catalog) *i18n.Catalog {
+	if text == nil {
+		return i18n.For(i18n.Default)
+	}
+	return text
+}
+
 // cardStyle is the presentation every card on this board is built with.
 func (b *Board) cardStyle() CardStyle {
-	return CardStyle{Icons: b.icons, Classifier: b.settings.Classifier}
+	return CardStyle{Icons: b.icons, Text: b.text, Classifier: b.settings.Classifier}
 }
 
 // linkText wraps a link row's text in OSC 8 when hyperlinks are enabled, so a terminal that
@@ -542,7 +555,7 @@ func (b *Board) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return b, b.runConfirm(state)
 	case "n", "q":
 		b.closeOverlay()
-		b.setStatus("中止した", false)
+		b.setStatus(b.text.Common.Cancelled, false)
 		return b, nil
 	}
 	return b, nil
@@ -567,7 +580,7 @@ func (b *Board) runConfirm(state confirmState) tea.Cmd {
 func (b *Board) openDetail() tea.Cmd {
 	task := b.currentTask()
 	if task == nil {
-		return status("カードが選択されていない", true)
+		return status(b.text.Common.NoCardSelected, true)
 	}
 	b.mode = modeDetail
 	b.detail = newDetailState(task.ID)
@@ -577,11 +590,11 @@ func (b *Board) openDetail() tea.Cmd {
 func (b *Board) beginDeleteTask() tea.Cmd {
 	task := b.currentTask()
 	if task == nil {
-		return status("カードが選択されていない", true)
+		return status(b.text.Common.NoCardSelected, true)
 	}
 	b.openConfirm(confirmState{
 		kind:   confirmDeleteTask,
-		prompt: fmt.Sprintf("#%d %s を削除する", task.ID, task.Title),
+		prompt: fmt.Sprintf(b.text.Board.ConfirmDelete, task.ID, task.Title),
 		taskID: task.ID,
 	})
 	return nil
@@ -833,14 +846,14 @@ func (b *Board) applyRefresh(msg refreshDoneMsg) tea.Cmd {
 	}
 	switch {
 	case interrupted:
-		b.setStatus(fmt.Sprintf("レート制限で中断した。次回取得を %s 後に延ばす", b.refreshInterval()), true)
+		b.setStatus(fmt.Sprintf(b.text.Board.RateLimited, b.refreshInterval()), true)
 	case failed > 0:
 		// The reason is included rather than just the count: a count alone is what let a run of
 		// wrong-account 404s look like ordinary noise for as long as it did.
-		b.setStatus(fmt.Sprintf("%d 件取得（%d 件失敗）: %s",
+		b.setStatus(fmt.Sprintf(b.text.Board.RefreshedSome,
 			len(msg.result.Outcomes)-failed, failed, firstFailureReason(msg.result)), true)
 	case msg.manual:
-		b.setStatus(fmt.Sprintf("%d 件取得した", len(msg.result.Outcomes)), false)
+		b.setStatus(fmt.Sprintf(b.text.Board.Refreshed, len(msg.result.Outcomes)), false)
 	}
 	return nil
 }
@@ -894,12 +907,12 @@ func (b *Board) applyEditor(msg editorDoneMsg) tea.Cmd {
 	}()
 
 	if msg.err != nil {
-		b.setStatus(fmt.Sprintf("エディタの起動に失敗した: %v", msg.err), true)
+		b.setStatus(fmt.Sprintf(b.text.Board.EditorFailed, msg.err), true)
 		return nil
 	}
 	data, err := os.ReadFile(msg.path)
 	if err != nil {
-		b.setStatus(fmt.Sprintf("編集結果を読めない: %v", err), true)
+		b.setStatus(fmt.Sprintf(b.text.Board.EditorReadFailed, err), true)
 		return nil
 	}
 	note := strings.TrimRight(string(data), "\n")
@@ -914,7 +927,7 @@ func (b *Board) applyEditor(msg editorDoneMsg) tea.Cmd {
 			task.SetNote(note, b.deps.now())
 			return nil
 		},
-		note: func() string { return fmt.Sprintf("#%d の note を更新した", taskID) },
+		note: func() string { return fmt.Sprintf(b.text.Board.NoteUpdated, taskID) },
 	})
 }
 
@@ -985,9 +998,9 @@ func (b *Board) addTasksCmd(titles []string, in model.TaskInput, urls []string) 
 		},
 		note: func() string {
 			if len(created) == 1 {
-				return fmt.Sprintf("#%d を %s に作成した", created[0], in.Status)
+				return fmt.Sprintf(b.text.Board.Created, created[0], in.Status)
 			}
-			return fmt.Sprintf("%d 件のタスクを %s に作成した", len(created), in.Status)
+			return fmt.Sprintf(b.text.Board.CreatedMany, len(created), in.Status)
 		},
 		focus: func() int {
 			if len(created) == 0 {
@@ -1027,9 +1040,9 @@ func (b *Board) addLinksCmd(taskID int, urls []string) tea.Cmd {
 		},
 		note: func() string {
 			if added == len(urls) {
-				return fmt.Sprintf("#%d に %d 件のリンクを追加した", taskID, added)
+				return fmt.Sprintf(b.text.Board.LinksAdded, taskID, added)
 			}
-			return fmt.Sprintf("#%d に %d 件のリンクを追加した（%d 件は登録済み）", taskID, added, len(urls)-added)
+			return fmt.Sprintf(b.text.Board.LinksAddedSome, taskID, added, len(urls)-added)
 		},
 		refresh: true,
 	})
@@ -1037,7 +1050,7 @@ func (b *Board) addLinksCmd(taskID int, urls []string) tea.Cmd {
 
 func (b *Board) setTitleCmd(taskID int, title string) tea.Cmd {
 	if strings.TrimSpace(title) == "" {
-		return status("タイトルは空にできない", true)
+		return status(b.text.Board.TitleEmpty, true)
 	}
 	now := b.deps.now()
 	return b.mutateCmd(mutation{
@@ -1048,7 +1061,7 @@ func (b *Board) setTitleCmd(taskID int, title string) tea.Cmd {
 			}
 			return target.SetTitle(title, now)
 		},
-		note: func() string { return fmt.Sprintf("#%d のタイトルを更新した", taskID) },
+		note: func() string { return fmt.Sprintf(b.text.Board.TitleUpdated, taskID) },
 	})
 }
 
@@ -1072,7 +1085,7 @@ func (b *Board) setDueCmd(taskID int, raw string) tea.Cmd {
 			target.SetDue(due, now)
 			return nil
 		},
-		note: func() string { return fmt.Sprintf("#%d の期日を更新した", taskID) },
+		note: func() string { return fmt.Sprintf(b.text.Board.DueUpdated, taskID) },
 	})
 }
 
@@ -1086,7 +1099,7 @@ func (b *Board) setStatusCmd(taskID int, statusID string) tea.Cmd {
 			}
 			return target.SetStatus(statusID, now)
 		},
-		note:  func() string { return fmt.Sprintf("#%d を %s へ移動した", taskID, statusID) },
+		note:  func() string { return fmt.Sprintf(b.text.Board.Moved, taskID, statusID) },
 		focus: func() int { return taskID },
 	})
 }
@@ -1101,7 +1114,7 @@ func (b *Board) setLinkNoteCmd(taskID int, url, note string) tea.Cmd {
 			}
 			return target.SetLinkNote(url, note, now)
 		},
-		note: func() string { return fmt.Sprintf("#%d のリンクメモを更新した", taskID) },
+		note: func() string { return fmt.Sprintf(b.text.Board.LinkNoteUpdated, taskID) },
 	})
 }
 
@@ -1111,7 +1124,7 @@ func (b *Board) deleteTaskCmd(taskID int) tea.Cmd {
 			_, err := f.RemoveTask(taskID)
 			return err
 		},
-		note: func() string { return fmt.Sprintf("#%d を削除した", taskID) },
+		note: func() string { return fmt.Sprintf(b.text.Board.Deleted, taskID) },
 	})
 }
 
@@ -1126,7 +1139,7 @@ func (b *Board) removeLinkCmd(taskID int, url string) tea.Cmd {
 			_, err = target.RemoveLink(url, now)
 			return err
 		},
-		note: func() string { return fmt.Sprintf("#%d のリンクを解除した", taskID) },
+		note: func() string { return fmt.Sprintf(b.text.Board.LinkRemoved, taskID) },
 	})
 }
 
@@ -1141,7 +1154,7 @@ func (b *Board) removeSessionCmd(taskID int, sessionID string) tea.Cmd {
 			_, err = target.RemoveSession(sessionID, now)
 			return err
 		},
-		note: func() string { return fmt.Sprintf("#%d のセッション紐づけを解除した", taskID) },
+		note: func() string { return fmt.Sprintf(b.text.Board.SessionDetached, taskID) },
 	})
 }
 
@@ -1156,7 +1169,7 @@ func (b *Board) addSessionCmd(taskID int, ref model.SessionRef) tea.Cmd {
 			_, err = target.AddSession(ref, now)
 			return err
 		},
-		note: func() string { return fmt.Sprintf("#%d に %s セッションを紐づけた", taskID, ref.Agent) },
+		note: func() string { return fmt.Sprintf(b.text.Board.SessionAttached, taskID, ref.Agent) },
 	})
 }
 
@@ -1164,11 +1177,11 @@ func (b *Board) addSessionCmd(taskID int, ref model.SessionRef) tea.Cmd {
 func (b *Board) editNoteCmd() tea.Cmd {
 	task := b.activeTask()
 	if task == nil {
-		return status("カードが選択されていない", true)
+		return status(b.text.Common.NoCardSelected, true)
 	}
 	editor := b.settings.Editor
 	if editor == "" {
-		return status("エディタが設定されていない（config.toml の editor / $VISUAL / $EDITOR）", true)
+		return status(b.text.Board.NoEditor, true)
 	}
 
 	path, err := writeTempNote(task.ID, task.Note)
@@ -1187,16 +1200,16 @@ func (b *Board) editNoteCmd() tea.Cmd {
 func writeTempNote(id int, note string) (string, error) {
 	tmp, err := os.CreateTemp("", fmt.Sprintf("taskherd-note-%d-*.md", id))
 	if err != nil {
-		return "", fmt.Errorf("一時ファイルを作れない: %w", err)
+		return "", fmt.Errorf("cannot create a temp file: %w", err)
 	}
 	if _, err := tmp.WriteString(note); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmp.Name())
-		return "", fmt.Errorf("一時ファイルに書けない: %w", err)
+		return "", fmt.Errorf("cannot write the temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmp.Name())
-		return "", fmt.Errorf("一時ファイルを閉じられない: %w", err)
+		return "", fmt.Errorf("cannot close the temp file: %w", err)
 	}
 	return tmp.Name(), nil
 }

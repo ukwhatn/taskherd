@@ -40,7 +40,7 @@ func TestDetailOpensAndReturns(t *testing.T) {
 		t.Fatalf("mode = %v, want modeDetail", h.board.mode)
 	}
 	view := h.board.render()
-	for _, want := range []string{"#1 設計", "タイトル", "ステータス", "詳細メモ", "＋リンクを追加", "＋セッションを紐づける"} {
+	for _, want := range []string{"#1 設計", ja.Detail.LabelTitle, ja.Detail.LabelStatus, "詳細メモ", ja.Detail.AddLink, ja.Detail.AddSession} {
 		if !strings.Contains(view, want) {
 			t.Errorf("詳細ビューに %q が無い:\n%s", want, view)
 		}

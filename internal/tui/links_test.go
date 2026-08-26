@@ -42,7 +42,7 @@ func TestParseLinkURLs(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseLinkURLs(tc.raw)
+			got, err := parseLinkURLs(ja, tc.raw)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("err = nil, want エラー（got = %v）", got)

@@ -14,6 +14,9 @@ const defaultPromptTemplate = `#{{id}} {{title}} に取り組んでほしい。
 const defaultFileContent = `# taskherd 設定ファイル
 # 生成: taskherd config init / パス上書き: 環境変数 TASKHERD_CONFIG
 
+# UI の言語。"ja" か "en"。環境変数 TASKHERD_LANG が一時的に優先する
+language = "ja"
+
 # note 編集に使うエディタ。解決順は editor > $VISUAL > $EDITOR
 # herdr プラグインの pane は shell を経由せず環境変数が届かないことがあるため、
 # board から note を編集するならここで指定しておくのが確実

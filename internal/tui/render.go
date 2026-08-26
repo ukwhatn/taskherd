@@ -22,8 +22,7 @@ const headerReserve = 2
 // boardHelp is the footer's key list. The arrow keys are named with the icon set's glyphs, so
 // the line stays readable in a terminal without a patched font.
 func (b *Board) boardHelp() string {
-	return fmt.Sprintf("%s 列  %s カード  tab 移行  enter 詳細  a 追加  delete 削除  g jump  r/R 取得  t 折り畳み  q 終了",
-		b.icons.horizontalKeys(), b.icons.verticalKeys())
+	return fmt.Sprintf(b.text.Board.Help, b.icons.horizontalKeys(), b.icons.verticalKeys())
 }
 
 // View renders the whole board. AltScreen is declared here rather than entered with a command,
@@ -69,11 +68,11 @@ func (b *Board) renderColumns(bodyHeight int) string {
 	// (it would let a click land on a card that is no longer drawn where it says).
 	b.cardRegions = b.cardRegions[:0]
 	if len(b.columns) == 0 {
-		return b.styles.dim.Render("列が定義されていない")
+		return b.styles.dim.Render(b.text.Common.NoColumns)
 	}
 	expanded, boardIndex := expandedColumns(b.columns)
 	if len(expanded) == 0 {
-		return b.styles.dim.Render(truncate("展開されている列がない（t で開く）", b.width))
+		return b.styles.dim.Render(truncate(b.text.Board.AllCollapsed, b.width))
 	}
 	collapsed := collapsedColumns(b.columns)
 
@@ -86,14 +85,14 @@ func (b *Board) renderColumns(bodyHeight int) string {
 	if len(layout.Widths) == 0 {
 		// Not even one column is readable at this width. The stack is dropped with them: it can be
 		// wider than the terminal on its own, and it says nothing without a board beside it.
-		return b.styles.dim.Render(truncate("端末が狭すぎて列を表示できない", b.width))
+		return b.styles.dim.Render(truncate(b.text.Board.TooNarrow, b.width))
 	}
 
 	// The sideways-scroll notice only appears when some column is off screen, and it costs the
 	// columns a line when it does. Folded columns are not scrolled to, so they are not counted.
 	notice := ""
 	if layout.Start > 0 || layout.End() < len(expanded) {
-		notice = b.styles.dim.Render(truncate(fmt.Sprintf("%s 列 %d-%d / %d（%s で移動）",
+		notice = b.styles.dim.Render(truncate(fmt.Sprintf(b.text.Board.ColumnWindow,
 			truncateMark, layout.Start+1, layout.End(), len(expanded), b.icons.horizontalKeys()), b.width))
 		bodyHeight--
 	}
@@ -212,7 +211,7 @@ func (b *Board) renderCards(col Column, focused bool, x, width, avail, clipHeigh
 }
 
 func (b *Board) overflowIndicator(arrow string, count, width int) string {
-	return padCell(b.styles.dim.Render(truncate(joinIcon(arrow, fmt.Sprintf("%d件", count)), width)), width)
+	return padCell(b.styles.dim.Render(truncate(joinIcon(arrow, fmt.Sprintf(b.text.Board.MoreCount, count)), width)), width)
 }
 
 // renderColumnHeader labels the column in its own color, with the card count beside it. The
@@ -319,7 +318,7 @@ func collapsedStackRow(col Column, inner int) string {
 // renderEmptyColumn draws the placeholder that stands in for a column with nothing in it, so the
 // column still reads as a column rather than as a gap in the board.
 func (b *Board) renderEmptyColumn(width int, m metrics) string {
-	return b.renderNoteBox("カードなし", width, m)
+	return b.renderNoteBox(b.text.Board.EmptyColumn, width, m)
 }
 
 // renderNoteBox draws one dim box holding a single line of text.
@@ -564,9 +563,9 @@ func (b *Board) renderJump() string {
 	}
 
 	return b.renderModal(modal{
-		title:   fmt.Sprintf("#%d の移動先セッション", b.jump.taskID),
+		title:   fmt.Sprintf(b.text.Jump.TargetTitle, b.jump.taskID),
 		body:    lines,
-		help:    fmt.Sprintf("%s 選択 / enter 決定 / q 閉じる", b.icons.verticalKeys()),
+		help:    fmt.Sprintf(b.text.Jump.TargetHelp, b.icons.verticalKeys()),
 		width:   width,
 		focused: true,
 	})
@@ -575,9 +574,9 @@ func (b *Board) renderJump() string {
 func (b *Board) renderConfirm() string {
 	width := b.modalWidth(lipgloss.Width(b.confirm.prompt) + boxChrome)
 	return b.renderModal(modal{
-		title:   "確認",
+		title:   b.text.Common.ConfirmTitle,
 		body:    []string{b.styles.alert.Render(truncate(b.confirm.prompt, modalInner(width)))},
-		help:    "y で実行 / n で中止",
+		help:    b.text.Common.ConfirmHelp,
 		width:   width,
 		focused: true,
 	})
@@ -621,11 +620,11 @@ func (b *Board) statusLine() string {
 func (b *Board) herdrFooter() string {
 	switch {
 	case b.deps.Sessions == nil:
-		return "無効"
+		return b.text.Board.HerdrDisabled
 	case !b.sessions.Available:
-		return "オフライン"
+		return b.text.Board.HerdrOffline
 	case b.lastHerdrSync.IsZero():
-		return "接続中"
+		return b.text.Board.HerdrConnecting
 	default:
 		return b.lastHerdrSync.Format("15:04:05")
 	}
@@ -634,13 +633,13 @@ func (b *Board) herdrFooter() string {
 func (b *Board) fetchFooter() string {
 	switch {
 	case b.fetching:
-		return "取得中"
+		return b.text.Board.LiveRefreshing
 	case b.lastFetch.IsZero():
-		return "未取得"
+		return b.text.Board.LiveNotFetched
 	default:
 		suffix := ""
 		if b.backoffSteps > 0 {
-			suffix = fmt.Sprintf(" (次回 %s後)", b.refreshInterval())
+			suffix = fmt.Sprintf(b.text.Board.NextRefresh, b.refreshInterval())
 		}
 		return b.lastFetch.Format("15:04:05") + suffix
 	}

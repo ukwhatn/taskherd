@@ -202,14 +202,14 @@ func (b *Board) refreshStaleCmd() tea.Cmd {
 // request, and the point of it is to bypass the cache.
 func (b *Board) refreshTaskCmd() tea.Cmd {
 	if b.deps.Links == nil {
-		return status("ライブ取得が無効になっている", true)
+		return status(b.text.Board.RefreshDisabled, true)
 	}
 	task := b.activeTask()
 	if task == nil {
-		return status("カードが選択されていない", true)
+		return status(b.text.Common.NoCardSelected, true)
 	}
 	if b.fetching {
-		return status("取得中", false)
+		return status(b.text.Board.Refreshing, false)
 	}
 
 	var urls []string
@@ -217,7 +217,7 @@ func (b *Board) refreshTaskCmd() tea.Cmd {
 		urls = append(urls, link.URL)
 	}
 	if len(urls) == 0 {
-		return status("このタスクにリンクがない", true)
+		return status(b.text.Board.TaskHasNoLinks, true)
 	}
 	b.fetching = true
 	return b.fetchCmd(urls, true)
@@ -225,10 +225,10 @@ func (b *Board) refreshTaskCmd() tea.Cmd {
 
 func (b *Board) refreshAllCmd() tea.Cmd {
 	if b.deps.Links == nil {
-		return status("ライブ取得が無効になっている", true)
+		return status(b.text.Board.RefreshDisabled, true)
 	}
 	if b.fetching {
-		return status("取得中", false)
+		return status(b.text.Board.Refreshing, false)
 	}
 
 	var urls []string
@@ -241,7 +241,7 @@ func (b *Board) refreshAllCmd() tea.Cmd {
 		urls = append(urls, link.URL)
 	}
 	if len(urls) == 0 {
-		return status("リンクが 1 つもない", true)
+		return status(b.text.Board.NoLinksAtAll, true)
 	}
 	b.fetching = true
 	return b.fetchCmd(urls, true)

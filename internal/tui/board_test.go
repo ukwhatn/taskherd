@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -467,8 +468,8 @@ func TestBoardResumeFailureKeepsBoardOpen(t *testing.T) {
 	if h.quit {
 		t.Fatal("resume を渡せなかったのに board が終了した")
 	}
-	if !strings.Contains(h.board.status, "resume を開始できない") {
-		t.Errorf("status = %q, want resume を開始できない旨", h.board.status)
+	if want := fmt.Sprintf(ja.Jump.ResumeFailed, 1, errUnavailable); h.board.status != want {
+		t.Errorf("status = %q, want %q", h.board.status, want)
 	}
 }
 

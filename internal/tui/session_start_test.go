@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -209,8 +210,8 @@ func TestBoardSessionStartLauncherFailureKeepsBoardOpen(t *testing.T) {
 	if !h.board.statusIsError {
 		t.Error("status がエラー扱いでない")
 	}
-	if !strings.Contains(h.board.status, "起動を開始できない") {
-		t.Errorf("status = %q, want 起動を開始できない旨", h.board.status)
+	if want := fmt.Sprintf(ja.Start.StartFailed, 1, errUnavailable); h.board.status != want {
+		t.Errorf("status = %q, want %q", h.board.status, want)
 	}
 }
 

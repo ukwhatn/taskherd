@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
@@ -13,7 +14,7 @@ import (
 // watcher only while it is open, and nothing of taskherd survives it.
 func Run(ctx context.Context, deps Deps, settings Settings) error {
 	if deps.Tasks == nil {
-		return fmt.Errorf("タスクストアが設定されていない")
+		return errors.New("no task store is configured")
 	}
 	if deps.Files != nil {
 		defer func() {
@@ -37,7 +38,7 @@ func Run(ctx context.Context, deps Deps, settings Settings) error {
 
 	program := tea.NewProgram(New(boardCtx, deps, settings), tea.WithContext(boardCtx))
 	if _, err := program.Run(); err != nil {
-		return fmt.Errorf("board を実行できない: %w", err)
+		return fmt.Errorf("cannot run the board: %w", err)
 	}
 	return nil
 }

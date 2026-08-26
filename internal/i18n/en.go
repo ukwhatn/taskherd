@@ -1,0 +1,166 @@
+package i18n
+
+// enCatalog is the English text.
+//
+// Key hints are lowercase words; messages are sentence case with no closing period, which is what
+// a one-line status area reads best as. Where English wants the arguments in a different order
+// from Japanese, the entry uses explicit indexes rather than reordering the call site.
+var enCatalog = Catalog{
+	Common: Common{
+		None:             "(none)",
+		Unknown:          "unknown",
+		NotFetched:       "not fetched",
+		Failed:           "failed",
+		NoCardSelected:   "No card is selected",
+		NoColumns:        "No columns are defined",
+		HerdrUnreachable: "herdr is unreachable",
+		Cancelled:        "Cancelled",
+		ConfirmTitle:     "Confirm",
+		ConfirmHelp:      "y confirm  n cancel",
+		LinkNeedsScheme:  "Include the scheme in the URL (e.g. https://github.com/owner/repo/pull/1): %q",
+	},
+	Board: Board{
+		Help:            "%s column  %s card  tab status  enter details  a add  delete remove  g session  r refresh  R refresh all  t collapse  q quit",
+		AllCollapsed:    "All columns are collapsed (t to expand)",
+		TooNarrow:       "Terminal is too narrow to show columns",
+		ColumnWindow:    "%s columns %d-%d / %d (%s to move)",
+		MoreCount:       "%d more",
+		MoreLinks:       "%d more",
+		EmptyColumn:     "No cards",
+		HerdrDisabled:   "disabled",
+		HerdrOffline:    "offline",
+		HerdrConnecting: "connecting",
+		LiveRefreshing:  "refreshing",
+		LiveNotFetched:  "not fetched",
+		NextRefresh:     " (next in %s)",
+		Refreshing:      "Refreshing",
+		RefreshDisabled: "Link refresh is disabled",
+		TaskHasNoLinks:  "This task has no links",
+		NoLinksAtAll:    "No task has any links",
+		RateLimited:     "Rate limited, refresh stopped (next in %s)",
+		RefreshedSome:   "Refreshed %d (failed %d): %s",
+		Refreshed:       "Refreshed %d",
+
+		EditorFailed:     "Cannot start the editor: %v",
+		EditorReadFailed: "Cannot read the edited note: %v",
+		NoEditor:         "No editor is configured (editor in config.toml, $VISUAL, or $EDITOR)",
+
+		ConfirmDelete: "Delete #%d %s?",
+		TitleEmpty:    "The title cannot be empty",
+
+		NoteUpdated:     "Updated the note of #%d",
+		Created:         "Created #%d in %s",
+		CreatedMany:     "Created %d tasks in %s",
+		LinksAdded:      "Added %[2]d links to #%[1]d",
+		LinksAddedSome:  "Added %[2]d links to #%[1]d (%[3]d already present)",
+		TitleUpdated:    "Updated the title of #%d",
+		DueUpdated:      "Updated the due date of #%d",
+		Moved:           "Moved #%d to %s",
+		LinkNoteUpdated: "Updated the link note of #%d",
+		Deleted:         "Deleted #%d",
+		LinkRemoved:     "Removed the link from #%d",
+		SessionDetached: "Detached the session from #%d",
+		SessionAttached: "Attached a %[2]s session to #%[1]d",
+	},
+	Detail: Detail{
+		Help:        "%s item  enter edit  %s status  delete detach  g session  r refresh  q close",
+		HelpEditing: "enter confirm  esc cancel",
+
+		LabelTitle:   "Title",
+		LabelStatus:  "Status",
+		LabelDue:     "Due",
+		LabelNote:    "note",
+		LabelLink:    "Link",
+		LabelSession: "Session",
+
+		Overdue:     " (overdue)",
+		NoteLines:   "%d lines",
+		AddLink:     "+ Add link",
+		AddSession:  "+ Attach session",
+		HerdrSuffix: " (herdr unreachable)",
+
+		LinkNotFound:    "Link not found",
+		SessionNotFound: "Session not found",
+
+		ConfirmRemoveLink:    "Remove %[2]s from #%[1]d?",
+		ConfirmDetachSession: "Detach session %[2]s from #%[1]d?",
+		OnlyLinkOrSession:    "Only link and session rows can be removed",
+
+		StaleMark: "%s ago (TTL expired)",
+
+		PromptTitle:    "Title",
+		PromptDue:      "Due date (YYYY-MM-DD, empty to clear)",
+		PromptLinkNote: "Link note (empty to clear)",
+		PromptAddLink:  "Link URLs to add (space or newline separated)",
+	},
+	Add: Add{
+		Help:  "%s item  %s status  %s newline (title / note)  enter create  esc cancel",
+		Title: "New task",
+
+		LabelTitle:  "Title",
+		LabelStatus: "Status",
+		LabelDue:    "Due",
+		LabelNote:   "note",
+		LabelLink:   "Link",
+
+		NoColumns:  "Cannot create a task: no columns are defined",
+		NeedTitle:  "Enter a title",
+		ChangeHint: "%s to change",
+		CreateHint: "enter creates %d tasks",
+	},
+	Start: Start{
+		Help:  "tab field  %s working dir  %s newline (prompt)  ctrl+y copy  enter start  esc cancel",
+		Title: "Start a session for #%d %s",
+
+		NoLauncher:  "No session launcher is configured",
+		HerdrDown:   "Cannot start a session while herdr is unreachable",
+		ProbingCwd:  "Checking working directory candidates…",
+		Copied:      "Copied to clipboard (only on terminals that support it)",
+		NeedCwd:     "Enter a working directory or pick one",
+		StartFailed: "Cannot start #%d: %v",
+
+		LabelCwd:    "Working directory",
+		LabelCustom: "Enter: ",
+		LabelPrompt: "Prompt",
+	},
+	Jump: Jump{
+		HerdrDown:           "Cannot jump while herdr is unreachable",
+		ResumeManually:      "herdr is unreachable. Run: cd %s && claude --resume %s",
+		ResumeManuallyAgent: "herdr is unreachable. Resume the %[2]s session manually in %[1]s",
+		PaneGoneUnsupported: "The pane of the %[1]s session is gone. Resuming this agent is not supported; resume it manually in %[2]s",
+		ConfirmResume:       "The pane is gone. Run claude --resume in %s?",
+		FocusFailed:         "Cannot jump to pane %s: %v",
+		NoLauncher:          "No session launcher is configured",
+		ResumeFailed:        "Cannot resume #%d: %v",
+
+		TargetTitle: "Jump target for #%d",
+		TargetHelp:  "%s select  enter confirm  q close",
+	},
+	Select: Select{
+		NoTargetColumn: "There is no other column to move to",
+		StatusTitle:    "Status of #%d",
+		StatusHelp:     "%s select  enter confirm  q close",
+
+		AttachHerdrDown: "Cannot attach a session while herdr is unreachable",
+		HerdrError:      "herdr is unreachable: %v",
+		NoAgentsFound:   "No agents found in herdr",
+		NoSessionID:     "Cannot detect a session id in pane %s. Run herdr integration install claude, then retry",
+		Querying:        "Querying herdr…",
+		NoAgents:        "No agents",
+		NotDetected:     "(not detected)",
+		AttachTitle:     "Session to attach to #%d",
+		AttachHelp:      "%s select  enter attach  q close",
+	},
+	Picker: Picker{
+		FilterPrompt: "Filter: ",
+		Attached:     "Attached to #%d",
+		HerdrError:   "herdr is unreachable: %w",
+		NoAgent:      "No agent detected in pane %s",
+		NoSessionID:  "Cannot detect a session id in pane %s. Run herdr integration install claude, then retry",
+		Title:        "Task to attach pane %s to",
+		Loading:      "Loading…",
+		NoMatch:      "No matching task",
+		Attaching:    "Attaching…",
+		Help:         "%s select  enter attach  esc cancel",
+	},
+}

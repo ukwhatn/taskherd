@@ -59,7 +59,7 @@ func BuildLinkRows(task model.Task, states map[string]fetch.LinkState, style Car
 			// row of the same list rather than as text that lost its indent.
 			rows = append(rows, LinkRow{
 				Icon:     Segment{Text: style.Icons.More, Kind: SegMuted},
-				Refs:     []string{fmt.Sprintf("他 %d 件", len(task.Links)-limit)},
+				Refs:     []string{fmt.Sprintf(style.text().Board.MoreLinks, len(task.Links)-limit)},
 				RefKind:  SegMuted,
 				Overflow: true,
 			})
@@ -80,7 +80,7 @@ func buildLinkRow(link model.Link, state fetch.LinkState, style CardStyle) LinkR
 		Icon:    Segment{Text: style.Icons.linkGlyph(link.Kind, linkPhaseOf(state)), Kind: linkTone(state)},
 		Refs:    linkRefs(link, style.Classifier),
 		RefKind: SegRef,
-		Status:  linkStatus(state, style.Icons),
+		Status:  linkStatus(state, style),
 	}
 
 	// A stale value says how old it is, in the dim tone, and keeps every other tone it had. Dimming
@@ -93,7 +93,10 @@ func buildLinkRow(link model.Link, state fetch.LinkState, style CardStyle) LinkR
 	// value with nothing to distinguish it from a current one, which is the failure that costs
 	// most: the board looks like it is working.
 	if state.Fetched && state.Err != "" {
-		row.Status = append(row.Status, Segment{Text: style.Icons.failureMark(failingAge(state)), Kind: SegAlert})
+		row.Status = append(row.Status, Segment{
+			Text: style.Icons.failureMark(style.text().Common.Failed, failingAge(state)),
+			Kind: SegAlert,
+		})
 	}
 	return row
 }
@@ -126,25 +129,27 @@ func linkRefs(link model.Link, classifier model.URLClassifier) []string {
 }
 
 // linkStatus is the live state drawn after the reference.
-func linkStatus(state fetch.LinkState, icons IconSet) []Segment {
+func linkStatus(state fetch.LinkState, style CardStyle) []Segment {
 	if !state.Fetchable() {
 		return nil
 	}
+	icons, text := style.Icons, style.text()
+	notFetched := []Segment{{Text: text.Common.NotFetched, Kind: SegMuted}}
 	if !state.Fetched {
 		if state.Err != "" {
 			// Nothing has ever succeeded here, so the failure is the whole state, not a mark
 			// qualifying a value.
-			return []Segment{{Text: icons.failureMark(failingAge(state)), Kind: SegAlert}}
+			return []Segment{{Text: icons.failureMark(text.Common.Failed, failingAge(state)), Kind: SegAlert}}
 		}
-		return []Segment{{Text: "未取得", Kind: SegMuted}}
+		return notFetched
 	}
 
 	switch state.Kind {
 	case model.LinkKindGitHubPR:
-		return prStatus(state.GitHub, icons)
+		return prStatus(state.GitHub, style)
 	case model.LinkKindGitHubIssue:
 		if state.GitHub == nil {
-			return []Segment{{Text: "未取得", Kind: SegMuted}}
+			return notFetched
 		}
 		word := "open"
 		if strings.EqualFold(state.GitHub.State, "CLOSED") {
@@ -153,7 +158,7 @@ func linkStatus(state fetch.LinkState, icons IconSet) []Segment {
 		return []Segment{{Text: word, Kind: issueTone(state.GitHub.State)}}
 	case model.LinkKindJira:
 		if state.Jira == nil {
-			return []Segment{{Text: "未取得", Kind: SegMuted}}
+			return notFetched
 		}
 		return []Segment{{Text: state.Jira.StatusName, Kind: jiraTone(state.Jira.StatusCategory)}}
 	default:
@@ -161,11 +166,12 @@ func linkStatus(state fetch.LinkState, icons IconSet) []Segment {
 	}
 }
 
-func prStatus(data *fetch.GitHubData, icons IconSet) []Segment {
+func prStatus(data *fetch.GitHubData, style CardStyle) []Segment {
 	if data == nil {
-		return []Segment{{Text: "未取得", Kind: SegMuted}}
+		return []Segment{{Text: style.text().Common.NotFetched, Kind: SegMuted}}
 	}
 
+	icons := style.Icons
 	var segments []Segment
 	// Only an icon set with a glyph per state can say it in the icon; the others spell it out.
 	if !icons.StateInLinkIcon {

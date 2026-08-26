@@ -23,11 +23,11 @@ type statusSelectState struct {
 func (b *Board) beginStatusSelect() tea.Cmd {
 	task := b.activeTask()
 	if task == nil {
-		return status("カードが選択されていない", true)
+		return status(b.text.Common.NoCardSelected, true)
 	}
 	targets := selectableColumns(b.columns)
 	if len(targets) == 0 {
-		return status("移行先の列が定義されていない", true)
+		return status(b.text.Select.NoTargetColumn, true)
 	}
 
 	b.statusSel = statusSelectState{
@@ -94,9 +94,9 @@ func (b *Board) renderStatusSelect() string {
 	}
 
 	return b.renderModal(modal{
-		title:   fmt.Sprintf("#%d の移行先", b.statusSel.taskID),
+		title:   fmt.Sprintf(b.text.Select.StatusTitle, b.statusSel.taskID),
 		body:    []string{strings.Join(cells, " ")},
-		help:    fmt.Sprintf("%s 選択 / enter 確定 / q 閉じる", b.icons.horizontalKeys()),
+		help:    fmt.Sprintf(b.text.Select.StatusHelp, b.icons.horizontalKeys()),
 		width:   width,
 		focused: true,
 	})
@@ -131,7 +131,7 @@ func cellsWidth(labels []string) int {
 	return total
 }
 
-// sessionSelectState is the agent picker opened from the detail modal's ＋セッション紐づけ row.
+// sessionSelectState is the agent picker opened from the detail modal's "attach session" row.
 type sessionSelectState struct {
 	taskID  int
 	loading bool
@@ -144,7 +144,7 @@ type sessionSelectState struct {
 // snapshot is re-read rather than taken from the board's badges, so the list is what herdr has now.
 func (b *Board) beginSessionSelect(taskID int) tea.Cmd {
 	if b.deps.Herdr == nil {
-		return status("herdr に接続できないためセッションを紐づけられない", true)
+		return status(b.text.Select.AttachHerdrDown, true)
 	}
 	b.sessionSel = sessionSelectState{taskID: taskID, loading: true}
 	b.openOverlay(modeSessionSelect)
@@ -154,13 +154,13 @@ func (b *Board) beginSessionSelect(taskID int) tea.Cmd {
 func (b *Board) applyAgents(msg agentsLoadedMsg) {
 	b.sessionSel.loading = false
 	if msg.err != nil {
-		b.sessionSel.err = fmt.Sprintf("herdr に接続できない: %v", msg.err)
+		b.sessionSel.err = fmt.Sprintf(b.text.Select.HerdrError, msg.err)
 		return
 	}
 	b.sessionSel.agents = msg.agents
 	b.sessionSel.cursor = 0
 	if len(msg.agents) == 0 {
-		b.sessionSel.err = "herdr にエージェントが見つからない"
+		b.sessionSel.err = b.text.Select.NoAgentsFound
 	}
 }
 
@@ -191,8 +191,7 @@ func (b *Board) linkSelectedAgent() tea.Cmd {
 	}
 	agent := b.sessionSel.agents[b.sessionSel.cursor]
 	if agent.SessionID() == "" {
-		b.sessionSel.err = fmt.Sprintf(
-			"pane %s ではセッション ID を検出できない。herdr integration install claude を実行して再試行する", agent.PaneID)
+		b.sessionSel.err = fmt.Sprintf(b.text.Select.NoSessionID, agent.PaneID)
 		return nil
 	}
 
@@ -212,9 +211,9 @@ func (b *Board) renderSessionSelect() string {
 	var lines []string
 	switch {
 	case b.sessionSel.loading:
-		lines = append(lines, b.styles.dim.Render("herdr に問い合わせ中..."))
+		lines = append(lines, b.styles.dim.Render(b.text.Select.Querying))
 	case len(b.sessionSel.agents) == 0:
-		lines = append(lines, b.styles.dim.Render("エージェントがいない"))
+		lines = append(lines, b.styles.dim.Render(b.text.Select.NoAgents))
 	default:
 		for i, agent := range b.sessionSel.agents {
 			marker := padCell("", cursorWidth(b.icons))
@@ -223,7 +222,7 @@ func (b *Board) renderSessionSelect() string {
 			}
 			id := shortID(agent.SessionID())
 			if id == "" {
-				id = "(未検出)"
+				id = b.text.Select.NotDetected
 			}
 			line := truncate(fmt.Sprintf("%s%-8s %-10s %s", marker, agent.Agent, id, agent.Cwd), inner)
 			switch {
@@ -240,9 +239,9 @@ func (b *Board) renderSessionSelect() string {
 		lines = append(lines, b.styles.alert.Render(truncate(b.sessionSel.err, inner)))
 	}
 	return b.renderModal(modal{
-		title:   fmt.Sprintf("#%d に紐づけるセッション", b.sessionSel.taskID),
+		title:   fmt.Sprintf(b.text.Select.AttachTitle, b.sessionSel.taskID),
 		body:    lines,
-		help:    fmt.Sprintf("%s 選択 / enter 紐づけ / q 閉じる", b.icons.verticalKeys()),
+		help:    fmt.Sprintf(b.text.Select.AttachHelp, b.icons.verticalKeys()),
 		width:   width,
 		focused: true,
 	})

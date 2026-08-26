@@ -1,0 +1,168 @@
+package i18n
+
+// jaCatalog is the Japanese text.
+//
+// The register follows what Japanese CLI and TUI corpora actually use: sentences are 敬体
+// (`〜ます` / `〜ません` / `〜しました`), while key hints, row labels and modal titles are noun
+// phrases. A half-width space surrounds ASCII identifiers — against the usual Japanese typesetting
+// rule, and deliberately so: `herdr`, `pane`, `config.toml` and column ids are things the user
+// types, and setting them solid hides where the identifier ends.
+var jaCatalog = Catalog{
+	Common: Common{
+		None:             "（なし）",
+		Unknown:          "不明",
+		NotFetched:       "未取得",
+		Failed:           "失敗",
+		NoCardSelected:   "カードが選択されていません",
+		NoColumns:        "列が定義されていません",
+		HerdrUnreachable: "herdr に接続できません",
+		Cancelled:        "中止しました",
+		ConfirmTitle:     "確認",
+		ConfirmHelp:      "y 実行  n 中止",
+		LinkNeedsScheme:  "URL はスキームを含めて指定してください（例: https://github.com/owner/repo/pull/1）: %q",
+	},
+	Board: Board{
+		Help:            "%s 列  %s カード  tab ステータス  enter 詳細  a 追加  delete 削除  g セッション  r 更新  R 全更新  t 折り畳み  q 終了",
+		AllCollapsed:    "すべての列が折り畳まれています（t で展開）",
+		TooNarrow:       "端末の幅が足りず列を表示できません",
+		ColumnWindow:    "%s 列 %d-%d / %d（%s で移動）",
+		MoreCount:       "%d 件",
+		MoreLinks:       "ほか %d 件",
+		EmptyColumn:     "カードなし",
+		HerdrDisabled:   "無効",
+		HerdrOffline:    "オフライン",
+		HerdrConnecting: "接続中",
+		LiveRefreshing:  "更新中",
+		LiveNotFetched:  "未取得",
+		NextRefresh:     "（次回 %s 後）",
+		Refreshing:      "更新中",
+		RefreshDisabled: "リンクの更新が無効になっています",
+		TaskHasNoLinks:  "このタスクにはリンクがありません",
+		NoLinksAtAll:    "リンクが 1 つもありません",
+		RateLimited:     "レート制限のため更新を中断しました（次回は %s 後）",
+		RefreshedSome:   "%d 件を更新しました（%d 件失敗）: %s",
+		Refreshed:       "%d 件を更新しました",
+
+		EditorFailed:     "エディタを起動できません: %v",
+		EditorReadFailed: "編集結果を読み込めません: %v",
+		NoEditor:         "エディタが設定されていません（config.toml の editor、$VISUAL、$EDITOR のいずれか）",
+
+		ConfirmDelete: "#%d %s を削除しますか？",
+		TitleEmpty:    "タイトルは空にできません",
+
+		NoteUpdated:     "#%d の note を更新しました",
+		Created:         "#%d を %s に作成しました",
+		CreatedMany:     "%d 件のタスクを %s に作成しました",
+		LinksAdded:      "#%d に %d 件のリンクを追加しました",
+		LinksAddedSome:  "#%d に %d 件のリンクを追加しました（%d 件は登録済み）",
+		TitleUpdated:    "#%d のタイトルを更新しました",
+		DueUpdated:      "#%d の期限を更新しました",
+		Moved:           "#%d を %s へ移動しました",
+		LinkNoteUpdated: "#%d のリンクメモを更新しました",
+		Deleted:         "#%d を削除しました",
+		LinkRemoved:     "#%d のリンクを解除しました",
+		SessionDetached: "#%d のセッションを解除しました",
+		SessionAttached: "#%d に %s セッションを紐づけました",
+	},
+	Detail: Detail{
+		Help:        "%s 項目  enter 編集  %s ステータス  delete 解除  g セッション  r 更新  q 閉じる",
+		HelpEditing: "enter 確定  esc 取消",
+
+		LabelTitle:   "タイトル",
+		LabelStatus:  "ステータス",
+		LabelDue:     "期限",
+		LabelNote:    "note",
+		LabelLink:    "リンク",
+		LabelSession: "セッション",
+
+		Overdue:     "（期限切れ）",
+		NoteLines:   "%d 行",
+		AddLink:     "+ リンクを追加",
+		AddSession:  "+ セッションを紐づける",
+		HerdrSuffix: "（herdr 未接続）",
+
+		LinkNotFound:    "リンクが見つかりません",
+		SessionNotFound: "セッションが見つかりません",
+
+		ConfirmRemoveLink:    "#%d から %s を解除しますか？",
+		ConfirmDetachSession: "#%d からセッション %s を解除しますか？",
+		OnlyLinkOrSession:    "解除できるのはリンク行とセッション行だけです",
+
+		StaleMark: "%s 前（TTL 超過）",
+
+		PromptTitle:    "タイトル",
+		PromptDue:      "期限（YYYY-MM-DD。空にすると削除）",
+		PromptLinkNote: "リンクメモ（空にすると削除）",
+		PromptAddLink:  "追加するリンクの URL（空白・改行区切りで複数可）",
+	},
+	Add: Add{
+		Help:  "%s 項目  %s ステータス  %s 改行（タイトル / note）  enter 作成  esc 取消",
+		Title: "新しいタスク",
+
+		LabelTitle:  "タイトル",
+		LabelStatus: "ステータス",
+		LabelDue:    "期限",
+		LabelNote:   "note",
+		LabelLink:   "リンク",
+
+		NoColumns:  "列が定義されていないため作成できません",
+		NeedTitle:  "タイトルを入力してください",
+		ChangeHint: "%s で変更",
+		CreateHint: "enter で %d 件のタスクを作成します",
+	},
+	Start: Start{
+		Help:  "tab 入力欄  %s 作業ディレクトリ  %s 改行（プロンプト）  ctrl+y コピー  enter 起動  esc 取消",
+		Title: "#%d %s のセッションを起動",
+
+		NoLauncher:  "セッションの起動経路が設定されていません",
+		HerdrDown:   "herdr に接続できないため起動できません",
+		ProbingCwd:  "作業ディレクトリの候補を確認しています…",
+		Copied:      "クリップボードへコピーしました（対応していない端末では反映されません）",
+		NeedCwd:     "作業ディレクトリを入力するか候補から選んでください",
+		StartFailed: "#%d を起動できません: %v",
+
+		LabelCwd:    "作業ディレクトリ",
+		LabelCustom: "入力: ",
+		LabelPrompt: "プロンプト",
+	},
+	Jump: Jump{
+		HerdrDown:           "herdr に接続できないため移動できません",
+		ResumeManually:      "herdr に接続できません。cd %s && claude --resume %s を実行してください",
+		ResumeManuallyAgent: "herdr に接続できません。%s で %s セッションを手動で再開してください",
+		PaneGoneUnsupported: "%s セッションの pane がありません。この agent の再開には未対応です。%s で手動で再開してください",
+		ConfirmResume:       "pane がありません。%s で claude --resume を起動しますか？",
+		FocusFailed:         "pane %s へ移動できません: %v",
+		NoLauncher:          "セッションの起動経路が設定されていません",
+		ResumeFailed:        "#%d を再開できません: %v",
+
+		TargetTitle: "#%d の移動先セッション",
+		TargetHelp:  "%s 選択  enter 確定  q 閉じる",
+	},
+	Select: Select{
+		NoTargetColumn: "移動先の列がありません",
+		StatusTitle:    "#%d のステータス",
+		StatusHelp:     "%s 選択  enter 確定  q 閉じる",
+
+		AttachHerdrDown: "herdr に接続できないため紐づけられません",
+		HerdrError:      "herdr に接続できません: %v",
+		NoAgentsFound:   "herdr にエージェントが見つかりません",
+		NoSessionID:     "pane %s のセッション ID を検出できません。herdr integration install claude を実行してから再試行してください",
+		Querying:        "herdr に問い合わせています…",
+		NoAgents:        "エージェントがいません",
+		NotDetected:     "（未検出）",
+		AttachTitle:     "#%d に紐づけるセッション",
+		AttachHelp:      "%s 選択  enter 紐づけ  q 閉じる",
+	},
+	Picker: Picker{
+		FilterPrompt: "絞り込み: ",
+		Attached:     "#%d に紐づけました",
+		HerdrError:   "herdr に接続できません: %w",
+		NoAgent:      "pane %s でエージェントを検出できません",
+		NoSessionID:  "pane %s のセッション ID を検出できません。herdr integration install claude を実行してから再試行してください",
+		Title:        "pane %s を紐づけるタスク",
+		Loading:      "読み込み中…",
+		NoMatch:      "一致するタスクがありません",
+		Attaching:    "紐づけ中…",
+		Help:         "%s 選択  enter 紐づけ  esc 中止",
+	},
+}

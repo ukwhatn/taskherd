@@ -56,13 +56,13 @@ func newFieldTextarea() textarea.Model {
 // several seconds).
 func (b *Board) beginSessionStart(task *model.Task) tea.Cmd {
 	if b.deps.Launcher == nil {
-		return status("セッションを起動する経路が無い", true)
+		return status(b.text.Start.NoLauncher, true)
 	}
 	if b.deps.Herdr == nil {
-		return status("herdr に接続できないため起動できない", true)
+		return status(b.text.Start.HerdrDown, true)
 	}
 	if b.sessionStartProbe != 0 {
-		return status("cwd の候補を確認中...", true)
+		return status(b.text.Start.ProbingCwd, true)
 	}
 
 	candidates := model.RankSessionCwds(*b.file)
@@ -249,7 +249,7 @@ func (b *Board) copySessionStartPrompt() tea.Cmd {
 	text := b.sessionStart.prompt.Value()
 	return tea.Batch(
 		tea.SetClipboard(text),
-		status("クリップボードへコピーを試みた（対応端末のみ反映される）", false),
+		status(b.text.Start.Copied, false),
 	)
 }
 
@@ -272,11 +272,11 @@ func (b *Board) submitSessionStart() tea.Cmd {
 		cwd = s.candidates[s.cwdCursor]
 	}
 	if cwd == "" {
-		b.sessionStart.err = "作業ディレクトリを入力するか候補から選ぶ"
+		b.sessionStart.err = b.text.Start.NeedCwd
 		return nil
 	}
 	if b.deps.Launcher == nil {
-		b.sessionStart.err = "セッションを起動する経路が無い"
+		b.sessionStart.err = b.text.Start.NoLauncher
 		return nil
 	}
 
@@ -284,7 +284,7 @@ func (b *Board) submitSessionStart() tea.Cmd {
 		// The board stays open: this failed before anything was created, so the status line is
 		// still the only place the user would ever see it.
 		b.closeOverlay()
-		return status(fmt.Sprintf("#%d の起動を開始できない: %v", s.taskID, err), true)
+		return status(fmt.Sprintf(b.text.Start.StartFailed, s.taskID, err), true)
 	}
 	return tea.Quit
 }
@@ -295,7 +295,7 @@ func (b *Board) renderSessionStart() string {
 	inner := modalInner(width)
 
 	var lines []string
-	lines = append(lines, b.styles.dim.Render(truncate("作業ディレクトリ:", inner)))
+	lines = append(lines, b.styles.dim.Render(truncate(b.text.Start.LabelCwd, inner)))
 	for i, cwd := range s.candidates {
 		lines = append(lines, b.sessionStartRow(cwd, inner, s.focus == sessionStartFocusCwd && i == s.cwdCursor))
 	}
@@ -304,12 +304,12 @@ func (b *Board) renderSessionStart() string {
 	if s.focus == sessionStartFocusCwd && isCustom {
 		marker = b.icons.Cursor + " "
 	}
-	label := "入力する: "
+	label := b.text.Start.LabelCustom
 	s.cwdInput.SetWidth(maxInt(inner-lipgloss.Width(marker)-lipgloss.Width(label), 1))
 	lines = append(lines, truncate(marker+label+s.cwdInput.View(), inner))
 
 	lines = append(lines, "")
-	promptLabel := "プロンプト:"
+	promptLabel := b.text.Start.LabelPrompt
 	if s.focus == sessionStartFocusPrompt {
 		promptLabel = b.icons.Cursor + " " + promptLabel
 	} else {
@@ -324,10 +324,9 @@ func (b *Board) renderSessionStart() string {
 	}
 
 	return b.renderModal(modal{
-		title: fmt.Sprintf("#%d %s を起動する", s.taskID, s.title),
-		body:  lines,
-		help: fmt.Sprintf("tab 切替  %s cwd選択  %s 改行(プロンプト)  ctrl+y コピー  enter 起動  esc 取消",
-			b.icons.verticalKeys(), b.newlineKey()),
+		title:   fmt.Sprintf(b.text.Start.Title, s.taskID, s.title),
+		body:    lines,
+		help:    fmt.Sprintf(b.text.Start.Help, b.icons.verticalKeys(), b.newlineKey()),
 		width:   width,
 		focused: true,
 	})

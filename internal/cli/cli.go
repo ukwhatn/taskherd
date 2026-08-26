@@ -19,6 +19,7 @@ import (
 	"github.com/ukwhatn/taskherd/internal/config"
 	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 	"github.com/ukwhatn/taskherd/internal/store"
 )
@@ -56,7 +57,10 @@ type hinter interface {
 }
 
 type app struct {
-	env     Env
+	env Env
+	// text is the language every command speaks, settled before the command tree is built because
+	// cobra evaluates each command's help as it is assembled.
+	text    *i18n.Catalog
 	jsonOut bool
 	// notifyLabel names the operation in a herdr notification raised when the command fails. It is
 	// empty for an ordinary invocation, where stderr is being read by whoever typed the command;
@@ -71,7 +75,7 @@ type app struct {
 
 // Run executes args and returns the process exit code.
 func Run(env Env, args []string) int {
-	a := &app{env: env}
+	a := &app{env: env, text: i18n.For(resolveLang(env))}
 	root := a.rootCmd()
 	root.SetArgs(args)
 	root.SetOut(env.Out)
@@ -91,6 +95,16 @@ func Run(env Env, args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// resolveLang settles the UI language before anything is rendered.
+//
+// It reads config.toml itself rather than going through a.config(), because the command tree — help
+// text and all — is built before any command has decided it needs the configuration, and a config
+// error at this point has no language to be reported in. config.Load reports such errors properly
+// when a command actually loads its settings.
+func resolveLang(env Env) i18n.Lang {
+	return i18n.Resolve(env.Getenv, config.PeekLanguage(env.Paths.ConfigPath))
 }
 
 // notifyError announces a failure through herdr when --notify-error named the operation.

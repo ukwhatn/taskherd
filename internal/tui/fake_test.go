@@ -11,10 +11,19 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
 var boardNow = time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
+
+// ja and en are the catalogs the tests assert against. Comparing rendered output to a catalog
+// field rather than to a literal is what keeps a wording change from being a test change too;
+// the wording itself is checked in internal/i18n.
+var (
+	ja = i18n.For(i18n.LangJA)
+	en = i18n.For(i18n.LangEN)
+)
 
 // fakeStore stands in for the real tasks.json store. Load hands out a deep copy, which is what
 // makes the test able to catch the board writing back its own display model.
