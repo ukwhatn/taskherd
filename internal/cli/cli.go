@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/ukwhatn/taskherd/internal/buildinfo"
 	"github.com/ukwhatn/taskherd/internal/config"
 	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
@@ -124,6 +125,9 @@ func (a *app) rootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "taskherd",
 		Short: a.text.CLI.Root.Short,
+		// --version answers the same thing the version subcommand does, because both spellings
+		// are the first thing anyone tries when reporting a problem.
+		Version: buildinfo.Get().String(),
 		// Errors and usage are rendered by report() so that --json emits JSON only.
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -153,6 +157,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.boardCmd(),
 		a.pluginCmd(),
 		a.pickerCmd(),
+		a.versionCmd(),
 	)
 	return root
 }

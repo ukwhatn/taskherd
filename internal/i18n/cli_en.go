@@ -253,6 +253,9 @@ var cliEN = CLI{
 		GitHubLimited: "Stopped early: GitHub rate limit",
 		JiraLimited:   "Stopped early: Jira rate limit",
 	},
+	Version: CLIVersion{
+		Short: "Show the version",
+	},
 	Config: CLIConfig{
 		Short:     "work with the config and data files",
 		PathShort: "print where the config and data files live",
