@@ -74,6 +74,13 @@ label = "Wontfix"
 kind = "terminal"
 color = "gray"
 
+[update]
+# Ask GitHub whether a newer release exists when the board starts, at most once a day.
+# The only thing sent is the request itself. Set it to false to stop taskherd contacting
+# anything on its own; TASKHERD_NO_UPDATE_CHECK=1 turns it off for one invocation.
+# "taskherd update" keeps working either way — that is someone asking on purpose
+check = true
+
 [github]
 # GitHub Enterprise Server hosts, used to tell what kind of link a URL is
 # ghes_hosts = ["github.example.com"]

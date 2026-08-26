@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/ukwhatn/taskherd/internal/atomicfile"
 	"github.com/ukwhatn/taskherd/internal/i18n"
 )
 
@@ -171,7 +172,7 @@ func (c *Cache) Update(ctx context.Context, fn func(*CacheFile)) error {
 	}
 	data = append(data, '\n')
 
-	if err := writeFileAtomic(c.Path(), data); err != nil {
+	if err := atomicfile.Write(c.Path(), data, filePerm); err != nil {
 		return fmt.Errorf("cannot write %s: %w", c.Path(), err)
 	}
 	return nil

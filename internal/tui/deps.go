@@ -9,6 +9,7 @@ import (
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
+	"github.com/ukwhatn/taskherd/internal/update"
 )
 
 // TaskStore is the tasks.json access the board needs. Every change goes through Update, so the
@@ -78,6 +79,9 @@ type Deps struct {
 	Cache    CacheLoader
 	Links    LinkRefresher
 	Now      func() time.Time
+	// UpdateChecker looks for a newer release, at most once a day. Nil switches the look off
+	// entirely, which is what config's [update] check = false and TASKHERD_NO_UPDATE_CHECK do.
+	UpdateChecker *update.Checker
 }
 
 // Settings are the board's configuration, resolved from config.toml before the program starts.

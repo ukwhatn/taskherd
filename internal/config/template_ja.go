@@ -75,6 +75,13 @@ label = "Wontfix"
 kind = "terminal"
 color = "gray"
 
+[update]
+# 新しいリリースの有無を board 起動時に確認する（1 日 1 回まで）。
+# 確認先は GitHub の releases API で、送るのは HTTP リクエストそのものだけ。
+# false で一切通信しなくなる。環境変数 TASKHERD_NO_UPDATE_CHECK=1 でも一時的に止められる。
+# 確認を止めても taskherd update は使える（明示的に叩いたときだけ取りにいく）
+check = true
+
 [github]
 # GitHub Enterprise Server のホスト（リンク種別の判別に使う）
 # ghes_hosts = ["github.example.com"]

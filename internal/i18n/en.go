@@ -24,6 +24,7 @@ var enCatalog = Catalog{
 		AllCollapsed:    "All columns are collapsed (t to expand)",
 		TooNarrow:       "Terminal is too narrow to show columns",
 		ColumnWindow:    "%s columns %d-%d / %d (%s to move)",
+		UpdateAvailable: "%s is available (running %s). Run taskherd update to install it",
 		MoreCount:       "%d more",
 		MoreLinks:       "%d more",
 		EmptyColumn:     "No cards",

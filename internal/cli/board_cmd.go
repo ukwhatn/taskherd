@@ -59,10 +59,11 @@ func (a *app) requireOpenColumn(columns model.Columns) error {
 // management core has to work without herdr, and without a usable watcher.
 func (a *app) boardDeps(ctx context.Context, cfg *config.Config) tui.Deps {
 	deps := tui.Deps{
-		Tasks: a.tasks(),
-		Cache: a.cache(),
-		Links: a.fetcher(cfg),
-		Now:   a.env.Now,
+		Tasks:         a.tasks(),
+		Cache:         a.cache(),
+		Links:         a.fetcher(cfg),
+		Now:           a.env.Now,
+		UpdateChecker: a.updateCheckerFor(cfg),
 	}
 
 	if watcher, err := a.tasks().Watch(); err == nil {

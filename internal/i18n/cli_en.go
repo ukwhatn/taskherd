@@ -253,6 +253,33 @@ var cliEN = CLI{
 		GitHubLimited: "Stopped early: GitHub rate limit",
 		JiraLimited:   "Stopped early: Jira rate limit",
 	},
+	Update: CLIUpdate{
+		Short:       "Check for a newer release and install it",
+		FlagCheck:   "Only check; do not install",
+		FlagYes:     "Install without asking",
+		Available:   "%s is available (running %s)\n",
+		UpToDate:    "Up to date (%s)\n",
+		Confirm:     "Update to %s?",
+		Downloading: "Downloading %s…\n",
+		Done:        "Updated %s to %s: %s\n",
+		NotReleased: Problem{
+			Msg:  "This is not a released build, so there is nothing to update it to",
+			Hint: "It was built from source. Pull and rebuild instead",
+		},
+		NoRelease: Problem{
+			Msg:  "Nothing has been released yet",
+			Hint: "There is nothing to update to until the first release is published",
+		},
+		NotWritable: Problem{
+			Msg:  "No permission to replace %s",
+			Hint: "Run install.sh again, or reinstall somewhere you can write to",
+		},
+		Failed: Problem{
+			Msg:  "The update failed: %s",
+			Hint: "The binary you had is untouched. Try again later",
+		},
+		Notice: "%s is available (running %s). Run taskherd update to install it\n",
+	},
 	Version: CLIVersion{
 		Short: "Show the version",
 	},

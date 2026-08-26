@@ -262,6 +262,9 @@ func (b *Board) Init() tea.Cmd {
 	if b.deps.Links != nil {
 		cmds = append(cmds, b.tickCmd())
 	}
+	if cmd := b.checkUpdateCmd(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -311,6 +314,10 @@ func (b *Board) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshDoneMsg:
 		return b, b.applyRefresh(msg)
+
+	case updateFoundMsg:
+		b.announceUpdate(msg.tag)
+		return b, nil
 
 	case refreshTickMsg:
 		cmds := []tea.Cmd{b.tickCmd()}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/ukwhatn/taskherd/internal/atomicfile"
 	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
@@ -163,11 +164,11 @@ func (s *Store) Update(ctx context.Context, fn func(*model.File) error) error {
 	}
 	// The backup must land before the rename; afterwards it would hold the new content and recover nothing.
 	if raw != nil {
-		if err := writeFileAtomic(s.BakPath(), raw); err != nil {
+		if err := atomicfile.Write(s.BakPath(), raw, filePerm); err != nil {
 			return fmt.Errorf("cannot write the backup: %w", err)
 		}
 	}
-	if err := writeFileAtomic(s.TasksPath(), data); err != nil {
+	if err := atomicfile.Write(s.TasksPath(), data, filePerm); err != nil {
 		return fmt.Errorf("cannot write %s: %w", s.TasksPath(), err)
 	}
 	return nil

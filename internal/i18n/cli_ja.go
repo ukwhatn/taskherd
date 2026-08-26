@@ -254,6 +254,33 @@ var cliJA = CLI{
 		GitHubLimited: "GitHub のレート制限のため残りの取得を中断しました",
 		JiraLimited:   "Jira のレート制限のため残りの取得を中断しました",
 	},
+	Update: CLIUpdate{
+		Short:       "新しいリリースを確認して更新する",
+		FlagCheck:   "確認だけ行い更新しない",
+		FlagYes:     "確認プロンプトを出さずに更新する",
+		Available:   "%s が公開されています（現在 %s）\n",
+		UpToDate:    "最新です（%s）\n",
+		Confirm:     "%s に更新しますか",
+		Downloading: "%s をダウンロードしています…\n",
+		Done:        "%s から %s に更新しました: %s\n",
+		NotReleased: Problem{
+			Msg:  "リリース版ではないため更新できません",
+			Hint: "このバイナリはソースからビルドされています。git pull して再ビルドしてください",
+		},
+		NoRelease: Problem{
+			Msg:  "公開されているリリースがありません",
+			Hint: "最初のリリースが出るまで更新できません",
+		},
+		NotWritable: Problem{
+			Msg:  "%s を書き換える権限がありません",
+			Hint: "install.sh を実行し直すか、書き込める場所へ導入し直してください",
+		},
+		Failed: Problem{
+			Msg:  "更新に失敗しました: %s",
+			Hint: "元のバイナリはそのまま残っています。時間をおいて再実行してください",
+		},
+		Notice: "新しい版 %s が公開されています（現在 %s）。taskherd update で更新できます\n",
+	},
 	Version: CLIVersion{
 		Short: "バージョンを表示する",
 	},

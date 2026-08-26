@@ -79,6 +79,10 @@ func Run(env Env, args []string) int {
 	root.SetErr(env.Err)
 	root.SetIn(env.In)
 
+	// The notice goes out last whatever happens: an error is what the reader came for, and news
+	// about taskherd has no business sitting above it.
+	defer a.printUpdateNotice()
+
 	if err := root.Execute(); err != nil {
 		// Raised before report() so that both failure shapes — a plain error and a partial result
 		// already on stdout — reach the notification through the same path.
@@ -92,6 +96,16 @@ func Run(env Env, args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// printUpdateNotice mentions a newer release on stderr, once a day at most.
+//
+// stderr rather than stdout: a command's output is something people pipe, and news about taskherd
+// is not part of the answer they asked for.
+func (a *app) printUpdateNotice() {
+	if notice := a.updateNotice(); notice != "" {
+		fmt.Fprint(a.env.Err, notice)
+	}
 }
 
 // resolveLang settles the UI language before anything is rendered.
@@ -158,6 +172,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.pluginCmd(),
 		a.pickerCmd(),
 		a.versionCmd(),
+		a.updateCmd(),
 	)
 	return root
 }
