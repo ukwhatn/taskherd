@@ -250,6 +250,23 @@ func (c *Client) SendAgentPrompt(ctx context.Context, paneID, text string) error
 	return err
 }
 
+// Notify raises a herdr notification. It is how a process with no one watching its output — a
+// launch the board detached from itself before quitting — reports that it failed.
+//
+// body is optional; an empty one sends the title alone. Position and sound are left at herdr's
+// defaults: this is a report, not something to be dismissed in a particular corner.
+func (c *Client) Notify(ctx context.Context, title, body string) error {
+	callCtx, cancel := requestContext(ctx, cliTimeout)
+	defer cancel()
+
+	args := []string{"notification", "show", title}
+	if body != "" {
+		args = append(args, "--body", body)
+	}
+	_, err := c.runner.Run(callCtx, args...)
+	return err
+}
+
 // ReportTaskDisplay stamps the task id onto the pane so herdr's own UI can show it, and sets the
 // sidebar's display name to "#<id> <title>" via --display-agent. Unlike the task id token, the
 // display name has no uniqueness constraint (it is not the agent's herdr-internal identifier), so

@@ -558,6 +558,37 @@ func TestReportTaskDisplayStampsTokenAndDisplayName(t *testing.T) {
 	}
 }
 
+func TestNotifySendsTitleAndBody(t *testing.T) {
+	runner := &fakeRunner{}
+	client := newClient(t, newFakeHerdr(t, snapshotJSON()), runner)
+
+	if err := client.Notify(context.Background(), "taskherd: #42 の起動に失敗", "pane wS:p9 を確認する"); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+
+	got := strings.Join(runner.Calls()[0], " ")
+	want := "notification show taskherd: #42 の起動に失敗 --body pane wS:p9 を確認する"
+	if got != want {
+		t.Errorf("呼び出し = %q, want %q", got, want)
+	}
+}
+
+// An empty body sends the title alone rather than an empty --body, which herdr would take as a
+// blank second line.
+func TestNotifyOmitsEmptyBody(t *testing.T) {
+	runner := &fakeRunner{}
+	client := newClient(t, newFakeHerdr(t, snapshotJSON()), runner)
+
+	if err := client.Notify(context.Background(), "taskherd: 失敗", ""); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+
+	got := strings.Join(runner.Calls()[0], " ")
+	if want := "notification show taskherd: 失敗"; got != want {
+		t.Errorf("呼び出し = %q, want %q", got, want)
+	}
+}
+
 func newClient(t *testing.T, fake *fakeHerdr, runner herdrc.Runner) *herdrc.Client {
 	t.Helper()
 	if runner == nil {

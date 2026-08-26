@@ -3,6 +3,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,8 +56,12 @@ type hinter interface {
 }
 
 type app struct {
-	env         Env
-	jsonOut     bool
+	env     Env
+	jsonOut bool
+	// notifyLabel names the operation in a herdr notification raised when the command fails. It is
+	// empty for an ordinary invocation, where stderr is being read by whoever typed the command;
+	// the board sets it on the launches it detaches, which nobody is watching.
+	notifyLabel string
 	cfg         *config.Config
 	taskStore   *store.Store
 	cacheStore  *fetch.Cache
@@ -74,6 +79,9 @@ func Run(env Env, args []string) int {
 	root.SetIn(env.In)
 
 	if err := root.Execute(); err != nil {
+		// Raised before report() so that both failure shapes — a plain error and a partial result
+		// already on stdout — reach the notification through the same path.
+		a.notifyError(err)
 		// A partialResultError means the command already wrote its (possibly partial) result to
 		// stdout: report() would print a second, conflicting thing to stderr on top of it.
 		var partial *partialResultError
@@ -85,6 +93,24 @@ func Run(env Env, args []string) int {
 	return 0
 }
 
+// notifyError announces a failure through herdr when --notify-error named the operation.
+//
+// This exists for the launches the board detaches: the board quits the moment it hands one off,
+// so its status line is gone, and the process that took over writes to a log nobody is watching.
+// Without this a launch that stops at a trust-folder prompt looks exactly like one still running.
+// Best-effort by design — the same text is already on stderr and in the log.
+func (a *app) notifyError(err error) {
+	if a.notifyLabel == "" {
+		return
+	}
+	body := err.Error()
+	var h hinter
+	if errors.As(err, &h) && h.Hint() != "" {
+		body += "（" + h.Hint() + "）"
+	}
+	_ = a.herdr().Notify(context.Background(), "taskherd: "+a.notifyLabel+"に失敗", body)
+}
+
 func (a *app) rootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "taskherd",
@@ -94,6 +120,11 @@ func (a *app) rootCmd() *cobra.Command {
 		SilenceUsage:  true,
 	}
 	root.PersistentFlags().BoolVar(&a.jsonOut, "json", false, "結果を JSON で stdout に出力する（対話は行わない）")
+	root.PersistentFlags().StringVar(&a.notifyLabel, "notify-error", "",
+		"失敗したときに herdr の通知でこのラベルを知らせる")
+	// Hidden: this is how the board reaches a launch it has already detached from itself, not
+	// something to type.
+	_ = root.PersistentFlags().MarkHidden("notify-error")
 
 	root.AddCommand(
 		a.addCmd(),
