@@ -73,6 +73,8 @@ taskherd config init
 `~/.config/taskherd/config.toml`（`TASKHERD_CONFIG` で上書き可）に既定設定を生成する。GitHub Enterprise Server や Jira を使う場合はコメントアウトされた項目を書き換える:
 
 ```toml
+language = "ja"     # ja（既定）/ en
+
 [board]
 icons = "nerd"      # nerd（既定・Nerd Font 必須）/ ascii / none
 hyperlinks = true   # リンク行を OSC 8 でクリック可能にする
@@ -92,6 +94,22 @@ token_env = "TASKHERD_JIRA_TOKEN"
 ```
 
 `site` / `email` は自分のテナントの値に置き換える。`ghes_hosts` は GitHub.com 以外の PR/Issue リンクを `github_pr` / `github_issue` として判別させたいホストの一覧。
+
+### 表示言語（`language`）
+
+board の画面テキストを `ja` か `en` から選ぶ。既定は `ja`。
+
+一時的に切り替えるなら環境変数が優先する:
+
+```
+TASKHERD_LANG=en taskherd board
+```
+
+`LANG` からの自動判定はしない。シェルの `LANG` は実際に読む言語と一致しないことが多く、設定していない人の board が黙って別言語になるため。
+
+herdr プラグインとして開いた board には shell で export した環境変数が届かないことがあるので、常用する言語は `config.toml` に書く（`jira.token_file` と同じ理由）。
+
+CLI の出力とエラー文言は現時点では日本語のまま。board の画面テキストのみ切り替わる。
 
 ### アイコン表記（`board.icons`）
 

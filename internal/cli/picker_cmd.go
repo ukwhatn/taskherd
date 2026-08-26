@@ -103,6 +103,7 @@ func taskForSession(tasks []model.Task, sessionID string) (int, bool) {
 func (a *app) pickerDeps(cfg *config.Config) tui.PickerDeps {
 	return tui.PickerDeps{
 		Tasks:   a.tasks(),
+		Text:    a.text,
 		Herdr:   a.herdr(),
 		Columns: cfg.Columns,
 		Icons:   tui.IconMode(cfg.Board.Icons),

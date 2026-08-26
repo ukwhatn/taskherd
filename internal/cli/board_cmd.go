@@ -80,6 +80,7 @@ func (a *app) boardDeps(ctx context.Context, cfg *config.Config) tui.Deps {
 func (a *app) boardSettings(cfg *config.Config) tui.Settings {
 	return tui.Settings{
 		Columns:         cfg.Columns,
+		Text:            a.text,
 		Editor:          cfg.ResolveEditor(a.env.Getenv),
 		Classifier:      cfg.Classifier(),
 		CacheTTL:        time.Duration(cfg.Board.CacheTTLMinutes) * time.Minute,

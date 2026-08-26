@@ -47,7 +47,7 @@ func TestColumnScrollsWithOverflowIndicators(t *testing.T) {
 	h.board.height = 20
 
 	view := h.board.render()
-	if !strings.Contains(view, h.board.icons.ScrollDown+" 7件") {
+	if !strings.Contains(view, h.board.icons.ScrollDown+" "+fmt.Sprintf(ja.Board.MoreCount, 7)) {
 		t.Fatalf("下方向のオーバーフローインジケータが無い:\n%s", view)
 	}
 	if strings.Contains(view, h.board.icons.ScrollUp+" ") {
@@ -61,7 +61,7 @@ func TestColumnScrollsWithOverflowIndicators(t *testing.T) {
 		h.key("down")
 	}
 	view = h.board.render()
-	if !strings.Contains(view, h.board.icons.ScrollUp+" 7件") {
+	if !strings.Contains(view, h.board.icons.ScrollUp+" "+fmt.Sprintf(ja.Board.MoreCount, 7)) {
 		t.Errorf("末尾まで送ったのに上方向のインジケータが無い:\n%s", view)
 	}
 	if !strings.Contains(view, "#10 タスク 10") {
@@ -144,16 +144,16 @@ func TestModalIsBoxOverTheBoard(t *testing.T) {
 	h.key("delete")
 	view := h.board.render()
 
-	if !strings.Contains(view, "確認") {
+	if !strings.Contains(view, ja.Common.ConfirmTitle) {
 		t.Errorf("確認ダイアログのタイトルが無い:\n%s", view)
 	}
-	if !strings.Contains(view, "y で実行 / n で中止") {
+	if !strings.Contains(view, ja.Common.ConfirmHelp) {
 		t.Errorf("確認ダイアログのキーヘルプが無い:\n%s", view)
 	}
 	if !strings.Contains(view, "ToDo (3)") {
 		t.Errorf("ダイアログの背後に盤面が残っていない:\n%s", view)
 	}
-	if !strings.Contains(view, "tab 移行") {
+	if !strings.Contains(view, "tab ステータス") {
 		t.Errorf("ダイアログの背後にフッタが残っていない:\n%s", view)
 	}
 }
@@ -197,7 +197,7 @@ func TestStackedModalDimsTheOneBehind(t *testing.T) {
 	if alone == behind {
 		t.Errorf("ピッカーを開いても詳細モーダルの描画が変わっていない")
 	}
-	if !strings.Contains(h.board.render(), "の移行先") {
+	if !strings.Contains(h.board.render(), fmt.Sprintf(ja.Select.StatusTitle, 1)) {
 		t.Errorf("重ねたピッカーが描画されていない")
 	}
 }
@@ -421,7 +421,7 @@ func TestBoardSaysSoWhenNoColumnFits(t *testing.T) {
 			h.board.width, h.board.height = width, 24
 			view := h.board.render()
 
-			if !strings.Contains(stripANSI(view), truncate("端末が狭すぎて列を表示できない", width)) {
+			if !strings.Contains(stripANSI(view), truncate(ja.Board.TooNarrow, width)) {
 				t.Errorf("狭すぎる旨の表示が無い:\n%s", view)
 			}
 			if strings.Contains(view, "#1 ") {

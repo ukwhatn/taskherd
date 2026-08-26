@@ -13,13 +13,13 @@ import (
 func (b *Board) beginJump() tea.Cmd {
 	task := b.activeTask()
 	if task == nil {
-		return status("カードが選択されていない", true)
+		return status(b.text.Common.NoCardSelected, true)
 	}
 	if len(task.Sessions) == 0 {
 		return b.beginSessionStart(task)
 	}
 	if b.deps.Herdr == nil {
-		return status("herdr に接続できないため jump できない", true)
+		return status(b.text.Jump.HerdrDown, true)
 	}
 	if len(task.Sessions) == 1 {
 		return b.jumpTo(task.ID, task.Title, task.Sessions[0])
@@ -61,21 +61,21 @@ func (b *Board) handleJumpKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (b *Board) jumpTo(taskID int, title string, session model.SessionRef) tea.Cmd {
 	if !b.sessions.Available {
 		if session.Agent == resumeAgent {
-			return status(fmt.Sprintf("herdr に接続できない。cd %s && claude --resume %s を実行する", session.Cwd, session.SessionID), true)
+			return status(fmt.Sprintf(b.text.Jump.ResumeManually, session.Cwd, session.SessionID), true)
 		}
-		return status(fmt.Sprintf("herdr に接続できない。%s で %s セッションを手動再開する", session.Cwd, session.Agent), true)
+		return status(fmt.Sprintf(b.text.Jump.ResumeManuallyAgent, session.Cwd, session.Agent), true)
 	}
 
 	if paneID := b.sessions.Pane[session.SessionID]; paneID != "" {
 		return b.focusCmd(taskID, title, paneID)
 	}
 	if session.Agent != resumeAgent {
-		return status(fmt.Sprintf("%s セッションの pane が消滅している。この agent の resume には未対応。%s で手動再開する", session.Agent, session.Cwd), true)
+		return status(fmt.Sprintf(b.text.Jump.PaneGoneUnsupported, session.Agent, session.Cwd), true)
 	}
 
 	b.openConfirm(confirmState{
 		kind:    confirmResume,
-		prompt:  fmt.Sprintf("pane が消滅している。%s で claude --resume を起動する", session.Cwd),
+		prompt:  fmt.Sprintf(b.text.Jump.ConfirmResume, session.Cwd),
 		taskID:  taskID,
 		title:   title,
 		session: session,
@@ -92,7 +92,7 @@ func (b *Board) jumpTo(taskID int, title string, session model.SessionRef) tea.C
 func (b *Board) focusCmd(taskID int, title, paneID string) tea.Cmd {
 	return func() tea.Msg {
 		if err := b.deps.Herdr.FocusAgent(b.ctx, paneID); err != nil {
-			return statusMsg{text: fmt.Sprintf("pane %s へ移動できない: %v", paneID, err), isError: true}
+			return statusMsg{text: fmt.Sprintf(b.text.Jump.FocusFailed, paneID, err), isError: true}
 		}
 		_ = b.deps.Herdr.ReportTaskDisplay(b.ctx, paneID, taskID, title)
 		return tea.QuitMsg{}
@@ -109,10 +109,10 @@ func (b *Board) resumeCmd(state confirmState) tea.Cmd {
 	taskID, sessionID := state.taskID, state.session.SessionID
 	return func() tea.Msg {
 		if b.deps.Launcher == nil {
-			return statusMsg{text: "セッションを起動する経路が無い", isError: true}
+			return statusMsg{text: b.text.Jump.NoLauncher, isError: true}
 		}
 		if err := b.deps.Launcher.ResumeSession(taskID, sessionID); err != nil {
-			return statusMsg{text: fmt.Sprintf("#%d の resume を開始できない: %v", taskID, err), isError: true}
+			return statusMsg{text: fmt.Sprintf(b.text.Jump.ResumeFailed, taskID, err), isError: true}
 		}
 		return tea.QuitMsg{}
 	}

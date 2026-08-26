@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -22,12 +23,15 @@ const (
 	addFieldCount
 )
 
-var addFieldLabels = [addFieldCount]string{
-	addTitle:  "タイトル",
-	addStatus: "ステータス",
-	addDue:    "期限",
-	addNote:   "note",
-	addLink:   "リンク",
+// addFieldLabels names the rows in the language the board is drawing in.
+func addFieldLabels(text *i18n.Catalog) [addFieldCount]string {
+	return [addFieldCount]string{
+		addTitle:  text.Add.LabelTitle,
+		addStatus: text.Add.LabelStatus,
+		addDue:    text.Add.LabelDue,
+		addNote:   text.Add.LabelNote,
+		addLink:   text.Add.LabelLink,
+	}
 }
 
 // multiline reports whether several lines mean something on this field: the title makes one task
@@ -111,7 +115,7 @@ func (a *addState) note() string {
 func (b *Board) beginAdd() tea.Cmd {
 	col, ok := b.targetColumn()
 	if !ok {
-		return status("列が定義されていないためタスクを作成できない", true)
+		return status(b.text.Add.NoColumns, true)
 	}
 	b.add = newAddState(col.ID)
 	b.mode = modeAdd
@@ -200,10 +204,10 @@ func (b *Board) shiftAddStatus(delta int) {
 func (b *Board) submitAdd() tea.Cmd {
 	titles := b.add.titles()
 	if len(titles) == 0 {
-		b.add.err = "タイトルを入力する"
+		b.add.err = b.text.Add.NeedTitle
 		return nil
 	}
-	urls, err := parseLinkURLs(b.add.value(addLink))
+	urls, err := parseLinkURLs(b.text, b.add.value(addLink))
 	if err != nil {
 		b.add.err = err.Error()
 		return nil
@@ -234,6 +238,7 @@ func (b *Board) renderAdd() string {
 	width := b.modalWidth(84)
 	inner := modalInner(width)
 
+	labels := addFieldLabels(b.text)
 	var lines []string
 	for field := addTitle; field < addFieldCount; field++ {
 		// The finished lines sit above the field, so a multi-line entry reads as what it is.
@@ -247,11 +252,12 @@ func (b *Board) renderAdd() string {
 		}
 		// The text field styles its own cursor, so its row is assembled from parts already the
 		// right width rather than trimmed after the fact.
-		label := truncate(marker+padLabel(addFieldLabels[field]), inner)
+		label := truncate(marker+padLabel(labels[field]), inner)
 		if field == addStatus {
 			value := truncate(statusLabel, inner-lipgloss.Width(label))
 			if field == b.add.cursor {
-				value += "   " + b.styles.dim.Render(b.icons.horizontalKeys()+" で変更")
+				hint := fmt.Sprintf(b.text.Add.ChangeHint, b.icons.horizontalKeys())
+				value += "   " + b.styles.dim.Render(hint)
 			}
 			lines = append(lines, label+value)
 			continue
@@ -263,14 +269,14 @@ func (b *Board) renderAdd() string {
 
 	if titles := b.add.titles(); len(titles) > 1 {
 		lines = append(lines, b.styles.status.Render(truncate(
-			fmt.Sprintf("enter で %d 件のタスクを作成する", len(titles)), inner)))
+			fmt.Sprintf(b.text.Add.CreateHint, len(titles)), inner)))
 	}
 	if b.add.err != "" {
 		lines = append(lines, b.styles.alert.Render(truncate(b.add.err, inner)))
 	}
 
 	return b.renderModal(modal{
-		title:   "新しいタスク",
+		title:   b.text.Add.Title,
 		body:    lines,
 		help:    b.addHelp(),
 		width:   width,
@@ -281,6 +287,5 @@ func (b *Board) renderAdd() string {
 // addHelp names the key that actually inserts a line break, which depends on what the terminal
 // turned out to support.
 func (b *Board) addHelp() string {
-	return fmt.Sprintf("%s 項目  %s ステータス  %s 改行(タイトル/note)  enter 作成  esc 取消",
-		b.icons.verticalKeys(), b.icons.horizontalKeys(), b.newlineKey())
+	return fmt.Sprintf(b.text.Add.Help, b.icons.verticalKeys(), b.icons.horizontalKeys(), b.newlineKey())
 }

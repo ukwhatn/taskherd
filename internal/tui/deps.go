@@ -7,6 +7,7 @@ import (
 	"github.com/ukwhatn/taskherd/internal/config"
 	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -82,6 +83,9 @@ type Deps struct {
 // Settings are the board's configuration, resolved from config.toml before the program starts.
 type Settings struct {
 	Columns model.Columns
+	// Text is the language the board draws in. Nil falls back to the default catalog, so a caller
+	// that has not resolved a language still renders words rather than blanks.
+	Text *i18n.Catalog
 	// Editor is the command note editing opens, already resolved against the environment. Empty
 	// means no editor is configured anywhere, and note editing reports that rather than guessing.
 	Editor string

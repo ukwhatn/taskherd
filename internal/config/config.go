@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -23,7 +24,13 @@ type Paths struct {
 // Config is the content of config.toml.
 type Config struct {
 	// Editor is the command note editing opens, taking precedence over the environment.
-	Editor       string
+	Editor string
+	// Language is the UI language, "ja" or "en". TASKHERD_LANG overrides it for one invocation.
+	//
+	// It lives in config.toml rather than only in the environment because a board opened as a herdr
+	// plugin is spawned by the long-running herdr server and inherits that server's environment, so
+	// a variable exported in a shell never reaches it — the same reason jira.token_file exists.
+	Language     string
 	Board        Board
 	Columns      model.Columns
 	GitHub       GitHub
@@ -94,8 +101,9 @@ func (s SessionStart) TemplateFor(status string) string {
 // fileConfig mirrors config.toml. Scalars are pointers so that an explicit 0 is distinguishable
 // from an absent key (0 disables background refresh).
 type fileConfig struct {
-	Editor *string `toml:"editor"`
-	Board  struct {
+	Editor   *string `toml:"editor"`
+	Language *string `toml:"language"`
+	Board    struct {
 		RefreshIntervalMinutes *int    `toml:"refresh_interval_minutes"`
 		CacheTTLMinutes        *int    `toml:"cache_ttl_minutes"`
 		Icons                  *string `toml:"icons"`
@@ -128,6 +136,7 @@ var validIconModes = map[string]bool{"nerd": true, "ascii": true, "none": true}
 // Default returns the settings used when config.toml is absent.
 func Default() *Config {
 	return &Config{
+		Language:     string(i18n.Default),
 		Board:        Board{RefreshIntervalMinutes: 10, CacheTTLMinutes: 5, Icons: "nerd", Hyperlinks: true},
 		Columns:      model.DefaultColumns(),
 		Jira:         Jira{TokenEnv: "TASKHERD_JIRA_TOKEN"},
@@ -181,6 +190,9 @@ func Load(path string) (*Config, error) {
 	if raw.Editor != nil {
 		cfg.Editor = *raw.Editor
 	}
+	if raw.Language != nil {
+		cfg.Language = *raw.Language
+	}
 	if raw.Board.RefreshIntervalMinutes != nil {
 		cfg.Board.RefreshIntervalMinutes = *raw.Board.RefreshIntervalMinutes
 	}
@@ -225,6 +237,28 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// PeekLanguage reads the language setting out of config.toml and nothing else.
+//
+// This exists because the language has to be settled before anything can be rendered — cobra
+// builds every command's help text as the command tree is assembled, at the very top of a run —
+// while the real Load happens later, once a command knows it needs the rest of the settings.
+// Every failure here is swallowed on purpose: a missing file, a syntax error and an unknown key
+// all mean "no language was named", and reporting them would need the very language this is
+// resolving. Load reports them properly when the command actually reads its config.
+func PeekLanguage(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var raw struct {
+		Language string `toml:"language"`
+	}
+	if _, err := toml.Decode(string(data), &raw); err != nil {
+		return ""
+	}
+	return raw.Language
+}
+
 // Validate checks the column definitions and the interval settings.
 func (c *Config) Validate() error {
 	var violations []model.Violation
@@ -235,6 +269,12 @@ func (c *Config) Validate() error {
 			return err
 		}
 		violations = append(violations, invalid.Violations...)
+	}
+	if _, ok := i18n.Parse(c.Language); !ok {
+		violations = append(violations, model.Violation{
+			Path:    "language",
+			Message: fmt.Sprintf("%s のいずれかを指定する（実際: %q）", strings.Join(i18n.Names(), " / "), c.Language),
+		})
 	}
 	if c.Board.RefreshIntervalMinutes < 0 {
 		violations = append(violations, model.Violation{

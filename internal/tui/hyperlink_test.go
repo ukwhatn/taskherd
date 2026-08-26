@@ -121,7 +121,7 @@ func TestOverflowRowIsNotHyperlinked(t *testing.T) {
 	if strings.Contains(view, "https://github.com/o/r/pull/4") {
 		t.Errorf("上限を超えたリンクの URL が埋め込まれている:\n%q", view)
 	}
-	if !strings.Contains(view, "他 1 件") {
+	if !strings.Contains(view, fmt.Sprintf(ja.Board.MoreLinks, 1)) {
 		t.Errorf("集約行が描画されていない:\n%s", view)
 	}
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -249,8 +250,8 @@ func TestLinkRowCapsAtMaxWithSummaryRow(t *testing.T) {
 		t.Fatalf("rows = %d 行, want %d 行", len(rows), maxCardLinkRows+1)
 	}
 	summary := rows[len(rows)-1]
-	if !summary.Overflow || summary.Refs[0] != "他 2 件" {
-		t.Errorf("summary = %+v, want 他 2 件", summary)
+	if want := fmt.Sprintf(ja.Board.MoreLinks, 2); !summary.Overflow || summary.Refs[0] != want {
+		t.Errorf("summary = %+v, want %q", summary, want)
 	}
 	if summary.URL != "" {
 		t.Errorf("summary.URL = %q, want 空（開く先がない）", summary.URL)
@@ -355,7 +356,7 @@ func TestFailureMarkPerIconMode(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(string(tc.mode)+"/"+tc.age, func(t *testing.T) {
-			got := Icons(tc.mode).failureMark(tc.age)
+			got := Icons(tc.mode).failureMark(ja.Common.Failed, tc.age)
 			if got != tc.want {
 				t.Errorf("failureMark(%q) = %q, want %q", tc.age, got, tc.want)
 			}
