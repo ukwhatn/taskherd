@@ -75,6 +75,7 @@ func (a *app) startCmd() *cobra.Command {
 		cwdFlag    string
 		promptFlag string
 		newFlag    bool
+		noFocus    bool
 	)
 
 	cmd := &cobra.Command{
@@ -109,7 +110,7 @@ func (a *app) startCmd() *cobra.Command {
 				prompt = model.RenderPrompt(cfg.SessionStart.TemplateFor(task.Status), *task)
 			}
 
-			return a.startSession(cmd.Context(), task, cwd, prompt, newFlag)
+			return a.startSession(cmd.Context(), task, cwd, prompt, newFlag, !noFocus)
 		},
 	}
 
@@ -118,6 +119,8 @@ func (a *app) startCmd() *cobra.Command {
 		"起動直後に送るプロンプト（省略時は config のテンプレートを使う。空文字を明示すると送らない）")
 	cmd.Flags().BoolVar(&newFlag, "new", false,
 		"前回起動した agent があっても回収せず、新しく起こす（NAME に連番が付く）")
+	cmd.Flags().BoolVar(&noFocus, "no-focus", false,
+		"起こした pane へ移動しない（既定は移動する）")
 	return cmd
 }
 
@@ -307,7 +310,13 @@ func nextAgentName(snapshot *herdrc.Snapshot, agentName string) string {
 //
 // forceNew (--new) skips the recovery check entirely and always starts a fresh pane, the one way
 // to intentionally run a second session for the same task (§4.3).
-func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt string, forceNew bool) error {
+//
+// focus moves the user to the pane as soon as it exists, which is what makes `g` on the board feel
+// like the jump it shares a key with. It happens up front rather than at the end: the launch takes
+// around half a minute to reach a linked session with a prompt in it, and pulling focus at the end
+// of that would yank the user out of whatever they moved on to. --no-focus is for a launch nobody
+// is waiting on, started for a task other than the one at hand.
+func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt string, forceNew, focus bool) error {
 	client := a.herdr()
 	result := startResult{TaskID: task.ID}
 	agentName := agentNameFor(task.ID)
@@ -332,8 +341,13 @@ func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt st
 	if reused != nil {
 		paneID, sessionID, linkCwd = reused.PaneID, reused.SessionID(), reused.Cwd
 		result.PaneID, result.SessionID, result.Stage, result.Reused = paneID, sessionID, stageWaited, true
+		if focus {
+			// Best-effort, like every other focus in this file: a recovered pane that cannot be
+			// focused is still a pane the launch is about to link and prompt.
+			_ = client.FocusAgent(ctx, paneID)
+		}
 	} else {
-		tab, err := client.CreateTab(ctx, herdrc.TabSpec{Cwd: cwd, Label: task.Title})
+		tab, err := client.CreateTab(ctx, herdrc.TabSpec{Cwd: cwd, Label: task.Title, Focus: focus})
 		if err != nil {
 			// Nothing was created: a plain error, not a partial result.
 			return err

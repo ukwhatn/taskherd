@@ -30,6 +30,10 @@ const cliTimeout = 15 * time.Second
 type TabSpec struct {
 	Cwd   string
 	Label string
+	// Focus moves the user to the new tab as it is created, rather than leaving it in the
+	// background. Verified against herdr 0.8.2: `tab create` without --focus emits no focus event
+	// and leaves the focused tab where it was, so this has to be asked for explicitly.
+	Focus bool
 }
 
 // Tab is the result of creating a tab: the new tab and the pane an agent can be started in.
@@ -84,6 +88,11 @@ func (c *Client) CreateTab(ctx context.Context, spec TabSpec) (Tab, error) {
 	}
 	if spec.Label != "" {
 		args = append(args, "--label", spec.Label)
+	}
+	// Only the positive flag is ever sent: leaving the tab in the background is herdr's own
+	// default, so --no-focus would just restate it.
+	if spec.Focus {
+		args = append(args, "--focus")
 	}
 
 	out, err := c.runner.Run(callCtx, args...)

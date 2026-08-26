@@ -273,6 +273,38 @@ func TestCreateTabReturnsRootPane(t *testing.T) {
 	}
 }
 
+// herdr leaves a created tab in the background unless asked otherwise, so the flag has to be sent
+// for the caller that wants to land on it.
+func TestCreateTabAsksForFocusOnlyWhenRequested(t *testing.T) {
+	tests := []struct {
+		name  string
+		focus bool
+		want  string
+	}{
+		{name: "focus", focus: true, want: "tab create --cwd /tmp/work --label t --focus"},
+		{name: "background", focus: false, want: "tab create --cwd /tmp/work --label t"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &fakeRunner{handler: func([]string) ([]byte, error) {
+				return []byte(`{"id":"cli:tab:create","result":{"type":"tab_created",` +
+					`"tab":{"tab_id":"wS:t9","workspace_id":"wS"},` +
+					`"root_pane":{"pane_id":"wS:p9","cwd":"/private/tmp/work"}}}`), nil
+			}}
+			client := newClient(t, newFakeHerdr(t, snapshotJSON()), runner)
+
+			if _, err := client.CreateTab(context.Background(),
+				herdrc.TabSpec{Cwd: "/tmp/work", Label: "t", Focus: tc.focus}); err != nil {
+				t.Fatalf("CreateTab: %v", err)
+			}
+
+			if got := strings.Join(runner.Calls()[0], " "); got != tc.want {
+				t.Errorf("呼び出し = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStartAgentPassesResumeAfterSeparator(t *testing.T) {
 	runner := &fakeRunner{handler: func([]string) ([]byte, error) {
 		return []byte(`{"id":"cli:agent:start","result":{"type":"agent_started",` +
