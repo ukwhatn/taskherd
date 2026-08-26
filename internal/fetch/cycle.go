@@ -4,16 +4,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
+// providerConcurrency is how many links of one kind are fetched at a time.
+//
+// The ceiling that matters is GitHub's secondary rate limit on concurrent requests, which is far
+// above this; the per-hour GraphQL point budget is untouched by a few dozen links. Eight keeps a
+// board-sized refresh at a few seconds without being close enough to either limit to need tuning,
+// which is why this is a constant rather than a config knob.
+const providerConcurrency = 8
+
 // Fetcher runs one refresh cycle over a set of link URLs, writing results into Cache.
-// GitHub and Jira links are each worked through serially within their own kind, so a rate
-// limit on one provider never touches the other's remaining requests (§5.3/§8.3 of the
-// implementation master). This is the cycle-execution API PR-4's board is expected to call
-// on a timer; PR-3 only wires it to the `refresh` command.
+// GitHub and Jira run as two independent cycles side by side, each with its own concurrency
+// and its own rate-limit stop, so a rate limit on one provider never touches the other's
+// remaining requests (§5.3/§8.3 of the implementation master).
 type Fetcher struct {
 	GitHub     *GitHubFetcher
 	Jira       *JiraFetcher
@@ -37,32 +48,121 @@ type RefreshResult struct {
 	JiraInterrupted   bool
 }
 
+// attempt is one link's slot in a provider's run. Each worker owns exactly one slot, so the
+// slice needs no lock, and the fixed slice order is what keeps Outcomes deterministic even
+// though the fetches complete out of order.
+type attempt struct {
+	url       string
+	at        time.Time
+	data      any
+	err       error
+	attempted bool
+}
+
 // RefreshLinks fetches the current status of each url and stores it in Cache. URLs whose
 // kind is not github_pr/github_issue/jira are silently skipped: there is nothing to fetch
 // for an "other" link.
+//
+// Fetches run concurrently, but the cache is written once at the end of the cycle rather than
+// once per link: a per-link write would serialize behind the cache lock everything the
+// concurrency just bought. The trade is that a cycle killed partway through leaves nothing
+// behind, where the old serial code kept whatever it had already fetched. Losing a cycle costs
+// only a repeat of it, so the write is folded into a single transaction.
 func (f *Fetcher) RefreshLinks(ctx context.Context, urls []string) (*RefreshResult, error) {
 	githubURLs, jiraURLs := f.partitionByKind(urls)
-	result := &RefreshResult{}
+	github := make([]attempt, len(githubURLs))
+	jira := make([]attempt, len(jiraURLs))
 
-	for _, u := range githubURLs {
-		outcome := f.refreshOne(ctx, u, f.fetchGitHub)
-		result.Outcomes = append(result.Outcomes, outcome)
-		if isGHRateLimit(outcome.Err) {
-			result.GitHubInterrupted = true
-			break
-		}
+	var githubStopped, jiraStopped atomic.Bool
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		f.runProvider(ctx, githubURLs, github, f.fetchGitHub, isGHRateLimit, &githubStopped)
+	}()
+	go func() {
+		defer wg.Done()
+		f.runProvider(ctx, jiraURLs, jira, f.fetchJira, isJiraRateLimit, &jiraStopped)
+	}()
+	wg.Wait()
+
+	result := &RefreshResult{
+		GitHubInterrupted: githubStopped.Load(),
+		JiraInterrupted:   jiraStopped.Load(),
 	}
-
-	for _, u := range jiraURLs {
-		outcome := f.refreshOne(ctx, u, f.fetchJira)
-		result.Outcomes = append(result.Outcomes, outcome)
-		if isJiraRateLimit(outcome.Err) {
-			result.JiraInterrupted = true
-			break
-		}
-	}
-
+	f.commit(ctx, github, jira, result)
 	return result, nil
+}
+
+// runProvider fetches one kind's links with a bounded number in flight.
+//
+// A rate limit stops the run the same way the serial version's break did: the links that have
+// not started are never attempted, and so never appear in Outcomes. Requests already in flight
+// are left to finish rather than cancelled — they were already spent, and their results are
+// worth keeping — so a stopped run reports at most concurrency-1 more links than a serial one.
+func (f *Fetcher) runProvider(
+	ctx context.Context,
+	urls []string,
+	attempts []attempt,
+	doFetch func(context.Context, string) (any, error),
+	isRateLimit func(error) bool,
+	stopped *atomic.Bool,
+) {
+	var g errgroup.Group
+	g.SetLimit(providerConcurrency)
+
+	for i, url := range urls {
+		g.Go(func() error {
+			if stopped.Load() {
+				return nil
+			}
+			data, err := doFetch(ctx, url)
+			attempts[i] = attempt{url: url, at: f.Now(), data: data, err: err, attempted: true}
+			if isRateLimit(err) {
+				stopped.Store(true)
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+}
+
+// commit writes every attempted link into the cache under one lock/read/write transaction and
+// fills in result.Outcomes. A fetch that failed still gets an entry, so a link that has been
+// broken for a while keeps reporting how long.
+func (f *Fetcher) commit(ctx context.Context, github, jira []attempt, result *RefreshResult) {
+	updateErr := f.Cache.Update(ctx, func(cf *CacheFile) {
+		for _, group := range [][]attempt{github, jira} {
+			for i := range group {
+				a := &group[i]
+				if !a.attempted {
+					continue
+				}
+				if a.err != nil {
+					cf.SetFailure(a.url, a.err, a.at)
+					continue
+				}
+				if err := cf.SetSuccess(a.url, a.data, a.at); err != nil {
+					a.err = err
+				}
+			}
+		}
+	})
+
+	for _, group := range [][]attempt{github, jira} {
+		for i := range group {
+			a := &group[i]
+			if !a.attempted {
+				continue
+			}
+			err := a.err
+			if updateErr != nil {
+				err = updateErr
+			}
+			result.Outcomes = append(result.Outcomes, RefreshOutcome{URL: a.url, Err: err})
+		}
+	}
 }
 
 func (f *Fetcher) partitionByKind(urls []string) (github, jira []string) {
@@ -75,27 +175,6 @@ func (f *Fetcher) partitionByKind(urls []string) (github, jira []string) {
 		}
 	}
 	return github, jira
-}
-
-// refreshOne fetches url and writes the outcome into Cache under one lock/read/write
-// transaction, so a failed fetch cannot leave a half-updated entry.
-func (f *Fetcher) refreshOne(ctx context.Context, url string, doFetch func(context.Context, string) (any, error)) RefreshOutcome {
-	data, fetchErr := doFetch(ctx, url)
-	now := f.Now()
-
-	updateErr := f.Cache.Update(ctx, func(cf *CacheFile) {
-		if fetchErr != nil {
-			cf.SetFailure(url, fetchErr, now)
-			return
-		}
-		if err := cf.SetSuccess(url, data, now); err != nil {
-			fetchErr = err
-		}
-	})
-	if updateErr != nil {
-		return RefreshOutcome{URL: url, Err: updateErr}
-	}
-	return RefreshOutcome{URL: url, Err: fetchErr}
 }
 
 func (f *Fetcher) fetchGitHub(ctx context.Context, url string) (any, error) {
