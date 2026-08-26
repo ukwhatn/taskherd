@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "entries": {
+    "https://github.com/acme/webapp/pull/482": {
+      "fetched_at": "2026-08-26T05:58:00Z",
+      "ok": true,
+      "error": "",
+      "data": {
+        "state": "OPEN",
+        "is_draft": false,
+        "review_decision": "APPROVED",
+        "checks": "pass",
+        "title": "Rate limit the public search endpoint",
+        "updated_at": "2026-08-26T05:40:00Z"
+      }
+    },
+    "https://acme.atlassian.net/browse/PLAT-311": {
+      "fetched_at": "2026-08-26T05:58:00Z",
+      "ok": true,
+      "error": "",
+      "data": {
+        "status_name": "In Review",
+        "status_category": "indeterminate",
+        "summary": "Rate limit the public search endpoint",
+        "updated_at": "2026-08-26T05:30:00Z"
+      }
+    },
+    "https://github.com/acme/webapp/issues/477": {
+      "fetched_at": "2026-08-26T05:58:00Z",
+      "ok": true,
+      "error": "",
+      "data": {
+        "state": "OPEN",
+        "is_draft": false,
+        "review_decision": "",
+        "checks": "",
+        "title": "Session resume drops the working directory",
+        "updated_at": "2026-08-26T04:10:00Z"
+      }
+    },
+    "https://github.com/acme/platform/pull/91": {
+      "fetched_at": "2026-08-26T05:58:00Z",
+      "ok": true,
+      "error": "",
+      "data": {
+        "state": "OPEN",
+        "is_draft": true,
+        "review_decision": "REVIEW_REQUIRED",
+        "checks": "fail",
+        "title": "Migrate the billing job to the new scheduler",
+        "updated_at": "2026-08-26T05:45:00Z"
+      }
+    },
+    "https://acme.atlassian.net/browse/DOC-58": {
+      "fetched_at": "2026-08-26T05:58:00Z",
+      "ok": true,
+      "error": "",
+      "data": {
+        "status_name": "To Do",
+        "status_category": "new",
+        "summary": "Write the upgrade notes for 2.0",
+        "updated_at": "2026-08-26T03:00:00Z"
+      }
+    },
+    "https://github.com/acme/platform/issues/88": {
+      "fetched_at": "2026-08-26T05:58:00Z",
+      "ok": true,
+      "error": "",
+      "data": {
+        "state": "OPEN",
+        "is_draft": false,
+        "review_decision": "",
+        "checks": "",
+        "title": "Flaky test in the queue consumer",
+        "updated_at": "2026-08-26T03:30:00Z"
+      }
+    },
+    "https://github.com/acme/webapp/pull/470": {
+      "fetched_at": "2026-08-26T05:58:00Z",
+      "ok": true,
+      "error": "",
+      "data": {
+        "state": "MERGED",
+        "is_draft": false,
+        "review_decision": "APPROVED",
+        "checks": "pass",
+        "title": "Cache the org membership lookup",
+        "updated_at": "2026-08-25T07:55:00Z"
+      }
+    }
+  }
+}

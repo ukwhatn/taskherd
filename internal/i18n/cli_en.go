@@ -254,9 +254,9 @@ var cliEN = CLI{
 		JiraLimited:   "Stopped early: Jira rate limit",
 	},
 	Update: CLIUpdate{
-		Short:       "Check for a newer release and install it",
-		FlagCheck:   "Only check; do not install",
-		FlagYes:     "Install without asking",
+		Short:       "check for a newer release and install it",
+		FlagCheck:   "only check; do not install",
+		FlagYes:     "install without asking",
 		Available:   "%s is available (running %s)\n",
 		UpToDate:    "Up to date (%s)\n",
 		Confirm:     "Update to %s?",
@@ -281,7 +281,7 @@ var cliEN = CLI{
 		Notice: "%s is available (running %s). Run taskherd update to install it\n",
 	},
 	Version: CLIVersion{
-		Short: "Show the version",
+		Short: "show the version",
 	},
 	Config: CLIConfig{
 		Short:     "work with the config and data files",

@@ -1,0 +1,60 @@
+# Configuration for the screenshots in docs/assets.
+#
+# Everything the demo shows is invented: acme/webapp and acme.atlassian.net do not exist, and no
+# fetch ever runs against them (scripts/demo/cache.json stands in for the live state). Keep it that
+# way — screenshots are published, and real repository names, ticket keys and titles are not.
+
+language = "ja"
+
+[board]
+# 0 disables the background fetch, so a screenshot never depends on the network.
+refresh_interval_minutes = 0
+# Long enough that the seeded cache never reads as stale.
+cache_ttl_minutes = 525600
+icons = "nerd"
+hyperlinks = true
+
+[jira]
+# Naming the site is what lets a browse URL render as its issue key rather than as a bare host.
+# No token is set, so nothing is ever fetched from it.
+site = "acme.atlassian.net"
+
+[update]
+# The demo must not reach GitHub while a recording is running.
+check = false
+
+[[columns]]
+id = "todo"
+label = "ToDo"
+kind = "open"
+color = "gray"
+
+[[columns]]
+id = "planning"
+label = "Planning"
+kind = "open"
+color = "blue"
+
+[[columns]]
+id = "working"
+label = "Working"
+kind = "open"
+color = "green"
+
+[[columns]]
+id = "review"
+label = "Review"
+kind = "open"
+color = "magenta"
+
+[[columns]]
+id = "done"
+label = "Done"
+kind = "terminal"
+color = "purple"
+
+[[columns]]
+id = "wontfix"
+label = "Wontfix"
+kind = "terminal"
+color = "gray"
