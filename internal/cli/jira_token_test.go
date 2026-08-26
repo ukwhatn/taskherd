@@ -87,7 +87,7 @@ func TestRefreshWithoutAnyTokenSourceStillSaysNotConfigured(t *testing.T) {
 	h := jiraHarness(t, "")
 	res := h.run(t, "refresh", "--all")
 
-	if !strings.Contains(res.stdout+res.stderr, "Jira の設定がない") {
+	if !strings.Contains(res.stdout+res.stderr, ja.Err.Live.JiraNotConfigured.Msg) {
 		t.Errorf("未設定である旨が出ていない:\n%s%s", res.stdout, res.stderr)
 	}
 }

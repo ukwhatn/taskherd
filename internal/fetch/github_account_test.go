@@ -3,12 +3,17 @@ package fetch_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/ukwhatn/taskherd/internal/fetch"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 )
+
+// en is the language an error's own Error() speaks, which is what these tests read.
+var en = i18n.For(i18n.LangEN)
 
 // scriptedGH answers a sequence of gh invocations and records what each one was run with.
 type scriptedGH struct {
@@ -401,9 +406,8 @@ func TestGitHubFetcherDiagnosesWrongAccountOn404(t *testing.T) {
 	msg := err.Error()
 	for _, want := range []string{
 		"Could not resolve to a Repository",
-		`取得に使ったアカウント: "personal"`,
-		`"github.com"`,
-		`"<host>/<owner>"`,
+		fmt.Sprintf(en.Err.Live.GHAccountNamed, "personal", "github.com"),
+		en.Err.Live.GHAccountOwnerHint,
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("メッセージに %q が無い:\n%s", want, msg)
@@ -426,7 +430,7 @@ func TestGitHubFetcher404WithoutConfiguredAccount(t *testing.T) {
 	if err == nil {
 		t.Fatal("FetchPR() error = nil, want エラー")
 	}
-	if !strings.Contains(err.Error(), "gh の active account") {
+	if !strings.Contains(err.Error(), en.Err.Live.GHAccountActive) {
 		t.Errorf("メッセージが使用アカウントに触れていない:\n%s", err.Error())
 	}
 }

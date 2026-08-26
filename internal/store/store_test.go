@@ -193,8 +193,8 @@ func TestLoadReportsRecoveryHintOnCorruptFile(t *testing.T) {
 	if !errors.As(err, &corrupt) {
 		t.Fatalf("Load() error = %v, want *CorruptError", err)
 	}
-	if corrupt.Hint() == "" {
-		t.Error("Hint() が空（.bak からの復旧手順を案内していない）")
+	if _, hint := corrupt.Localize(nil); hint == "" {
+		t.Error("Localize() の hint が空（.bak からの復旧手順を案内していない）")
 	}
 }
 
@@ -267,9 +267,9 @@ func TestLoadVersionMismatchHintDoesNotAdviseBackupRecovery(t *testing.T) {
 		t.Errorf("Unwrap で *VersionMismatchError に到達できない: %v", err)
 	}
 
-	hint := unsupported.Hint()
+	_, hint := unsupported.Localize(nil)
 	if hint == "" {
-		t.Fatal("Hint() が空")
+		t.Fatal("Localize() の hint が空")
 	}
 	if strings.Contains(hint, "tasks.json.bak") {
 		t.Errorf("hint = %q, want .bak 復旧を案内しない（新しいファイルを古いバイナリで読んでいる状況）", hint)

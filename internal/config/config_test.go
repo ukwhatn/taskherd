@@ -89,7 +89,7 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 
 func TestLoadDefaultFileContentMatchesDefaults(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte(config.DefaultFileContent()), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(config.DefaultFileContent("ja")), 0o600); err != nil {
 		t.Fatalf("config.toml を書けない: %v", err)
 	}
 
@@ -307,7 +307,7 @@ editor = "nano"
 // over the environment, which is not what a user who never set the key asked for.
 func TestDefaultFileContentLeavesEditorUnset(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte(config.DefaultFileContent()), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(config.DefaultFileContent("ja")), 0o600); err != nil {
 		t.Fatalf("config.toml を書けない: %v", err)
 	}
 
@@ -442,7 +442,7 @@ func TestLoadRejectsEmptyGitHubAccount(t *testing.T) {
 // value copied out of a template would silently override gh's own resolution.
 func TestDefaultFileContentLeavesGitHubAccountsUnset(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte(config.DefaultFileContent()), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(config.DefaultFileContent("ja")), 0o600); err != nil {
 		t.Fatalf("config.toml を書けない: %v", err)
 	}
 
@@ -453,7 +453,7 @@ func TestDefaultFileContentLeavesGitHubAccountsUnset(t *testing.T) {
 	if len(cfg.GitHub.Accounts) != 0 {
 		t.Errorf("Accounts = %+v, want 空", cfg.GitHub.Accounts)
 	}
-	if !strings.Contains(config.DefaultFileContent(), "[github.accounts]") {
+	if !strings.Contains(config.DefaultFileContent("ja"), "[github.accounts]") {
 		t.Error("テンプレートに github.accounts の説明が無い")
 	}
 }
@@ -531,7 +531,7 @@ func TestLoadAcceptsTrailingSlashOnHostKey(t *testing.T) {
 // The template has to show the owner form, because a host-only example is what leads to every link
 // on a mixed host failing with a 404.
 func TestDefaultFileContentDocumentsOwnerForm(t *testing.T) {
-	content := config.DefaultFileContent()
+	content := config.DefaultFileContent("ja")
 	for _, want := range []string{`"<host>/<owner>"`, `# "github.com/some-org" = "work-account"`} {
 		if !strings.Contains(content, want) {
 			t.Errorf("テンプレートに %q が無い", want)
@@ -566,7 +566,7 @@ token_file = "~/.config/taskherd/jira_token"
 
 func TestDefaultFileContentLeavesTokenFileCommentedOut(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte(config.DefaultFileContent()), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(config.DefaultFileContent("ja")), 0o600); err != nil {
 		t.Fatalf("config.toml を書けない: %v", err)
 	}
 
@@ -577,7 +577,7 @@ func TestDefaultFileContentLeavesTokenFileCommentedOut(t *testing.T) {
 	if cfg.Jira.TokenFile != "" {
 		t.Errorf("TokenFile = %q, want 空（生成された config では例をコメントで示すだけ）", cfg.Jira.TokenFile)
 	}
-	if !strings.Contains(config.DefaultFileContent(), "# token_file =") {
+	if !strings.Contains(config.DefaultFileContent("ja"), "# token_file =") {
 		t.Error("生成された config に token_file の書き方が示されていない")
 	}
 }

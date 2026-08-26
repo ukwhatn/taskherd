@@ -157,7 +157,7 @@ func (r *execRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
 	}
 	// Only the operation name reaches the message, never the argument values: one of them can be
 	// arbitrary text handed to `agent prompt`, and it must not surface on any error path.
-	return out, fmt.Errorf("%s %s の実行に失敗した: %w", r.bin, operationName(args), err)
+	return out, fmt.Errorf("%s %s failed: %w", r.bin, operationName(args), err)
 }
 
 // knownOperations names every herdr subcommand taskherd invokes, longest first so a 3-word
@@ -201,7 +201,7 @@ func operationName(args []string) string {
 	// the safe subcommand word today (verified against real herdr, never a positional value), but
 	// falling back to it would depend on that staying true forever. The fixed word costs nothing
 	// and stays safe even if a future herdr command shape changes what args[0] can hold.
-	return "コマンド"
+	return "command"
 }
 
 // snapshotViaCLI is the fallback path used when the derived socket path does not resolve.
@@ -215,7 +215,7 @@ func (c *Client) snapshotViaCLI(ctx context.Context) (*Snapshot, error) {
 	}
 	var env envelope
 	if err := json.Unmarshal(out, &env); err != nil {
-		return nil, fmt.Errorf("herdr api snapshot の出力を解析できない: %w", err)
+		return nil, fmt.Errorf("cannot parse the output of herdr api snapshot: %w", err)
 	}
 	if env.Error != nil {
 		return nil, &APIError{Code: env.Error.Code, Message: env.Error.Message}

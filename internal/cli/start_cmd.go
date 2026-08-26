@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -51,7 +52,7 @@ func (e *partialResultError) Error() string {
 	return e.msg
 }
 
-// Hint implements the hinter interface consumed by the error reporter and by notifyError.
+// Hint implements the interface i18n.Message reads advice through.
 func (e *partialResultError) Hint() string { return e.hint }
 
 // startResult is a session-start attempt's outcome, reported in the same shape whether it fully
@@ -428,8 +429,10 @@ func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt st
 // (see startResult and partialResultError). Text mode prints the same information as two lines: a
 // summary of what exists so far, then the error and its hint when there is one.
 func (a *app) emitStart(result startResult, err error, hint string) error {
+	text := ""
 	if err != nil {
-		result.Error, result.Hint = err.Error(), hint
+		text, _ = i18n.Message(a.text, err)
+		result.Error, result.Hint = text, hint
 	}
 
 	if a.jsonOut {
@@ -460,9 +463,9 @@ func (a *app) emitStart(result startResult, err error, hint string) error {
 	if err == nil {
 		return nil
 	}
-	fmt.Fprintf(a.env.Err, a.text.CLI.Root.ErrorPrefix, err)
+	fmt.Fprintf(a.env.Err, a.text.CLI.Root.ErrorPrefix, text)
 	if hint != "" {
 		fmt.Fprintf(a.env.Err, a.text.CLI.Root.HintPrefix, hint)
 	}
-	return &partialResultError{msg: err.Error(), hint: hint, fallback: a.text.CLI.Start.PartialLabel}
+	return &partialResultError{msg: text, hint: hint, fallback: a.text.CLI.Start.PartialLabel}
 }

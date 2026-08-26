@@ -10,6 +10,7 @@ var cliEN = CLI{
 		ErrorPrefix:     "error: %v\n",
 		HintPrefix:      "hint: %s\n",
 		NotifyTitle:     "taskherd: %s failed",
+		NotifyBody:      "%s (%s)",
 		ConfirmPrompt:   "%s [y/N]: ",
 		Cancelled:       "Cancelled",
 		BadTaskID: Problem{

@@ -120,8 +120,8 @@ func TestGitHubFetcherNotFound(t *testing.T) {
 	if !errors.As(err, &notFound) {
 		t.Fatalf("err = %v (%T), want *GHNotFoundError", err, err)
 	}
-	if notFound.Hint() == "" {
-		t.Error("Hint() が空")
+	if _, hint := notFound.Localize(nil); hint == "" {
+		t.Error("Localize() の hint が空")
 	}
 }
 
@@ -151,10 +151,11 @@ func TestGitHubFetcherCommandError(t *testing.T) {
 	if !errors.As(err, &cmdErr) {
 		t.Fatalf("err = %v (%T), want *GHCommandError", err, err)
 	}
-	if cmdErr.Hint() == "" {
-		t.Error("Hint() が空")
+	text, hint := cmdErr.Localize(nil)
+	if hint == "" {
+		t.Error("Localize() の hint が空")
 	}
-	if cmdErr.Error() == "" {
-		t.Error("Error() が空（stderr をそのまま提示すべき）")
+	if text == "" {
+		t.Error("Localize() の本文が空（stderr をそのまま提示すべき）")
 	}
 }

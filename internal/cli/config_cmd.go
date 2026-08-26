@@ -83,7 +83,7 @@ func (a *app) configInitCmd() *cobra.Command {
 			if err := os.Chmod(dir, 0o700); err != nil {
 				return fmt.Errorf("cannot set permissions on %s: %w", dir, err)
 			}
-			if err := os.WriteFile(path, []byte(config.DefaultFileContent()), 0o600); err != nil {
+			if err := os.WriteFile(path, []byte(config.DefaultFileContent(string(resolveLang(a.env)))), 0o600); err != nil {
 				return fmt.Errorf("cannot write %s: %w", path, err)
 			}
 

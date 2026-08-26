@@ -114,7 +114,7 @@ func (c *Client) CreateTab(ctx context.Context, spec TabSpec) (Tab, error) {
 		return Tab{}, err
 	}
 	if payload.RootPane.PaneID == "" {
-		return Tab{}, fmt.Errorf("herdr tab create が pane を返さなかった")
+		return Tab{}, errors.New("herdr tab create returned no pane")
 	}
 	return Tab{
 		TabID:       payload.Tab.TabID,
@@ -299,16 +299,16 @@ func (c *Client) ReportTaskDisplay(ctx context.Context, paneID string, taskID in
 func decodeResult(out []byte, target any) error {
 	var env envelope
 	if err := json.Unmarshal(out, &env); err != nil {
-		return fmt.Errorf("herdr の出力を解析できない: %w", err)
+		return fmt.Errorf("cannot parse herdr's output: %w", err)
 	}
 	if env.Error != nil {
 		return &APIError{Code: env.Error.Code, Message: env.Error.Message}
 	}
 	if len(env.Result) == 0 {
-		return fmt.Errorf("herdr の出力に result が無い")
+		return errors.New("herdr's output carries no result")
 	}
 	if err := json.Unmarshal(env.Result, target); err != nil {
-		return fmt.Errorf("herdr の result を解析できない: %w", err)
+		return fmt.Errorf("cannot parse herdr's result: %w", err)
 	}
 	return nil
 }

@@ -201,7 +201,7 @@ func decodeSnapshot(result json.RawMessage) (*Snapshot, error) {
 		Snapshot Snapshot `json:"snapshot"`
 	}
 	if err := json.Unmarshal(result, &payload); err != nil {
-		return nil, fmt.Errorf("snapshot を解析できない: %w", err)
+		return nil, fmt.Errorf("cannot parse the snapshot: %w", err)
 	}
 	return &payload.Snapshot, nil
 }

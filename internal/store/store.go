@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -37,14 +38,19 @@ type CorruptError struct {
 }
 
 func (e *CorruptError) Error() string {
-	return fmt.Sprintf("%s を読み込めない: %v", e.Path, e.Err)
+	text, _ := e.Localize(i18n.For(i18n.LangEN))
+	return text
 }
 
 func (e *CorruptError) Unwrap() error { return e.Err }
 
-// Hint returns how to recover.
-func (e *CorruptError) Hint() string {
-	return fmt.Sprintf("書き込み前の内容は %s に残っている。内容を確認して手動で復旧する（taskherd は自動上書きしない）", e.BakPath)
+// Localize states the problem and how to recover from it. The cause is put through Message too:
+// a parse failure is an English diagnostic, but a version mismatch is not, and only Message knows
+// which one it is holding.
+func (e *CorruptError) Localize(t *i18n.Catalog) (string, string) {
+	entry := i18n.OrDefault(t).Err.Data.Corrupt
+	cause, _ := i18n.Message(t, e.Err)
+	return fmt.Sprintf(entry.Msg, e.Path, cause), fmt.Sprintf(entry.Hint, e.BakPath)
 }
 
 // UnsupportedVersionError reports a tasks.json written for a different taskherd version.
@@ -55,14 +61,17 @@ type UnsupportedVersionError struct {
 }
 
 func (e *UnsupportedVersionError) Error() string {
-	return fmt.Sprintf("%s を読み込めない: %v", e.Path, e.Err)
+	text, _ := e.Localize(i18n.For(i18n.LangEN))
+	return text
 }
 
 func (e *UnsupportedVersionError) Unwrap() error { return e.Err }
 
-// Hint returns how to recover.
-func (e *UnsupportedVersionError) Hint() string {
-	return "ファイルが新しい場合は taskherd を新しい version 対応のバイナリへ更新する。古い形式の場合は手動で移行する（バックアップからの復旧では解決しない）"
+// Localize states the problem and how to recover from it.
+func (e *UnsupportedVersionError) Localize(t *i18n.Catalog) (string, string) {
+	entry := i18n.OrDefault(t).Err.Data.Version
+	cause, _ := i18n.Message(t, e.Err)
+	return fmt.Sprintf(entry.Msg, e.Path, cause), entry.Hint
 }
 
 // LockError reports that waiting for the lock timed out.
@@ -73,14 +82,16 @@ type LockError struct {
 }
 
 func (e *LockError) Error() string {
-	return fmt.Sprintf("%s のロックを %s 以内に取得できなかった: %v", e.Path, e.Timeout, e.Err)
+	text, _ := e.Localize(i18n.For(i18n.LangEN))
+	return text
 }
 
 func (e *LockError) Unwrap() error { return e.Err }
 
-// Hint returns how to recover.
-func (e *LockError) Hint() string {
-	return "他の taskherd プロセスが書き込み中の可能性がある。完了を待ってから再実行する"
+// Localize states the problem and how to recover from it.
+func (e *LockError) Localize(t *i18n.Catalog) (string, string) {
+	entry := i18n.OrDefault(t).Err.Data.Lock
+	return fmt.Sprintf(entry.Msg, e.Path, e.Timeout, e.Err), entry.Hint
 }
 
 // Store reads and writes one data directory.
@@ -143,7 +154,7 @@ func (s *Store) Update(ctx context.Context, fn func(*model.File) error) error {
 	// The mutated result is re-validated: a buggy caller must not be able to persist
 	// duplicate ids or a stale next_id into the file every other command trusts.
 	if err := model.Validate(f); err != nil {
-		return fmt.Errorf("変更後の内容が検証を通らないため書き込みを中止した: %w", err)
+		return fmt.Errorf("write aborted: the mutated content does not validate: %w", err)
 	}
 
 	data, err := model.MarshalFile(f)
@@ -153,11 +164,11 @@ func (s *Store) Update(ctx context.Context, fn func(*model.File) error) error {
 	// The backup must land before the rename; afterwards it would hold the new content and recover nothing.
 	if raw != nil {
 		if err := writeFileAtomic(s.BakPath(), raw); err != nil {
-			return fmt.Errorf("バックアップを書けない: %w", err)
+			return fmt.Errorf("cannot write the backup: %w", err)
 		}
 	}
 	if err := writeFileAtomic(s.TasksPath(), data); err != nil {
-		return fmt.Errorf("%s を書けない: %w", s.TasksPath(), err)
+		return fmt.Errorf("cannot write %s: %w", s.TasksPath(), err)
 	}
 	return nil
 }
@@ -184,7 +195,7 @@ func (s *Store) read() ([]byte, *model.File, error) {
 		return nil, model.NewFile(), nil
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s を読めない: %w", s.TasksPath(), err)
+		return nil, nil, fmt.Errorf("cannot read %s: %w", s.TasksPath(), err)
 	}
 
 	f, err := model.ParseFile(raw)
@@ -200,11 +211,11 @@ func (s *Store) read() ([]byte, *model.File, error) {
 
 func (s *Store) ensureDir() error {
 	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
-		return fmt.Errorf("%s を作成できない: %w", s.dir, err)
+		return fmt.Errorf("cannot create %s: %w", s.dir, err)
 	}
 	// MkdirAll applies umask, so the mode is set explicitly here (this also tightens an existing directory).
 	if err := os.Chmod(s.dir, dirPerm); err != nil {
-		return fmt.Errorf("%s の権限を設定できない: %w", s.dir, err)
+		return fmt.Errorf("cannot set the mode on %s: %w", s.dir, err)
 	}
 	return nil
 }

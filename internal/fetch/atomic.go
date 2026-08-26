@@ -15,7 +15,7 @@ func writeFileAtomic(path string, data []byte) error {
 
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
-		return fmt.Errorf("一時ファイルを作れない: %w", err)
+		return fmt.Errorf("cannot create the temporary file: %w", err)
 	}
 	tmpName := tmp.Name()
 	defer func() {
@@ -24,19 +24,19 @@ func writeFileAtomic(path string, data []byte) error {
 	}()
 
 	if err := tmp.Chmod(filePerm); err != nil {
-		return fmt.Errorf("一時ファイルの権限を設定できない: %w", err)
+		return fmt.Errorf("cannot set the mode on the temporary file: %w", err)
 	}
 	if _, err := tmp.Write(data); err != nil {
-		return fmt.Errorf("一時ファイルに書けない: %w", err)
+		return fmt.Errorf("cannot write the temporary file: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
-		return fmt.Errorf("一時ファイルを fsync できない: %w", err)
+		return fmt.Errorf("cannot fsync the temporary file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("一時ファイルを閉じられない: %w", err)
+		return fmt.Errorf("cannot close the temporary file: %w", err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("rename できない: %w", err)
+		return fmt.Errorf("cannot rename into place: %w", err)
 	}
 	return fsyncDir(dir)
 }
@@ -44,14 +44,14 @@ func writeFileAtomic(path string, data []byte) error {
 func fsyncDir(dir string) error {
 	fh, err := os.Open(dir)
 	if err != nil {
-		return fmt.Errorf("%s を開けない: %w", dir, err)
+		return fmt.Errorf("cannot open %s: %w", dir, err)
 	}
 	defer func() {
 		_ = fh.Close()
 	}()
 
 	if err := fh.Sync(); err != nil {
-		return fmt.Errorf("%s を fsync できない: %w", dir, err)
+		return fmt.Errorf("cannot fsync %s: %w", dir, err)
 	}
 	return nil
 }

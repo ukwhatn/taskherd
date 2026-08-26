@@ -4,10 +4,11 @@ package model
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/ukwhatn/taskherd/internal/i18n"
 )
 
 // CurrentVersion is the tasks.json version this binary can read and write.
@@ -16,17 +17,54 @@ const CurrentVersion = 1
 const dateLayout = "2006-01-02"
 
 var (
-	ErrTaskNotFound    = errors.New("タスクが見つからない")
-	ErrLinkNotFound    = errors.New("リンクが見つからない")
-	ErrLinkExists      = errors.New("同じ URL が既に紐づいている")
-	ErrEmptyTitle      = errors.New("タイトルが空")
-	ErrEmptyStatus     = errors.New("ステータスが空")
-	ErrSessionNotFound = errors.New("セッションが紐づいていない")
-	ErrSessionExists   = errors.New("同じセッションが既にこのタスクに紐づいている")
-	ErrEmptySessionID  = errors.New("セッション ID が空")
-	ErrEmptySessionCwd = errors.New("セッションの cwd が空")
-	ErrEmptyAgent      = errors.New("エージェント名が空")
+	ErrTaskNotFound    = &sentinel{func(t *i18n.ErrTask) string { return t.TaskNotFound }}
+	ErrLinkNotFound    = &sentinel{func(t *i18n.ErrTask) string { return t.LinkNotFound }}
+	ErrLinkExists      = &sentinel{func(t *i18n.ErrTask) string { return t.LinkExists }}
+	ErrEmptyTitle      = &sentinel{func(t *i18n.ErrTask) string { return t.EmptyTitle }}
+	ErrEmptyStatus     = &sentinel{func(t *i18n.ErrTask) string { return t.EmptyStatus }}
+	ErrSessionNotFound = &sentinel{func(t *i18n.ErrTask) string { return t.SessionNotFound }}
+	ErrSessionExists   = &sentinel{func(t *i18n.ErrTask) string { return t.SessionExists }}
+	ErrEmptySessionID  = &sentinel{func(t *i18n.ErrTask) string { return t.EmptySessionID }}
+	ErrEmptySessionCwd = &sentinel{func(t *i18n.ErrTask) string { return t.EmptySessionCwd }}
+	ErrEmptyAgent      = &sentinel{func(t *i18n.ErrTask) string { return t.EmptyAgent }}
 )
+
+// sentinel is a fixed error that reads its text out of the catalog.
+//
+// The pointer is the identity errors.Is compares, exactly as with errors.New, so callers are
+// unaffected. Error() renders the English entry: an error's own text is what lands in a log or a
+// bug report, where one searchable wording beats a familiar one.
+type sentinel struct {
+	text func(*i18n.ErrTask) string
+}
+
+func (e *sentinel) Error() string { return e.text(&i18n.For(i18n.LangEN).Err.Task) }
+
+func (e *sentinel) Localize(t *i18n.Catalog) (string, string) {
+	return e.text(&i18n.OrDefault(t).Err.Task), ""
+}
+
+// subjectError says which task, link or session an error is about.
+//
+// It replaces wrapping with fmt.Errorf, which would hide the sentinel's translation behind a prefix
+// fixed in one language. The subject itself is a value — an id, a URL — and needs no translating.
+type subjectError struct {
+	subject string
+	err     error
+}
+
+func withSubject(subject string, err error) error {
+	return &subjectError{subject: subject, err: err}
+}
+
+func (e *subjectError) Error() string { return e.subject + ": " + e.err.Error() }
+
+func (e *subjectError) Unwrap() error { return e.err }
+
+func (e *subjectError) Localize(t *i18n.Catalog) (string, string) {
+	text, hint := i18n.Message(t, e.err)
+	return e.subject + ": " + text, hint
+}
 
 // Timestamp is a point in time in RFC 3339 notation.
 type Timestamp string
@@ -102,7 +140,7 @@ func NewTimestamp(t time.Time) Timestamp {
 // ParseDate validates YYYY-MM-DD notation and returns it as a Date.
 func ParseDate(s string) (Date, error) {
 	if _, err := time.Parse(dateLayout, s); err != nil {
-		return "", fmt.Errorf("日付は YYYY-MM-DD 形式で指定する: %q", s)
+		return "", i18n.Errorf(func(t *i18n.Catalog) string { return t.Err.Task.BadDate }, s)
 	}
 	return Date(s), nil
 }
@@ -116,7 +154,7 @@ func (t Timestamp) Time() (time.Time, error) {
 func ParseFile(data []byte) (*File, error) {
 	var f File
 	if err := json.Unmarshal(data, &f); err != nil {
-		return nil, fmt.Errorf("tasks.json を解析できない: %w", err)
+		return nil, fmt.Errorf("cannot parse tasks.json: %w", err)
 	}
 	if err := Validate(&f); err != nil {
 		return nil, err
@@ -129,7 +167,7 @@ func ParseFile(data []byte) (*File, error) {
 func MarshalFile(f *File) ([]byte, error) {
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("tasks.json を生成できない: %w", err)
+		return nil, fmt.Errorf("cannot build tasks.json: %w", err)
 	}
 	return append(data, '\n'), nil
 }
@@ -156,7 +194,7 @@ func (f *File) Task(id int) (*Task, error) {
 			return &f.Tasks[i], nil
 		}
 	}
-	return nil, fmt.Errorf("#%d: %w", id, ErrTaskNotFound)
+	return nil, withSubject(fmt.Sprintf("#%d", id), ErrTaskNotFound)
 }
 
 // AddTask appends a task using next_id as its id.
@@ -197,7 +235,7 @@ func (f *File) RemoveTask(id int) (*Task, error) {
 		f.Tasks = append(f.Tasks[:i], f.Tasks[i+1:]...)
 		return &removed, nil
 	}
-	return nil, fmt.Errorf("#%d: %w", id, ErrTaskNotFound)
+	return nil, withSubject(fmt.Sprintf("#%d", id), ErrTaskNotFound)
 }
 
 func (t *Task) SetTitle(title string, now time.Time) error {
@@ -243,7 +281,7 @@ func (t *Task) AppendNote(note string, now time.Time) {
 func (t *Task) AddLink(url string, kind LinkKind, note string, now time.Time) (*Link, error) {
 	for _, existing := range t.Links {
 		if existing.URL == url {
-			return nil, fmt.Errorf("%s: %w", url, ErrLinkExists)
+			return nil, withSubject(url, ErrLinkExists)
 		}
 	}
 	t.Links = append(t.Links, Link{URL: url, Kind: kind, Note: note, AddedAt: NewTimestamp(now)})
@@ -271,7 +309,7 @@ func (t *Task) AddSession(ref SessionRef, now time.Time) (*SessionRef, error) {
 	}
 	for _, existing := range t.Sessions {
 		if existing.SessionID == ref.SessionID {
-			return nil, fmt.Errorf("%s: %w", ref.SessionID, ErrSessionExists)
+			return nil, withSubject(ref.SessionID, ErrSessionExists)
 		}
 	}
 
@@ -292,7 +330,7 @@ func (t *Task) RemoveSession(sessionID string, now time.Time) (*SessionRef, erro
 		t.touch(now)
 		return &removed, nil
 	}
-	return nil, fmt.Errorf("%s: %w", sessionID, ErrSessionNotFound)
+	return nil, withSubject(sessionID, ErrSessionNotFound)
 }
 
 // Session returns the linked session with the given id.
@@ -315,7 +353,7 @@ func (t *Task) SetLinkNote(url, note string, now time.Time) error {
 		t.touch(now)
 		return nil
 	}
-	return fmt.Errorf("%s: %w", url, ErrLinkNotFound)
+	return withSubject(url, ErrLinkNotFound)
 }
 
 func (t *Task) RemoveLink(url string, now time.Time) (*Link, error) {
@@ -328,7 +366,7 @@ func (t *Task) RemoveLink(url string, now time.Time) (*Link, error) {
 		t.touch(now)
 		return &removed, nil
 	}
-	return nil, fmt.Errorf("%s: %w", url, ErrLinkNotFound)
+	return nil, withSubject(url, ErrLinkNotFound)
 }
 
 func (t *Task) touch(now time.Time) {

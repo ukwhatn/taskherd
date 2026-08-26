@@ -169,7 +169,7 @@ func (p *picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pickerLinkedMsg:
 		p.linking = false
 		if msg.err != nil {
-			p.status, p.isError = msg.err.Error(), true
+			p.status, p.isError = p.message(msg.err), true
 			return p, nil
 		}
 		p.linked = true
@@ -323,6 +323,13 @@ func columnOrder(status string, columns model.Columns) int {
 	return len(columns)
 }
 
+// message renders err in the popup's language, dropping the advice it carries: the popup has one
+// line to say what went wrong.
+func (p *picker) message(err error) string {
+	text, _ := i18n.Message(p.text, err)
+	return text
+}
+
 func (p *picker) View() tea.View {
 	var b strings.Builder
 
@@ -332,7 +339,7 @@ func (p *picker) View() tea.View {
 
 	switch {
 	case p.loadErr != nil:
-		b.WriteString(p.styles.alert.Render(p.loadErr.Error()))
+		b.WriteString(p.styles.alert.Render(p.message(p.loadErr)))
 		b.WriteString("\n")
 	case !p.loaded:
 		b.WriteString(p.styles.dim.Render(p.text.Picker.Loading))

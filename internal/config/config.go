@@ -140,7 +140,7 @@ func Default() *Config {
 		Board:        Board{RefreshIntervalMinutes: 10, CacheTTLMinutes: 5, Icons: "nerd", Hyperlinks: true},
 		Columns:      model.DefaultColumns(),
 		Jira:         Jira{TokenEnv: "TASKHERD_JIRA_TOKEN"},
-		SessionStart: SessionStart{PromptTemplate: defaultPromptTemplate},
+		SessionStart: SessionStart{PromptTemplate: promptTemplate(string(i18n.Default))},
 	}
 }
 
@@ -160,7 +160,7 @@ func ResolvePaths(getenv func(string) string) (Paths, error) {
 
 	home := getenv("HOME")
 	if home == "" {
-		return Paths{}, errors.New("HOME が設定されていない。XDG_STATE_HOME と TASKHERD_CONFIG を明示するか HOME を設定する")
+		return Paths{}, i18n.Problemf(func(t *i18n.Catalog) i18n.Problem { return t.Err.Data.NoHome })
 	}
 	if paths.StateDir == "" {
 		paths.StateDir = filepath.Join(home, ".local", "state", appName)
@@ -178,12 +178,12 @@ func Load(path string) (*Config, error) {
 		return Default(), nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%s を読めない: %w", path, err)
+		return nil, fmt.Errorf("cannot read %s: %w", path, err)
 	}
 
 	var raw fileConfig
 	if _, err := toml.Decode(string(data), &raw); err != nil {
-		return nil, fmt.Errorf("%s を解析できない: %w", path, err)
+		return nil, fmt.Errorf("cannot parse %s: %w", path, err)
 	}
 
 	cfg := Default()
@@ -228,6 +228,11 @@ func Load(path string) (*Config, error) {
 	}
 	if raw.SessionStart.PromptTemplate != nil {
 		cfg.SessionStart.PromptTemplate = *raw.SessionStart.PromptTemplate
+	} else {
+		// The built-in prompt is the one thing in Default() that the file's own language changes,
+		// so it is settled here rather than there: a config that only says language = "en" should
+		// not start sessions with a Japanese prompt.
+		cfg.SessionStart.PromptTemplate = promptTemplate(cfg.Language)
 	}
 	cfg.SessionStart.Templates = raw.SessionStart.Templates
 
@@ -270,43 +275,29 @@ func (c *Config) Validate() error {
 		}
 		violations = append(violations, invalid.Violations...)
 	}
+	add := func(path string, code i18n.ViolationCode, args ...any) {
+		violations = append(violations, model.Violation{Path: path, Code: code, Args: args})
+	}
+
 	if _, ok := i18n.Parse(c.Language); !ok {
-		violations = append(violations, model.Violation{
-			Path:    "language",
-			Message: fmt.Sprintf("%s のいずれかを指定する（実際: %q）", strings.Join(i18n.Names(), " / "), c.Language),
-		})
+		add("language", i18n.ViolationLanguageInvalid, strings.Join(i18n.Names(), " / "), c.Language)
 	}
 	if c.Board.RefreshIntervalMinutes < 0 {
-		violations = append(violations, model.Violation{
-			Path:    "board.refresh_interval_minutes",
-			Message: fmt.Sprintf("0 以上でなければならない（0 で背景更新を無効化。実際: %d）", c.Board.RefreshIntervalMinutes),
-		})
+		add("board.refresh_interval_minutes", i18n.ViolationIntervalNegative, c.Board.RefreshIntervalMinutes)
 	}
 	if c.Board.CacheTTLMinutes < 0 {
-		violations = append(violations, model.Violation{
-			Path:    "board.cache_ttl_minutes",
-			Message: fmt.Sprintf("0 以上でなければならない（実際: %d）", c.Board.CacheTTLMinutes),
-		})
+		add("board.cache_ttl_minutes", i18n.ViolationCacheTTLNegative, c.Board.CacheTTLMinutes)
 	}
 	if !validIconModes[c.Board.Icons] {
-		violations = append(violations, model.Violation{
-			Path:    "board.icons",
-			Message: fmt.Sprintf("nerd / ascii / none のいずれかを指定する（実際: %q）", c.Board.Icons),
-		})
+		add("board.icons", i18n.ViolationIconModeInvalid, c.Board.Icons)
 	}
 	for key, account := range c.GitHub.Accounts {
 		if strings.TrimSpace(key) == "" || strings.TrimSpace(account) == "" {
-			violations = append(violations, model.Violation{
-				Path:    "github.accounts",
-				Message: fmt.Sprintf("ホスト名とアカウント名の両方が必要（実際: %q = %q）", key, account),
-			})
+			add("github.accounts", i18n.ViolationAccountIncomplete, key, account)
 			continue
 		}
 		if !validAccountKey(key) {
-			violations = append(violations, model.Violation{
-				Path:    "github.accounts",
-				Message: fmt.Sprintf(`キーは "<host>" または "<host>/<owner>" の形式で指定する（実際: %q）`, key),
-			})
+			add("github.accounts", i18n.ViolationAccountKeyFormat, key)
 		}
 	}
 

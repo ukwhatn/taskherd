@@ -144,8 +144,8 @@ func TestSnapshotUnreachableIsReportedAsUnavailable(t *testing.T) {
 	if !errors.As(status.Err, &unavailable) {
 		t.Errorf("err = %v, want UnavailableError", status.Err)
 	}
-	if unavailable.Hint() == "" {
-		t.Error("Hint が空（縮退の案内がない）")
+	if _, hint := unavailable.Localize(nil); hint == "" {
+		t.Error("Localize() の hint が空（縮退の案内がない）")
 	}
 }
 

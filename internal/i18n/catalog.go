@@ -16,6 +16,7 @@ type Catalog struct {
 	Select Select
 	Picker Picker
 	CLI    CLI
+	Err    Err
 }
 
 // Common is the vocabulary shared across screens. A word only belongs here when the two uses would

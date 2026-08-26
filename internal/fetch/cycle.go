@@ -3,13 +3,13 @@ package fetch
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
@@ -32,6 +32,8 @@ type Fetcher struct {
 	Classifier model.URLClassifier
 	JiraCreds  JiraCredentials // zero value means Jira is not configured
 	Now        func() time.Time
+	// Text is the language a failure is written into cache.json in. Nil means the default.
+	Text *i18n.Catalog
 }
 
 // RefreshOutcome is the per-link result of one refresh cycle. Err is nil on success.
@@ -140,7 +142,7 @@ func (f *Fetcher) commit(ctx context.Context, github, jira []attempt, result *Re
 					continue
 				}
 				if a.err != nil {
-					cf.SetFailure(a.url, a.err, a.at)
+					cf.SetFailure(f.Text, a.url, a.err, a.at)
 					continue
 				}
 				if err := cf.SetSuccess(a.url, a.data, a.at); err != nil {
@@ -187,7 +189,7 @@ func (f *Fetcher) fetchGitHub(ctx context.Context, url string) (any, error) {
 func (f *Fetcher) fetchJira(ctx context.Context, url string) (any, error) {
 	key, ok := f.Classifier.JiraKey(url)
 	if !ok {
-		return nil, fmt.Errorf("%s から Jira issue key を取り出せない", url)
+		return nil, i18n.Errorf(func(t *i18n.Catalog) string { return t.Err.Live.NoJiraKey }, url)
 	}
 	return f.Jira.FetchIssue(ctx, f.JiraCreds, key)
 }

@@ -209,14 +209,14 @@ func (b *Board) submitAdd() tea.Cmd {
 	}
 	urls, err := parseLinkURLs(b.text, b.add.value(addLink))
 	if err != nil {
-		b.add.err = err.Error()
+		b.add.err = b.message(err)
 		return nil
 	}
 	var due *model.Date
 	if raw := strings.TrimSpace(b.add.value(addDue)); raw != "" {
 		parsed, parseErr := model.ParseDate(raw)
 		if parseErr != nil {
-			b.add.err = parseErr.Error()
+			b.add.err = b.message(parseErr)
 			return nil
 		}
 		due = &parsed
