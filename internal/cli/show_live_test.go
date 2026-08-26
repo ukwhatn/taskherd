@@ -39,7 +39,7 @@ func TestShowDisplaysCachedLinkState(t *testing.T) {
 	if !strings.Contains(res.stdout, "live:") {
 		t.Fatalf("stdout にライブ状態が無い:\n%s", res.stdout)
 	}
-	for _, want := range []string{"open", "checks=pass", "本体実装", "1m前"} {
+	for _, want := range []string{"open", "checks=pass", "本体実装", "1m 前"} {
 		if !strings.Contains(res.stdout, want) {
 			t.Errorf("stdout に %q が無い:\n%s", want, res.stdout)
 		}

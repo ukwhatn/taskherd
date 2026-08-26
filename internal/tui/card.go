@@ -67,7 +67,7 @@ type CardStyle struct {
 }
 
 // text is the catalog the rows are worded from, never nil.
-func (s CardStyle) text() *i18n.Catalog { return catalogOrDefault(s.Text) }
+func (s CardStyle) text() *i18n.Catalog { return i18n.OrDefault(s.Text) }
 
 // Card is the text of one card, split so the view can style each part independently.
 type Card struct {

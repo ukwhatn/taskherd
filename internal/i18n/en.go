@@ -163,4 +163,5 @@ var enCatalog = Catalog{
 		Attaching:    "Attaching…",
 		Help:         "%s select  enter attach  esc cancel",
 	},
+	CLI: cliEN,
 }

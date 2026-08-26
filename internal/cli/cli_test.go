@@ -12,9 +12,14 @@ import (
 
 	"github.com/ukwhatn/taskherd/internal/cli"
 	"github.com/ukwhatn/taskherd/internal/config"
+	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
 	"github.com/ukwhatn/taskherd/internal/store"
 )
+
+// ja is the catalog the assertions read their expected text from, so a wording change stays a
+// change to internal/i18n alone.
+var ja = i18n.For(i18n.LangJA)
 
 var (
 	baseTime  = time.Date(2026, 8, 24, 16, 0, 0, 0, time.FixedZone("JST", 9*60*60))

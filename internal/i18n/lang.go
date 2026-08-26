@@ -58,6 +58,18 @@ func Resolve(getenv func(string) string, configured string) Lang {
 	return Default
 }
 
+// OrDefault substitutes the default catalog for a nil one.
+//
+// Every field read off a nil catalog would panic, and the places a catalog travels to — a board's
+// Settings, a launcher's argv — are all structs a caller can build without one. Failing that way,
+// deep inside a render or a launch, is worse than drawing the default language.
+func OrDefault(c *Catalog) *Catalog {
+	if c == nil {
+		return For(Default)
+	}
+	return c
+}
+
 // For returns the catalog of a language. An unknown language gets the default catalog, so a caller
 // that skipped Resolve still renders something.
 func For(lang Lang) *Catalog {

@@ -16,7 +16,7 @@ func parseLinkURLs(text *i18n.Catalog, raw string) ([]string, error) {
 	var urls []string
 	for _, field := range strings.Fields(raw) {
 		if !strings.Contains(field, "://") {
-			return nil, fmt.Errorf(catalogOrDefault(text).Common.LinkNeedsScheme, field)
+			return nil, fmt.Errorf(i18n.OrDefault(text).Common.LinkNeedsScheme, field)
 		}
 		if seen[field] {
 			continue

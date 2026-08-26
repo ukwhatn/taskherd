@@ -39,11 +39,14 @@ const sessionStartWaitTimeout = 30 * time.Second
 type partialResultError struct {
 	msg  string
 	hint string
+	// fallback stands in when msg is empty, which no current caller does; it is here so that the
+	// zero value still says something a reader of the log can act on.
+	fallback string
 }
 
 func (e *partialResultError) Error() string {
 	if e.msg == "" {
-		return "start が起動を開始した後に失敗した（結果は stdout に出力済み）"
+		return e.fallback
 	}
 	return e.msg
 }
@@ -80,10 +83,10 @@ func (a *app) startCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "start <id>",
-		Short: "タスクに新しいエージェントセッションを起こす",
+		Short: a.text.CLI.Start.Short,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := parseID(args[0])
+			id, err := a.parseID(args[0])
 			if err != nil {
 				return err
 			}
@@ -114,13 +117,13 @@ func (a *app) startCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "起動する作業ディレクトリ（候補が定まらなければ必須）")
+	cmd.Flags().StringVar(&cwdFlag, "cwd", "", a.text.CLI.Start.FlagCwd)
 	cmd.Flags().StringVar(&promptFlag, "prompt", "",
-		"起動直後に送るプロンプト（省略時は config のテンプレートを使う。空文字を明示すると送らない）")
+		a.text.CLI.Start.FlagPrompt)
 	cmd.Flags().BoolVar(&newFlag, "new", false,
-		"前回起動した agent があっても回収せず、新しく起こす（NAME に連番が付く）")
+		a.text.CLI.Start.FlagNew)
 	cmd.Flags().BoolVar(&noFocus, "no-focus", false,
-		"起こした pane へ移動しない（既定は移動する）")
+		a.text.CLI.Start.FlagNoFocus)
 	return cmd
 }
 
@@ -143,8 +146,8 @@ func (a *app) resolveStartCwd(ctx context.Context, f model.File, flag string, ch
 		cwd := strings.TrimSpace(flag)
 		if cwd == "" {
 			return "", &UserError{
-				Msg:      "--cwd が空白だけ",
-				HintText: "作業ディレクトリを指定するか、--cwd 自体を省略して候補から選ぶ",
+				Msg:      a.text.CLI.Start.BlankCwd.Msg,
+				HintText: a.text.CLI.Start.BlankCwd.Hint,
 			}
 		}
 		return cwd, nil
@@ -157,8 +160,8 @@ func (a *app) resolveStartCwd(ctx context.Context, f model.File, flag string, ch
 			return cwd, nil
 		}
 		return "", &UserError{
-			Msg:      "cwd の候補が無い（このタスクに紐づくセッションがまだ無い）",
-			HintText: "--cwd <path> で作業ディレクトリを指定する",
+			Msg:      a.text.CLI.Start.NoCandidate.Msg,
+			HintText: a.text.CLI.Start.NoCandidate.Hint,
 		}
 	case 1:
 		return candidates[0], nil
@@ -166,8 +169,8 @@ func (a *app) resolveStartCwd(ctx context.Context, f model.File, flag string, ch
 
 	if a.jsonOut {
 		return "", &UserError{
-			Msg:      "cwd の候補が複数ある",
-			HintText: "--cwd <path> で作業ディレクトリを指定する（候補: " + strings.Join(candidates, ", ") + "）",
+			Msg:      a.text.CLI.Start.ManyCandidates.Msg,
+			HintText: fmt.Sprintf(a.text.CLI.Start.ManyCandidates.Hint, strings.Join(candidates, ", ")),
 		}
 	}
 	return a.promptStartCwd(candidates)
@@ -194,27 +197,27 @@ func (a *app) recoverableAgentCwd(ctx context.Context, agentName string) (string
 }
 
 func (a *app) promptStartCwd(candidates []string) (string, error) {
-	fmt.Fprintln(a.env.Out, "作業ディレクトリの候補:")
+	fmt.Fprintln(a.env.Out, a.text.CLI.Start.CandidatesHeader)
 	for i, cwd := range candidates {
 		fmt.Fprintf(a.env.Out, "  %d) %s\n", i+1, cwd)
 	}
 
-	choice, err := a.readLine("番号か、パスを直接入力")
+	choice, err := a.readLine(a.text.CLI.Start.ChoosePrompt)
 	if err != nil {
 		return "", err
 	}
 	if index, convErr := strconv.Atoi(choice); convErr == nil {
 		if index < 1 || index > len(candidates) {
 			return "", &UserError{
-				Msg:      fmt.Sprintf("番号が不正: %q", choice),
-				HintText: fmt.Sprintf("1〜%d の番号か、パスを直接入力する", len(candidates)),
+				Msg:      fmt.Sprintf(a.text.CLI.Start.BadChoice.Msg, choice),
+				HintText: fmt.Sprintf(a.text.CLI.Start.BadChoice.Hint, len(candidates)),
 			}
 		}
 		return candidates[index-1], nil
 	}
 	cwd := strings.TrimSpace(choice)
 	if cwd == "" {
-		return "", &UserError{Msg: "作業ディレクトリが空", HintText: "パスを入力するか --cwd で指定する"}
+		return "", &UserError{Msg: a.text.CLI.Start.EmptyCwd.Msg, HintText: a.text.CLI.Start.EmptyCwd.Hint}
 	}
 	return cwd, nil
 }
@@ -256,22 +259,22 @@ func (a *app) findReusableAgent(ctx context.Context, client *herdrc.Client, task
 
 	if !agentIsUsable(agent) {
 		return nil, &UserError{
-			Msg:      fmt.Sprintf("#%d の前回の起動が pane %s に残っている（まだ使える状態ではない）", task.ID, agent.PaneID),
-			HintText: fmt.Sprintf("pane %s を確認する", agent.PaneID),
+			Msg:      fmt.Sprintf(a.text.CLI.Start.ReusableBusy.Msg, task.ID, agent.PaneID),
+			HintText: fmt.Sprintf(a.text.CLI.Start.ReusableBusy.Hint, agent.PaneID),
 		}
 	}
 	sessionID := agent.SessionID()
 	if _, linked := task.Session(sessionID); linked {
 		return nil, &UserError{
-			Msg:      fmt.Sprintf("#%d は既にこのセッションに紐づいている", task.ID),
-			HintText: fmt.Sprintf("taskherd jump %d で移動する", task.ID),
+			Msg:      fmt.Sprintf(a.text.CLI.Start.AlreadyLinked.Msg, task.ID),
+			HintText: fmt.Sprintf(a.text.CLI.Start.AlreadyLinked.Hint, task.ID),
 		}
 	}
 	if strings.TrimSpace(agent.Cwd) != strings.TrimSpace(cwd) {
 		return nil, &UserError{
-			Msg: fmt.Sprintf("#%d の前回の起動が別の cwd（%s）の pane %s で動いている", task.ID, agent.Cwd, agent.PaneID),
+			Msg: fmt.Sprintf(a.text.CLI.Start.OtherCwd.Msg, task.ID, agent.Cwd, agent.PaneID),
 			HintText: fmt.Sprintf(
-				"pane %s へ移るか、taskherd start %d --new --cwd %s で新しく起こす", agent.PaneID, task.ID, cwd),
+				a.text.CLI.Start.OtherCwd.Hint, agent.PaneID, task.ID, cwd),
 		}
 	}
 	return agent, nil
@@ -360,20 +363,20 @@ func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt st
 			PaneID: tab.PaneID,
 		})
 		if err != nil {
-			return a.emitStart(result, err, fmt.Sprintf("pane %s を確認する（起動に失敗した）", tab.PaneID))
+			return a.emitStart(result, err, fmt.Sprintf(a.text.CLI.Start.StartFailed, tab.PaneID))
 		}
 		result.PaneID = started.PaneID
 		result.Stage = stageStarted
 		if started.NeedsAttention {
 			return a.emitStart(result,
-				fmt.Errorf("起動直後に入力待ちになっている（%s）", started.Code),
-				fmt.Sprintf("pane %s を開いて応答してから、セッション picker から後で紐づける", started.PaneID))
+				fmt.Errorf(a.text.CLI.Start.WaitingInput, started.Code),
+				fmt.Sprintf(a.text.CLI.Start.WaitingInputHint, started.PaneID))
 		}
 
 		agent, err := client.WaitForAgentSession(ctx, started.PaneID, a.sessionWaitTimeout())
 		if err != nil {
 			return a.emitStart(result, err,
-				fmt.Sprintf("pane %s を確認し、セッション picker から後で紐づける", started.PaneID))
+				fmt.Sprintf(a.text.CLI.Start.CheckPaneHint, started.PaneID))
 		}
 		sessionID = agent.SessionID()
 		if sessionID == "" {
@@ -382,11 +385,11 @@ func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt st
 			// of the generic message matters here: it is the single most common way this wait ends
 			// without one.
 			if agent.AgentStatus == herdrc.StateBlocked {
-				return a.emitStart(result, errors.New("入力待ちで止まっている（trust-folder の確認など）"),
-					fmt.Sprintf("pane %s を確認し、セッション picker から後で紐づける", started.PaneID))
+				return a.emitStart(result, errors.New(a.text.CLI.Start.TrustPrompt),
+					fmt.Sprintf(a.text.CLI.Start.CheckPaneHint, started.PaneID))
 			}
-			return a.emitStart(result, errors.New("herdr がセッション id を報告しなかった"),
-				fmt.Sprintf("pane %s を確認し、セッション picker から後で紐づける", started.PaneID))
+			return a.emitStart(result, errors.New(a.text.CLI.Start.NoSessionReported),
+				fmt.Sprintf(a.text.CLI.Start.CheckPaneHint, started.PaneID))
 		}
 		paneID, linkCwd = started.PaneID, cwd
 		result.SessionID = sessionID
@@ -404,7 +407,7 @@ func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt st
 	})
 	if err != nil {
 		return a.emitStart(result, err,
-			fmt.Sprintf("pane %s / session %s を taskherd session link で手動で紐づける", paneID, sessionID))
+			fmt.Sprintf(a.text.CLI.Start.LinkManuallyHint, paneID, sessionID))
 	}
 	result.Linked = true
 	result.Stage = stageLinked
@@ -412,7 +415,7 @@ func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt st
 
 	if prompt != "" {
 		if err := client.SendAgentPrompt(ctx, paneID, prompt); err != nil {
-			return a.emitStart(result, err, "起動と紐づけは済んでいる。プロンプトの送信だけ失敗した")
+			return a.emitStart(result, err, a.text.CLI.Start.PromptFailedHint)
 		}
 		result.PromptSent = true
 		result.Stage = stagePrompted
@@ -434,7 +437,7 @@ func (a *app) emitStart(result startResult, err error, hint string) error {
 			return emitErr
 		}
 		if err != nil {
-			return &partialResultError{msg: result.Error, hint: result.Hint}
+			return &partialResultError{msg: result.Error, hint: result.Hint, fallback: a.text.CLI.Start.PartialLabel}
 		}
 		return nil
 	}
@@ -448,18 +451,18 @@ func (a *app) emitStart(result startResult, err error, hint string) error {
 	}
 	switch {
 	case result.PromptSent:
-		fmt.Fprintln(a.env.Out, " まで起動した（プロンプト送信済み）")
+		fmt.Fprintln(a.env.Out, a.text.CLI.Start.DoneWithPrompt)
 	case result.Linked:
-		fmt.Fprintln(a.env.Out, " まで起動した（紐づけ済み、プロンプトは送っていない）")
+		fmt.Fprintln(a.env.Out, a.text.CLI.Start.DoneWithoutPrompt)
 	default:
 		fmt.Fprintln(a.env.Out)
 	}
 	if err == nil {
 		return nil
 	}
-	fmt.Fprintf(a.env.Err, "エラー: %v\n", err)
+	fmt.Fprintf(a.env.Err, a.text.CLI.Root.ErrorPrefix, err)
 	if hint != "" {
-		fmt.Fprintf(a.env.Err, "ヒント: %s\n", hint)
+		fmt.Fprintf(a.env.Err, a.text.CLI.Root.HintPrefix, hint)
 	}
-	return &partialResultError{msg: err.Error(), hint: hint}
+	return &partialResultError{msg: err.Error(), hint: hint, fallback: a.text.CLI.Start.PartialLabel}
 }

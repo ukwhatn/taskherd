@@ -9,6 +9,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/ukwhatn/taskherd/internal/i18n"
 )
 
 // detachedLogName is the file under the state directory that a detached launch's output goes to.
@@ -31,48 +33,54 @@ type detachedLauncher struct {
 	exePath  string
 	stateDir string
 	now      func() time.Time
+	// text names the operation in the --notify-error label the child raises its failure under.
+	// Resolved here rather than in the child so that the notification reads in the same language
+	// as the board that asked for the launch.
+	text *i18n.Catalog
 }
 
 // newDetachedLauncher resolves the binary to re-exec. It fails only when the running executable
 // cannot be located at all, in which case the board runs without a launcher and says so rather
 // than guessing at a name on PATH.
-func newDetachedLauncher(stateDir string, now func() time.Time) (*detachedLauncher, error) {
+func newDetachedLauncher(stateDir string, now func() time.Time, text *i18n.Catalog) (*detachedLauncher, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return nil, fmt.Errorf("taskherd 自身の実行パスを解決できない: %w", err)
+		return nil, fmt.Errorf("cannot resolve taskherd's own path: %w", err)
 	}
-	return &detachedLauncher{exePath: exe, stateDir: stateDir, now: now}, nil
+	return &detachedLauncher{exePath: exe, stateDir: stateDir, now: now, text: i18n.OrDefault(text)}, nil
 }
 
 func (l *detachedLauncher) StartSession(taskID int, cwd, prompt string) error {
-	return l.spawn(startSessionArgs(taskID, cwd, prompt))
+	return l.spawn(startSessionArgs(l.text, taskID, cwd, prompt))
 }
 
 func (l *detachedLauncher) ResumeSession(taskID int, sessionID string) error {
-	return l.spawn(resumeSessionArgs(taskID, sessionID))
+	return l.spawn(resumeSessionArgs(l.text, taskID, sessionID))
 }
 
 // startSessionArgs is the argv of a detached `taskherd start`.
 //
 // --prompt is always passed, empty included: an omitted flag means "fall back to the config
 // template", and the modal's prompt field is exactly what the user decided to send, blank or not.
-func startSessionArgs(taskID int, cwd, prompt string) []string {
+func startSessionArgs(text *i18n.Catalog, taskID int, cwd, prompt string) []string {
+	text = i18n.OrDefault(text)
 	return []string{
 		"start", strconv.Itoa(taskID),
 		"--cwd", cwd,
 		"--prompt", prompt,
-		"--notify-error", fmt.Sprintf("#%d の起動", taskID),
+		"--notify-error", fmt.Sprintf(text.CLI.Start.LaunchLabel, taskID),
 	}
 }
 
 // resumeSessionArgs is the argv of a detached `taskherd jump` for a session whose pane is gone.
 // --yes is safe here because the board already asked: runConfirm only reaches resumeCmd on y.
-func resumeSessionArgs(taskID int, sessionID string) []string {
+func resumeSessionArgs(text *i18n.Catalog, taskID int, sessionID string) []string {
+	text = i18n.OrDefault(text)
 	return []string{
 		"jump", strconv.Itoa(taskID),
 		"--session", sessionID,
 		"--yes",
-		"--notify-error", fmt.Sprintf("#%d の resume", taskID),
+		"--notify-error", fmt.Sprintf(text.CLI.Start.ResumeLabel, taskID),
 	}
 }
 
@@ -106,7 +114,7 @@ func (l *detachedLauncher) spawn(args []string) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("taskherd を起こせない: %w", err)
+		return fmt.Errorf("cannot spawn taskherd: %w", err)
 	}
 	// Released rather than waited on: this process is about to exit, and the child is meant to
 	// outlive it.
@@ -115,12 +123,12 @@ func (l *detachedLauncher) spawn(args []string) error {
 
 func (l *detachedLauncher) openLog() (*os.File, error) {
 	if err := os.MkdirAll(l.stateDir, 0o700); err != nil {
-		return nil, fmt.Errorf("%s を作成できない: %w", l.stateDir, err)
+		return nil, fmt.Errorf("cannot create %s: %w", l.stateDir, err)
 	}
 	path := filepath.Join(l.stateDir, detachedLogName)
 	log, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("%s を開けない: %w", path, err)
+		return nil, fmt.Errorf("cannot open %s: %w", path, err)
 	}
 	return log, nil
 }

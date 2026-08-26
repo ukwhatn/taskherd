@@ -18,7 +18,7 @@ const targetPaneEnv = "TASKHERD_TARGET_PANE"
 func (a *app) pluginCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "plugin",
-		Short:  "herdr プラグインの action から呼ばれる内部コマンド",
+		Short:  a.text.CLI.Plugin.Short,
 		Hidden: true,
 	}
 	cmd.AddCommand(a.pluginOpenBoardCmd(), a.pluginLinkPaneCmd())
@@ -30,7 +30,7 @@ func (a *app) pluginCmd() *cobra.Command {
 func (a *app) pluginOpenBoardCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "open-board",
-		Short:  "board pane を開く（herdr-plugin.toml の open-board action の実体）",
+		Short:  a.text.CLI.Plugin.OpenBoardShort,
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -51,7 +51,7 @@ func (a *app) pluginOpenBoardCmd() *cobra.Command {
 func (a *app) pluginLinkPaneCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "link-pane",
-		Short:  "この pane をタスクに紐づける picker を開く（herdr-plugin.toml の link-pane action の実体）",
+		Short:  a.text.CLI.Plugin.LinkPaneShort,
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -61,8 +61,8 @@ func (a *app) pluginLinkPaneCmd() *cobra.Command {
 			}
 			if paneID == "" {
 				return &UserError{
-					Msg:      "action の呼び出し元 pane を特定できない",
-					HintText: "この action は pane を対象にした操作からのみ呼び出せる",
+					Msg:      a.text.CLI.Plugin.NoCallerPane.Msg,
+					HintText: a.text.CLI.Plugin.NoCallerPane.Hint,
 				}
 			}
 			return a.herdr().OpenPluginPane(cmd.Context(), herdrPluginID, "picker", map[string]string{

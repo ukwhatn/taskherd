@@ -110,5 +110,5 @@ func (l liveState) note(a *app) {
 	if a.jsonOut || !l.consulted || l.available {
 		return
 	}
-	fmt.Fprintf(a.env.Err, "注記: herdr に接続できないためセッション状態を表示しない（%v）\n", l.err)
+	fmt.Fprintf(a.env.Err, a.text.CLI.Session.HerdrDownNote, l.err)
 }

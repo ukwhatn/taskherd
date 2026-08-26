@@ -109,7 +109,7 @@ TASKHERD_LANG=en taskherd board
 
 herdr プラグインとして開いた board には shell で export した環境変数が届かないことがあるので、常用する言語は `config.toml` に書く（`jira.token_file` と同じ理由）。
 
-CLI の出力とエラー文言は現時点では日本語のまま。board の画面テキストのみ切り替わる。
+board の画面テキストと CLI の help・出力の両方が切り替わる。
 
 ### アイコン表記（`board.icons`）
 

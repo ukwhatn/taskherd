@@ -12,14 +12,14 @@ func (a *app) linkCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "link <id> <url>",
-		Short: "外部リンクを紐づける（種別は URL から自動判別）",
+		Short: a.text.CLI.Link.LinkShort,
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := parseID(args[0])
+			id, err := a.parseID(args[0])
 			if err != nil {
 				return err
 			}
-			url, err := parseLinkURL(args[1])
+			url, err := a.parseLinkURL(args[1])
 			if err != nil {
 				return err
 			}
@@ -45,25 +45,25 @@ func (a *app) linkCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.emitTask(updated, fmt.Sprintf("#%d に [%s] %s を紐づけた", updated.ID, kind, url))
+			return a.emitTask(updated, fmt.Sprintf(a.text.CLI.Link.Linked, updated.ID, kind, url))
 		},
 	}
 
-	cmd.Flags().StringVar(&note, "note", "", "リンク単位のメモ")
+	cmd.Flags().StringVar(&note, "note", "", a.text.CLI.Link.FlagNote)
 	return cmd
 }
 
 func (a *app) unlinkCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "unlink <id> <url>",
-		Short: "外部リンクの紐づけを外す",
+		Short: a.text.CLI.Link.UnlinkShort,
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := parseID(args[0])
+			id, err := a.parseID(args[0])
 			if err != nil {
 				return err
 			}
-			url, err := parseLinkURL(args[1])
+			url, err := a.parseLinkURL(args[1])
 			if err != nil {
 				return err
 			}
@@ -84,7 +84,7 @@ func (a *app) unlinkCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.emitTask(updated, fmt.Sprintf("#%d から %s の紐づけを外した", updated.ID, url))
+			return a.emitTask(updated, fmt.Sprintf(a.text.CLI.Link.Unlinked, updated.ID, url))
 		},
 	}
 }

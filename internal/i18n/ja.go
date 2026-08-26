@@ -165,4 +165,5 @@ var jaCatalog = Catalog{
 		Attaching:    "紐づけ中…",
 		Help:         "%s 選択  enter 紐づけ  esc 中止",
 	},
+	CLI: cliJA,
 }

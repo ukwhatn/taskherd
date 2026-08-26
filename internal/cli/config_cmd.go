@@ -13,7 +13,7 @@ import (
 func (a *app) configCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "設定ファイルとデータファイルを扱う",
+		Short: a.text.CLI.Config.Short,
 	}
 	cmd.AddCommand(a.configPathCmd(), a.configInitCmd())
 	return cmd
@@ -22,7 +22,7 @@ func (a *app) configCmd() *cobra.Command {
 func (a *app) configPathCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "path",
-		Short: "config・データファイルのパスを表示する",
+		Short: a.text.CLI.Config.PathShort,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st := a.tasks()
@@ -63,28 +63,28 @@ func (a *app) configPathCmd() *cobra.Command {
 func (a *app) configInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
-		Short: "既定の config.toml を生成する",
+		Short: a.text.CLI.Config.InitShort,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := a.env.Paths.ConfigPath
 			if _, err := os.Stat(path); err == nil {
 				return &UserError{
-					Msg:      fmt.Sprintf("%s は既に存在する", path),
-					HintText: "既存の設定を残すため上書きしない。作り直す場合は退避してから再実行する",
+					Msg:      fmt.Sprintf(a.text.CLI.Config.Exists.Msg, path),
+					HintText: a.text.CLI.Config.Exists.Hint,
 				}
 			} else if !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("%s を確認できない: %w", path, err)
+				return fmt.Errorf("cannot stat %s: %w", path, err)
 			}
 
 			dir := filepath.Dir(path)
 			if err := os.MkdirAll(dir, 0o700); err != nil {
-				return fmt.Errorf("%s を作成できない: %w", dir, err)
+				return fmt.Errorf("cannot create %s: %w", dir, err)
 			}
 			if err := os.Chmod(dir, 0o700); err != nil {
-				return fmt.Errorf("%s の権限を設定できない: %w", dir, err)
+				return fmt.Errorf("cannot set permissions on %s: %w", dir, err)
 			}
 			if err := os.WriteFile(path, []byte(config.DefaultFileContent()), 0o600); err != nil {
-				return fmt.Errorf("%s を書けない: %w", path, err)
+				return fmt.Errorf("cannot write %s: %w", path, err)
 			}
 
 			if a.jsonOut {
@@ -92,7 +92,7 @@ func (a *app) configInitCmd() *cobra.Command {
 					Created string `json:"created"`
 				}{Created: path})
 			}
-			fmt.Fprintf(a.env.Out, "%s を作成した\n", path)
+			fmt.Fprintf(a.env.Out, a.text.CLI.Config.Created, path)
 			return nil
 		},
 	}

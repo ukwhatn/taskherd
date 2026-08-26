@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -75,8 +76,8 @@ func TestRefreshAllWithNoTasksSucceeds(t *testing.T) {
 
 	res := h.mustRun(t, "refresh", "--all")
 
-	if !strings.Contains(res.stdout, "0 件取得した") {
-		t.Errorf("stdout = %q, want 0 件取得した", res.stdout)
+	if want := fmt.Sprintf(ja.CLI.Refresh.Refreshed, 0); !strings.Contains(res.stdout, want) {
+		t.Errorf("stdout = %q, want %q", res.stdout, want)
 	}
 }
 
