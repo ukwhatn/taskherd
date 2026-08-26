@@ -7,6 +7,8 @@
 #   TASKHERD_VERSION      tag to install (default: the latest release)
 #   TASKHERD_INSTALL_DIR  where to put the binary (default: $HOME/.local/bin)
 #   TASKHERD_BASE_URL     release host, for testing against a local server
+#   TASKHERD_NO_PATH_HINT set when another program drives this script and the PATH advice at the
+#                         end would be aimed at a directory the user never types
 #
 # The default install directory is under $HOME on purpose: it needs no sudo, and `taskherd update`
 # can replace a binary there without asking for any.
@@ -116,6 +118,10 @@ main() {
 	mv "${INSTALL_DIR}/taskherd.new" "${INSTALL_DIR}/taskherd" || die "could not install into ${INSTALL_DIR}"
 
 	note "installed ${INSTALL_DIR}/taskherd"
+
+	if [ -n "${TASKHERD_NO_PATH_HINT:-}" ]; then
+		return 0
+	fi
 
 	case ":${PATH}:" in
 	*":${INSTALL_DIR}:"*) ;;
