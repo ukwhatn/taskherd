@@ -3,6 +3,9 @@ package fetch_test
 import (
 	"context"
 	"errors"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,9 +29,9 @@ func newTestFetcher(t *testing.T, runGH fakeRunFn) (*fetch.Fetcher, *fetch.Cache
 type fakeRunFn = fetch.GitHubRunner
 
 func TestFetcherRefreshLinksGitHubSuccess(t *testing.T) {
-	calls := 0
+	var calls atomic.Int64
 	run := func(_ context.Context, _ []string, args ...string) ([]byte, []byte, error) {
-		calls++
+		calls.Add(1)
 		return []byte(`{"state":"OPEN","title":"t","updatedAt":"2026-08-24T09:00:00Z"}`), nil, nil
 	}
 	f, cache := newTestFetcher(t, run)
@@ -38,8 +41,8 @@ func TestFetcherRefreshLinksGitHubSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RefreshLinks() error = %v", err)
 	}
-	if calls != 2 {
-		t.Errorf("gh 呼び出し回数 = %d, want 2", calls)
+	if got := calls.Load(); got != 2 {
+		t.Errorf("gh 呼び出し回数 = %d, want 2", got)
 	}
 	if len(result.Outcomes) != 2 {
 		t.Fatalf("Outcomes = %+v", result.Outcomes)
@@ -56,9 +59,92 @@ func TestFetcherRefreshLinksGitHubSuccess(t *testing.T) {
 	}
 }
 
+// Outcomes follows the order the links were given, not the order the fetches happened to finish,
+// so callers that print or diff a cycle's result see a stable list.
+func TestFetcherRefreshLinksOutcomesKeepInputOrder(t *testing.T) {
+	var started atomic.Int64
+	run := func(_ context.Context, _ []string, args ...string) ([]byte, []byte, error) {
+		// Finish in the reverse of the start order, so a result-ordered implementation cannot pass.
+		time.Sleep(time.Duration(8-started.Add(1)) * 10 * time.Millisecond)
+		return []byte(`{"state":"OPEN","title":"t","updatedAt":"2026-08-24T09:00:00Z"}`), nil, nil
+	}
+	f, _ := newTestFetcher(t, run)
+
+	urls := []string{
+		"https://github.com/o/r/pull/1",
+		"https://github.com/o/r/pull/2",
+		"https://github.com/o/r/pull/3",
+		"https://github.com/o/r/pull/4",
+	}
+	result, err := f.RefreshLinks(context.Background(), urls)
+	if err != nil {
+		t.Fatalf("RefreshLinks() error = %v", err)
+	}
+	if len(result.Outcomes) != len(urls) {
+		t.Fatalf("Outcomes = %+v, want %d 件", result.Outcomes, len(urls))
+	}
+	for i, want := range urls {
+		if got := result.Outcomes[i].URL; got != want {
+			t.Errorf("Outcomes[%d].URL = %s, want %s", i, got, want)
+		}
+	}
+}
+
+// A serial implementation deadlocks this test: every fetch waits for n of them to be in flight
+// at once, which only happens if they actually run concurrently.
+func TestFetcherRefreshLinksFetchesConcurrently(t *testing.T) {
+	const n = 4
+	var (
+		mu       sync.Mutex
+		inFlight int
+		peak     int
+		once     sync.Once
+	)
+	allInFlight := make(chan struct{})
+
+	run := func(_ context.Context, _ []string, args ...string) ([]byte, []byte, error) {
+		mu.Lock()
+		inFlight++
+		if inFlight > peak {
+			peak = inFlight
+		}
+		reached := inFlight >= n
+		mu.Unlock()
+
+		if reached {
+			once.Do(func() { close(allInFlight) })
+		}
+		select {
+		case <-allInFlight:
+		case <-time.After(2 * time.Second): // a serial run never opens the gate; do not hang the suite
+		}
+
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+		return []byte(`{"state":"OPEN","title":"t","updatedAt":"2026-08-24T09:00:00Z"}`), nil, nil
+	}
+	f, _ := newTestFetcher(t, run)
+
+	urls := make([]string, n)
+	for i := range urls {
+		urls[i] = "https://github.com/o/r/pull/" + strconv.Itoa(i+1)
+	}
+	if _, err := f.RefreshLinks(context.Background(), urls); err != nil {
+		t.Fatalf("RefreshLinks() error = %v", err)
+	}
+
+	mu.Lock()
+	got := peak
+	mu.Unlock()
+	if got < n {
+		t.Errorf("同時に走った最大数 = %d, want %d（逐次実行になっている）", got, n)
+	}
+}
+
 func TestFetcherRefreshLinksSkipsUnrecognizedKind(t *testing.T) {
 	run := func(_ context.Context, _ []string, args ...string) ([]byte, []byte, error) {
-		t.Fatal("other kind の URL で gh が呼ばれた")
+		t.Error("other kind の URL で gh が呼ばれた")
 		return nil, nil, nil
 	}
 	f, _ := newTestFetcher(t, run)
@@ -72,19 +158,22 @@ func TestFetcherRefreshLinksSkipsUnrecognizedKind(t *testing.T) {
 	}
 }
 
-func TestFetcherRefreshLinksGitHubRateLimitInterruptsRemainingGitHubLinks(t *testing.T) {
-	calls := 0
+// A rate limit stops the links that have not started yet. Requests already in flight are left to
+// finish, so the check is that the run stopped short — not that it stopped at an exact count.
+func TestFetcherRefreshLinksGitHubRateLimitStopsUnstartedLinks(t *testing.T) {
+	const total = 64 // comfortably more than the concurrency limit
+	var calls atomic.Int64
 	run := func(_ context.Context, _ []string, args ...string) ([]byte, []byte, error) {
-		calls++
-		if calls == 1 {
-			return nil, []byte("gh: API rate limit exceeded"), errors.New("exit status 1")
-		}
-		t.Errorf("レート制限後に %d 回目の呼び出しが発生した", calls)
-		return []byte(`{}`), nil, nil
+		calls.Add(1)
+		return nil, []byte("gh: API rate limit exceeded"), errors.New("exit status 1")
 	}
 	f, _ := newTestFetcher(t, run)
 
-	urls := []string{"https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2", "https://github.com/o/r/pull/3"}
+	urls := make([]string, total)
+	for i := range urls {
+		urls[i] = "https://github.com/o/r/pull/" + strconv.Itoa(i+1)
+	}
+
 	result, err := f.RefreshLinks(context.Background(), urls)
 	if err != nil {
 		t.Fatalf("RefreshLinks() error = %v", err)
@@ -92,11 +181,15 @@ func TestFetcherRefreshLinksGitHubRateLimitInterruptsRemainingGitHubLinks(t *tes
 	if !result.GitHubInterrupted {
 		t.Error("GitHubInterrupted = false, want true")
 	}
-	if len(result.Outcomes) != 1 {
-		t.Fatalf("Outcomes = %+v, want 1 件（残りは中断）", result.Outcomes)
+
+	attempted := int(calls.Load())
+	if attempted >= total {
+		t.Errorf("gh 呼び出し回数 = %d, want %d 未満（残りは中断される）", attempted, total)
 	}
-	if calls != 1 {
-		t.Errorf("gh 呼び出し回数 = %d, want 1", calls)
+	// Links that were never attempted must not show up as outcomes: that absence is what tells a
+	// caller the run stopped rather than that those links failed.
+	if len(result.Outcomes) != attempted {
+		t.Errorf("Outcomes = %d 件, want %d 件（試行した数と一致する）", len(result.Outcomes), attempted)
 	}
 }
 
