@@ -9,6 +9,13 @@ import (
 	"github.com/ukwhatn/taskherd/internal/i18n"
 )
 
+// ja and en are the catalogs the tests assert against, so that a wording change stays a change to
+// internal/i18n alone.
+var (
+	ja = i18n.For(i18n.LangJA)
+	en = i18n.For(i18n.LangEN)
+)
+
 func TestResolveLang(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

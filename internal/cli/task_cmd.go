@@ -25,7 +25,7 @@ func (a *app) addCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "add <title>",
-		Short: "タスクを作成する",
+		Short: a.text.CLI.Task.AddShort,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := a.config()
@@ -35,16 +35,16 @@ func (a *app) addCmd() *cobra.Command {
 			if status == "" {
 				status = cfg.DefaultStatus()
 			}
-			if err := requireColumn(cfg, status); err != nil {
+			if err := a.requireColumn(cfg, status); err != nil {
 				return err
 			}
-			duePtr, err := parseDueFlag(due)
+			duePtr, err := a.parseDueFlag(due)
 			if err != nil {
 				return err
 			}
 			urls := make([]string, 0, len(links))
 			for _, raw := range links {
-				parsed, err := parseLinkURL(raw)
+				parsed, err := a.parseLinkURL(raw)
 				if err != nil {
 					return err
 				}
@@ -88,16 +88,16 @@ func (a *app) addCmd() *cobra.Command {
 			if ref.PaneID != "" {
 				a.stampTaskToken(cmd.Context(), ref.PaneID, created.ID, created.Title)
 			}
-			return a.emitTask(created, fmt.Sprintf("#%d を作成した（%s）: %s", created.ID, created.Status, created.Title))
+			return a.emitTask(created, fmt.Sprintf(a.text.CLI.Task.Created, created.ID, created.Status, created.Title))
 		},
 	}
 
-	cmd.Flags().StringVar(&status, "status", "", "作成時の列 id（既定: config の先頭列）")
-	cmd.Flags().StringVar(&due, "due", "", "期日（YYYY-MM-DD）")
-	cmd.Flags().StringVar(&note, "note", "", "note の初期値")
-	cmd.Flags().StringArrayVar(&links, "link", nil, "紐づける外部リンク URL（複数指定可）")
-	cmd.Flags().StringVar(&session, "session", "", "紐づけるセッション（current または UUID）")
-	cmd.Flags().StringVar(&cwd, "cwd", "", "セッションの作業ディレクトリ（--session が UUID で herdr が解決できない場合は必須）")
+	cmd.Flags().StringVar(&status, "status", "", a.text.CLI.Task.AddFlagStatus)
+	cmd.Flags().StringVar(&due, "due", "", a.text.CLI.Task.AddFlagDue)
+	cmd.Flags().StringVar(&note, "note", "", a.text.CLI.Task.AddFlagNote)
+	cmd.Flags().StringArrayVar(&links, "link", nil, a.text.CLI.Task.AddFlagLink)
+	cmd.Flags().StringVar(&session, "session", "", a.text.CLI.Task.AddFlagSession)
+	cmd.Flags().StringVar(&cwd, "cwd", "", a.text.CLI.Task.AddFlagCwd)
 	return cmd
 }
 
@@ -109,7 +109,7 @@ func (a *app) listCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "タスク一覧を表示する（既定は terminal 列を除く）",
+		Short: a.text.CLI.Task.ListShort,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := a.config()
@@ -134,7 +134,7 @@ func (a *app) listCmd() *cobra.Command {
 			}
 			live.note(a)
 			if len(tasks) == 0 {
-				fmt.Fprintln(a.env.Out, "該当するタスクがない")
+				fmt.Fprintln(a.env.Out, a.text.CLI.Task.ListEmpty)
 				return nil
 			}
 			for _, task := range tasks {
@@ -144,18 +144,18 @@ func (a *app) listCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringArrayVar(&statuses, "status", nil, "表示する列 id（複数指定可。未定義の列 id も指定できる）")
-	cmd.Flags().BoolVar(&all, "all", false, "terminal 列も表示する")
+	cmd.Flags().StringArrayVar(&statuses, "status", nil, a.text.CLI.Task.ListFlagStatus)
+	cmd.Flags().BoolVar(&all, "all", false, a.text.CLI.Task.ListFlagAll)
 	return cmd
 }
 
 func (a *app) showCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <id>",
-		Short: "タスクの詳細を表示する",
+		Short: a.text.CLI.Task.ShowShort,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := parseID(args[0])
+			id, err := a.parseID(args[0])
 			if err != nil {
 				return err
 			}
@@ -207,10 +207,10 @@ func (a *app) editCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "edit <id>",
-		Short: "タスクの属性を更新する",
+		Short: a.text.CLI.Task.EditShort,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := parseID(args[0])
+			id, err := a.parseID(args[0])
 			if err != nil {
 				return err
 			}
@@ -219,8 +219,8 @@ func (a *app) editCmd() *cobra.Command {
 			changedStatus := cmd.Flags().Changed("status")
 			if !changedTitle && !changedDue && !changedStatus {
 				return &UserError{
-					Msg:      "更新する項目が指定されていない",
-					HintText: "--title / --due / --status のいずれかを指定する（--due \"\" で期日を消す）",
+					Msg:      a.text.CLI.Task.EditNothing.Msg,
+					HintText: a.text.CLI.Task.EditNothing.Hint,
 				}
 			}
 
@@ -229,11 +229,11 @@ func (a *app) editCmd() *cobra.Command {
 				return err
 			}
 			if changedStatus {
-				if err := requireColumn(cfg, status); err != nil {
+				if err := a.requireColumn(cfg, status); err != nil {
 					return err
 				}
 			}
-			duePtr, err := parseDueFlag(due)
+			duePtr, err := a.parseDueFlag(due)
 			if err != nil {
 				return err
 			}
@@ -264,20 +264,20 @@ func (a *app) editCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.emitTask(edited, fmt.Sprintf("#%d を更新した（%s）: %s", edited.ID, edited.Status, edited.Title))
+			return a.emitTask(edited, fmt.Sprintf(a.text.CLI.Task.Edited, edited.ID, edited.Status, edited.Title))
 		},
 	}
 
-	cmd.Flags().StringVar(&title, "title", "", "新しいタイトル")
-	cmd.Flags().StringVar(&due, "due", "", "新しい期日（YYYY-MM-DD。空文字で削除）")
-	cmd.Flags().StringVar(&status, "status", "", "新しい列 id")
+	cmd.Flags().StringVar(&title, "title", "", a.text.CLI.Task.EditFlagTitle)
+	cmd.Flags().StringVar(&due, "due", "", a.text.CLI.Task.EditFlagDue)
+	cmd.Flags().StringVar(&status, "status", "", a.text.CLI.Task.EditFlagStatus)
 	return cmd
 }
 
 func (a *app) moveCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "move <id> <status>",
-		Short: "タスクを別の列へ移動する",
+		Short: a.text.CLI.Task.MoveShort,
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.move(cmd, args[0], args[1])
@@ -288,7 +288,7 @@ func (a *app) moveCmd() *cobra.Command {
 func (a *app) doneCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "done <id>",
-		Short: "タスクを done 列へ移動する（move <id> done の alias）",
+		Short: a.text.CLI.Task.DoneShort,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.move(cmd, args[0], "done")
@@ -297,7 +297,7 @@ func (a *app) doneCmd() *cobra.Command {
 }
 
 func (a *app) move(cmd *cobra.Command, idArg, status string) error {
-	id, err := parseID(idArg)
+	id, err := a.parseID(idArg)
 	if err != nil {
 		return err
 	}
@@ -305,7 +305,7 @@ func (a *app) move(cmd *cobra.Command, idArg, status string) error {
 	if err != nil {
 		return err
 	}
-	if err := requireColumn(cfg, status); err != nil {
+	if err := a.requireColumn(cfg, status); err != nil {
 		return err
 	}
 
@@ -325,7 +325,7 @@ func (a *app) move(cmd *cobra.Command, idArg, status string) error {
 	if err != nil {
 		return err
 	}
-	return a.emitTask(moved, fmt.Sprintf("#%d を %s へ移動した: %s", moved.ID, moved.Status, moved.Title))
+	return a.emitTask(moved, fmt.Sprintf(a.text.CLI.Task.Moved, moved.ID, moved.Status, moved.Title))
 }
 
 func (a *app) rmCmd() *cobra.Command {
@@ -333,18 +333,18 @@ func (a *app) rmCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "rm <id>",
-		Short: "タスクを削除する",
+		Short: a.text.CLI.Task.RmShort,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := parseID(args[0])
+			id, err := a.parseID(args[0])
 			if err != nil {
 				return err
 			}
 			if !yes {
 				if a.jsonOut {
 					return &UserError{
-						Msg:      "削除の確認が必要",
-						HintText: "--yes を指定する（--json では確認プロンプトを出さない）",
+						Msg:      a.text.CLI.Task.RmNeedsYes.Msg,
+						HintText: a.text.CLI.Task.RmNeedsYes.Hint,
 					}
 				}
 				f, err := a.tasks().Load()
@@ -355,12 +355,12 @@ func (a *app) rmCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				confirmed, err := a.confirm(fmt.Sprintf("#%d 「%s」を削除する", task.ID, task.Title))
+				confirmed, err := a.confirm(fmt.Sprintf(a.text.CLI.Task.RmConfirm, task.ID, task.Title))
 				if err != nil {
 					return err
 				}
 				if !confirmed {
-					fmt.Fprintln(a.env.Out, "中止した")
+					fmt.Fprintln(a.env.Out, a.text.CLI.Root.Cancelled)
 					return nil
 				}
 			}
@@ -377,11 +377,11 @@ func (a *app) rmCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.emitTask(removed, fmt.Sprintf("#%d を削除した: %s", removed.ID, removed.Title))
+			return a.emitTask(removed, fmt.Sprintf(a.text.CLI.Task.Removed, removed.ID, removed.Title))
 		},
 	}
 
-	cmd.Flags().BoolVar(&yes, "yes", false, "確認プロンプトを省略する")
+	cmd.Flags().BoolVar(&yes, "yes", false, a.text.CLI.Task.RmFlagYes)
 	return cmd
 }
 
@@ -432,18 +432,18 @@ func sortTasks(tasks []model.Task, columns model.Columns) {
 func formatLinkState(text *i18n.Catalog, state fetch.LinkState) string {
 	if !state.Fetched {
 		if state.Err != "" {
-			return "取得失敗: " + state.Err
+			return fmt.Sprintf(text.CLI.Task.FetchFailed, state.Err)
 		}
-		return "未取得（refresh で取得する）"
+		return text.CLI.Task.NotFetched
 	}
 
-	line := fmt.Sprintf("%s（%s前", tui.DescribeLink(text, state), tui.FormatAge(state.Age))
+	shape := text.CLI.Task.Live
 	if state.Stale {
-		line += " / TTL 超過"
+		shape = text.CLI.Task.LiveStale
 	}
-	line += "）"
+	line := fmt.Sprintf(shape, tui.DescribeLink(text, state), tui.FormatAge(state.Age))
 	if state.Err != "" {
-		line += " 最新の取得は失敗: " + state.Err
+		line += fmt.Sprintf(text.CLI.Task.LastFetchFailed, state.Err)
 	}
 	return line
 }
@@ -464,7 +464,7 @@ func formatTaskDetail(text *i18n.Catalog, task *model.Task, columns model.Column
 	var b strings.Builder
 	fmt.Fprintf(&b, "#%d %s\n", task.ID, task.Title)
 
-	statusLabel := "未定義の列"
+	statusLabel := text.CLI.Task.UnknownColumnLabel
 	if col, ok := columns.Find(task.Status); ok {
 		statusLabel = col.Label
 	}
@@ -506,7 +506,7 @@ func formatTaskDetail(text *i18n.Catalog, task *model.Task, columns model.Column
 
 	fmt.Fprint(&b, "\nnote:\n")
 	if task.Note == "" {
-		fmt.Fprint(&b, "  (なし)\n")
+		fmt.Fprint(&b, text.CLI.Task.EmptyList)
 		return b.String()
 	}
 	for _, line := range strings.Split(task.Note, "\n") {

@@ -559,7 +559,7 @@ func DescribeLink(text *i18n.Catalog, state fetch.LinkState) string {
 	case state.Jira != nil:
 		return fmt.Sprintf("%s (%s)%s", state.Jira.StatusName, state.Jira.StatusCategory, titleSuffix(state.Jira.Summary))
 	default:
-		return catalogOrDefault(text).Common.Unknown
+		return i18n.OrDefault(text).Common.Unknown
 	}
 }
 

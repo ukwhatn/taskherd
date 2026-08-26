@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/ukwhatn/taskherd/internal/config"
@@ -18,15 +19,15 @@ import (
 func (a *app) pickerCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "picker",
-		Short:  "pane をタスクに紐づける選択 TUI（herdr-plugin.toml の picker entrypoint 専用）",
+		Short:  a.text.CLI.Picker.Short,
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			targetPane := a.env.Getenv(targetPaneEnv)
 			if targetPane == "" {
 				return &UserError{
-					Msg:      targetPaneEnv + " が設定されていない",
-					HintText: "picker は herdr プラグインの link-pane action からのみ起動する",
+					Msg:      fmt.Sprintf(a.text.CLI.Picker.NoTargetPane.Msg, targetPaneEnv),
+					HintText: a.text.CLI.Picker.NoTargetPane.Hint,
 				}
 			}
 			cfg, err := a.config()

@@ -64,7 +64,7 @@ func TestRefreshSaysWhyTheTokenFileFailed(t *testing.T) {
 
 	// "Jira の設定がない" on its own is the dead end this reason exists to remove.
 	out := res.stdout + res.stderr
-	if !strings.Contains(out, "token_file") || !strings.Contains(out, "読めない") {
+	if !strings.Contains(out, "token_file") || !strings.Contains(out, "読めません") {
 		t.Errorf("読めない理由が出ていない:\n%s", out)
 	}
 }

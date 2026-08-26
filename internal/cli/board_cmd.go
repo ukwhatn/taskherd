@@ -13,13 +13,13 @@ import (
 func (a *app) boardCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "board",
-		Short: "kanban ボード（TUI）を開く",
+		Short: a.text.CLI.Board.Short,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if a.jsonOut {
 				return &UserError{
-					Msg:      "board は対話 TUI のため --json では起動できない",
-					HintText: "機械可読な出力は list --json / show --json を使う",
+					Msg:      a.text.CLI.Board.NoTTY.Msg,
+					HintText: a.text.CLI.Board.NoTTY.Hint,
 				}
 			}
 			cfg, err := a.config()
@@ -28,7 +28,7 @@ func (a *app) boardCmd() *cobra.Command {
 			}
 			// Checked before boardDeps, which is what starts the file and herdr watchers: a refusal
 			// after that point would return without the deferred Close ever being registered.
-			if err := requireOpenColumn(cfg.Columns); err != nil {
+			if err := a.requireOpenColumn(cfg.Columns); err != nil {
 				return err
 			}
 			return tui.Run(cmd.Context(), a.boardDeps(cmd.Context(), cfg), a.boardSettings(cfg))
@@ -42,15 +42,15 @@ func (a *app) boardCmd() *cobra.Command {
 // cursor, so a column set that is all terminal leaves the board with nothing to focus. This is a
 // rule about the board and not about the config: Columns.Validate runs for every command, and
 // list, show and add all work perfectly well with such a column set.
-func requireOpenColumn(columns model.Columns) error {
+func (a *app) requireOpenColumn(columns model.Columns) error {
 	for _, col := range columns {
 		if col.Kind == model.ColumnKindOpen {
 			return nil
 		}
 	}
 	return &UserError{
-		Msg:      `board を開くには kind = "open" の列が最低 1 つ必要`,
-		HintText: "config.toml の [[columns]] に open の列を足す（場所は taskherd config path）",
+		Msg:      a.text.CLI.Board.NoOpenColumn.Msg,
+		HintText: a.text.CLI.Board.NoOpenColumn.Hint,
 	}
 }
 
@@ -68,7 +68,7 @@ func (a *app) boardDeps(ctx context.Context, cfg *config.Config) tui.Deps {
 	if watcher, err := a.tasks().Watch(); err == nil {
 		deps.Files = watcher
 	}
-	if launcher, err := newDetachedLauncher(a.env.Paths.StateDir, a.env.Now); err == nil {
+	if launcher, err := newDetachedLauncher(a.env.Paths.StateDir, a.env.Now, a.text); err == nil {
 		deps.Launcher = launcher
 	}
 	client := a.herdr()

@@ -207,7 +207,7 @@ func New(ctx context.Context, deps Deps, settings Settings) *Board {
 		settings: settings,
 		styles:   newStyles(),
 		icons:    Icons(settings.Icons),
-		text:     catalogOrDefault(settings.Text),
+		text:     i18n.OrDefault(settings.Text),
 		file:     model.NewFile(),
 		cache:    &fetch.CacheFile{Version: 1, Entries: map[string]fetch.CacheEntry{}},
 		links:    map[string]fetch.LinkState{},
@@ -220,15 +220,6 @@ func New(ctx context.Context, deps Deps, settings Settings) *Board {
 		width:               80,
 		height:              24,
 	}
-}
-
-// catalogOrDefault keeps a nil catalog from reaching the render path, where every field read off
-// it would draw an empty string and the screen would lose its labels without failing.
-func catalogOrDefault(text *i18n.Catalog) *i18n.Catalog {
-	if text == nil {
-		return i18n.For(i18n.Default)
-	}
-	return text
 }
 
 // cardStyle is the presentation every card on this board is built with.

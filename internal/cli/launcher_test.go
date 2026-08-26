@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,12 +10,12 @@ import (
 )
 
 func TestStartSessionArgs(t *testing.T) {
-	got := startSessionArgs(42, "/repo/work", "これをやって\n2 行目")
+	got := startSessionArgs(ja, 42, "/repo/work", "これをやって\n2 行目")
 	want := []string{
 		"start", "42",
 		"--cwd", "/repo/work",
 		"--prompt", "これをやって\n2 行目",
-		"--notify-error", "#42 の起動",
+		"--notify-error", fmt.Sprintf(ja.CLI.Start.LaunchLabel, 42),
 	}
 	assertArgs(t, got, want)
 }
@@ -22,23 +23,23 @@ func TestStartSessionArgs(t *testing.T) {
 // An empty prompt still travels as an explicit --prompt "": omitting the flag would make start
 // fall back to the config template, which is the opposite of what an emptied prompt field means.
 func TestStartSessionArgsKeepsEmptyPromptExplicit(t *testing.T) {
-	got := startSessionArgs(7, "/repo", "")
+	got := startSessionArgs(ja, 7, "/repo", "")
 	want := []string{
 		"start", "7",
 		"--cwd", "/repo",
 		"--prompt", "",
-		"--notify-error", "#7 の起動",
+		"--notify-error", fmt.Sprintf(ja.CLI.Start.LaunchLabel, 7),
 	}
 	assertArgs(t, got, want)
 }
 
 func TestResumeSessionArgs(t *testing.T) {
-	got := resumeSessionArgs(3, "s-gone")
+	got := resumeSessionArgs(ja, 3, "s-gone")
 	want := []string{
 		"jump", "3",
 		"--session", "s-gone",
 		"--yes",
-		"--notify-error", "#3 の resume",
+		"--notify-error", fmt.Sprintf(ja.CLI.Start.ResumeLabel, 3),
 	}
 	assertArgs(t, got, want)
 }
@@ -110,7 +111,7 @@ func TestDetachedLauncherReportsUnstartableExecutable(t *testing.T) {
 	if err == nil {
 		t.Fatal("err = nil, want 起動できない旨のエラー")
 	}
-	if !strings.Contains(err.Error(), "起こせない") {
+	if !strings.Contains(err.Error(), "cannot spawn taskherd") {
 		t.Errorf("err = %v, want 起こせない旨", err)
 	}
 }

@@ -111,11 +111,27 @@ func walkStrings(t *testing.T, v reflect.Value, prefix string, fn func(path, val
 	}
 }
 
-// formatArgs is the argument list a format string implies: position -> verb. Explicit indexes
-// (%[2]d) are followed, which is how a translation can reorder arguments without the two languages
-// looking different here.
-func formatArgs(format string) map[int]byte {
-	args := map[int]byte{}
+// verbClass groups the verbs that consume the same kind of Go value, so that a translation may
+// quote naturally (%q where the other language wrote %s) without that reading as a mismatch. What
+// the comparison is actually for is an argument that went missing, was added, or changed type.
+func verbClass(verb byte) string {
+	switch verb {
+	case 's', 'q', 'v', 'w':
+		return "value"
+	case 'd', 'b', 'o', 'x', 'X', 'c', 'U':
+		return "integer"
+	case 'f', 'F', 'e', 'E', 'g', 'G':
+		return "float"
+	default:
+		return string(verb)
+	}
+}
+
+// formatArgs is the argument list a format string implies: position -> what it consumes. Explicit
+// indexes (%[2]d) are followed, which is how a translation can reorder arguments without the two
+// languages looking different here.
+func formatArgs(format string) map[int]string {
+	args := map[int]string{}
 	next := 1
 	for i := 0; i < len(format); i++ {
 		if format[i] != '%' || i+1 >= len(format) {
@@ -143,7 +159,7 @@ func formatArgs(format string) map[int]byte {
 		if i >= len(format) {
 			break
 		}
-		args[next] = format[i]
+		args[next] = verbClass(format[i])
 		next++
 	}
 	return args

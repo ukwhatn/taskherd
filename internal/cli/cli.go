@@ -122,20 +122,19 @@ func (a *app) notifyError(err error) {
 	if errors.As(err, &h) && h.Hint() != "" {
 		body += "（" + h.Hint() + "）"
 	}
-	_ = a.herdr().Notify(context.Background(), "taskherd: "+a.notifyLabel+"に失敗", body)
+	_ = a.herdr().Notify(context.Background(), fmt.Sprintf(a.text.CLI.Root.NotifyTitle, a.notifyLabel), body)
 }
 
 func (a *app) rootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "taskherd",
-		Short: "herdr のエージェントセッション・PR・チケットをタスク単位で束ねるタスク管理ツール",
+		Short: a.text.CLI.Root.Short,
 		// Errors and usage are rendered by report() so that --json emits JSON only.
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
-	root.PersistentFlags().BoolVar(&a.jsonOut, "json", false, "結果を JSON で stdout に出力する（対話は行わない）")
-	root.PersistentFlags().StringVar(&a.notifyLabel, "notify-error", "",
-		"失敗したときに herdr の通知でこのラベルを知らせる")
+	root.PersistentFlags().BoolVar(&a.jsonOut, "json", false, a.text.CLI.Root.FlagJSON)
+	root.PersistentFlags().StringVar(&a.notifyLabel, "notify-error", "", a.text.CLI.Root.FlagNotifyError)
 	// Hidden: this is how the board reaches a launch it has already detached from itself, not
 	// something to type.
 	_ = root.PersistentFlags().MarkHidden("notify-error")
@@ -177,16 +176,16 @@ func (a *app) report(err error) {
 		}{Error: err.Error(), Hint: hint}
 		data, marshalErr := json.Marshal(payload)
 		if marshalErr != nil {
-			fmt.Fprintf(a.env.Err, "エラー: %v\n", err)
+			fmt.Fprintf(a.env.Err, a.text.CLI.Root.ErrorPrefix, err)
 			return
 		}
 		fmt.Fprintln(a.env.Err, string(data))
 		return
 	}
 
-	fmt.Fprintf(a.env.Err, "エラー: %v\n", err)
+	fmt.Fprintf(a.env.Err, a.text.CLI.Root.ErrorPrefix, err)
 	if hint != "" {
-		fmt.Fprintf(a.env.Err, "ヒント: %s\n", hint)
+		fmt.Fprintf(a.env.Err, a.text.CLI.Root.HintPrefix, hint)
 	}
 }
 
@@ -255,11 +254,11 @@ func (a *app) jiraCredentials(cfg *config.Config) fetch.JiraCredentials {
 	if err != nil {
 		// The path is quoted but the file's content never is: this string is written to cache.json
 		// and drawn on the board.
-		creds.TokenReason = fmt.Sprintf("token_file %q を読めない: %v", cfg.Jira.TokenFile, err)
+		creds.TokenReason = fmt.Sprintf(a.text.CLI.Root.TokenFileUnreadable, cfg.Jira.TokenFile, err)
 		return creds
 	}
 	if creds.Token = strings.TrimSpace(string(data)); creds.Token == "" {
-		creds.TokenReason = fmt.Sprintf("token_file %q が空", cfg.Jira.TokenFile)
+		creds.TokenReason = fmt.Sprintf(a.text.CLI.Root.TokenFileEmpty, cfg.Jira.TokenFile)
 	}
 	return creds
 }
@@ -291,7 +290,7 @@ func (a *app) emitJSON(v any) error {
 	enc := json.NewEncoder(a.env.Out)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
-		return fmt.Errorf("JSON を出力できない: %w", err)
+		return fmt.Errorf("cannot encode the result as JSON: %w", err)
 	}
 	return nil
 }
@@ -307,45 +306,45 @@ func (a *app) emitTask(task *model.Task, textLine string) error {
 	return nil
 }
 
-func parseID(arg string) (int, error) {
+func (a *app) parseID(arg string) (int, error) {
 	id, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(arg), "#"))
 	if err != nil || id < 1 {
 		return 0, &UserError{
-			Msg:      fmt.Sprintf("タスク id が不正: %q", arg),
-			HintText: "id は正の整数で指定する（#12 表記も可）",
+			Msg:      fmt.Sprintf(a.text.CLI.Root.BadTaskID.Msg, arg),
+			HintText: a.text.CLI.Root.BadTaskID.Hint,
 		}
 	}
 	return id, nil
 }
 
-func requireColumn(cfg *config.Config, status string) error {
+func (a *app) requireColumn(cfg *config.Config, status string) error {
 	if _, ok := cfg.Columns.Find(status); !ok {
 		return &UserError{
-			Msg:      fmt.Sprintf("未定義の列 id: %q", status),
-			HintText: "有効な列 id: " + strings.Join(cfg.Columns.IDs(), ", "),
+			Msg:      fmt.Sprintf(a.text.CLI.Root.UnknownColumn.Msg, status),
+			HintText: fmt.Sprintf(a.text.CLI.Root.UnknownColumn.Hint, strings.Join(cfg.Columns.IDs(), ", ")),
 		}
 	}
 	return nil
 }
 
-func parseDueFlag(raw string) (*model.Date, error) {
+func (a *app) parseDueFlag(raw string) (*model.Date, error) {
 	if raw == "" {
 		return nil, nil
 	}
 	due, err := model.ParseDate(raw)
 	if err != nil {
-		return nil, &UserError{Msg: err.Error(), HintText: "例: --due 2026-08-31"}
+		return nil, &UserError{Msg: err.Error(), HintText: a.text.CLI.Root.BadDueHint}
 	}
 	return &due, nil
 }
 
-func parseLinkURL(raw string) (string, error) {
+func (a *app) parseLinkURL(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	u, err := url.Parse(trimmed)
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return "", &UserError{
-			Msg:      fmt.Sprintf("URL が不正: %q", raw),
-			HintText: "スキームとホストを含む URL を指定する（例: https://github.com/owner/repo/pull/1）",
+			Msg:      fmt.Sprintf(a.text.CLI.Root.BadURL.Msg, raw),
+			HintText: a.text.CLI.Root.BadURL.Hint,
 		}
 	}
 	return trimmed, nil

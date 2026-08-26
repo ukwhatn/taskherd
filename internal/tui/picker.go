@@ -95,7 +95,7 @@ type picker struct {
 
 func newPicker(ctx context.Context, deps PickerDeps, targetPane string) *picker {
 	filter := textinput.New()
-	text := catalogOrDefault(deps.Text)
+	text := i18n.OrDefault(deps.Text)
 	filter.Prompt = text.Picker.FilterPrompt
 	filter.Focus()
 

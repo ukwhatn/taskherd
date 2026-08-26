@@ -13,26 +13,26 @@ func (a *app) refreshCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "refresh [<id>]",
-		Short: "リンクのライブ取得を即時実行しキャッシュを更新する",
+		Short: a.text.CLI.Refresh.Short,
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
 			case len(args) == 0 && !all:
 				return &UserError{
-					Msg:      "取得対象が指定されていない",
-					HintText: "id を指定するか --all を付ける",
+					Msg:      a.text.CLI.Refresh.NoTarget.Msg,
+					HintText: a.text.CLI.Refresh.NoTarget.Hint,
 				}
 			case len(args) > 0 && all:
 				return &UserError{
-					Msg:      "id と --all は同時に指定できない",
-					HintText: "対象を絞るなら id のみ、全体を更新するなら --all のみを指定する",
+					Msg:      a.text.CLI.Refresh.BothIDAndAll.Msg,
+					HintText: a.text.CLI.Refresh.BothIDAndAll.Hint,
 				}
 			}
 
 			var id int
 			if len(args) > 0 {
 				var err error
-				id, err = parseID(args[0])
+				id, err = a.parseID(args[0])
 				if err != nil {
 					return err
 				}
@@ -66,7 +66,7 @@ func (a *app) refreshCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&all, "all", false, "全タスクのリンクを取得する")
+	cmd.Flags().BoolVar(&all, "all", false, a.text.CLI.Refresh.FlagAll)
 	return cmd
 }
 
@@ -125,19 +125,19 @@ func (a *app) emitRefreshResult(result *fetch.RefreshResult) error {
 		})
 	}
 
-	fmt.Fprintf(a.env.Out, "%d 件取得した", len(updated))
+	fmt.Fprintf(a.env.Out, a.text.CLI.Refresh.Refreshed, len(updated))
 	if len(failed) > 0 {
-		fmt.Fprintf(a.env.Out, "（%d 件失敗）", len(failed))
+		fmt.Fprintf(a.env.Out, a.text.CLI.Refresh.FailedSuffix, len(failed))
 	}
 	fmt.Fprintln(a.env.Out)
 	for _, fail := range failed {
 		fmt.Fprintf(a.env.Out, "  - %s: %s\n", fail.URL, fail.Error)
 	}
 	if result.GitHubInterrupted {
-		fmt.Fprintln(a.env.Out, "GitHub のレート制限のため残りの取得を中断した")
+		fmt.Fprintln(a.env.Out, a.text.CLI.Refresh.GitHubLimited)
 	}
 	if result.JiraInterrupted {
-		fmt.Fprintln(a.env.Out, "Jira のレート制限のため残りの取得を中断した")
+		fmt.Fprintln(a.env.Out, a.text.CLI.Refresh.JiraLimited)
 	}
 	return nil
 }
