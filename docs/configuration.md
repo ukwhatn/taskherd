@@ -91,6 +91,17 @@ what the board recorded and never ask themselves.
 `TASKHERD_NO_UPDATE_CHECK=1` does the same for one invocation. `taskherd update` keeps working
 either way, since that is someone asking on purpose.
 
+The question goes to GitHub's releases API, which caps unauthenticated reads at 60 an hour **per
+source address**. Behind a shared outbound address — an office network, a VPN — that allowance is
+spent by everyone on it at once, and the check starts failing for reasons nothing on this machine
+can fix. So the read is authenticated when it can be: taskherd asks `gh` for the token belonging to
+the account [`[github.accounts]`](#githubaccounts) names for `github.com`, or to `gh`'s active
+account when it names none, and sends it as a bearer token. With no `gh`, no signed-in account, or
+no config at all the read simply goes out unauthenticated, as it always did.
+
+Downloading the release itself is never authenticated: an asset URL redirects to a storage host,
+the asset is public, and that host is not the one whose cap made the check worth authenticating.
+
 The only thing sent is the HTTP request itself, to
 `api.github.com/repos/ukwhatn/taskherd/releases/latest`.
 
@@ -104,7 +115,8 @@ state is fetched for it.
 
 By default a fetch runs as whatever account `gh` currently has active. Naming an account here makes
 taskherd resolve its token with `gh auth token --hostname <host> --user <account>` and hand that to
-the `gh` subprocess — **without switching your active account**.
+the `gh` subprocess — **without switching your active account**. The same resolution settles which
+account the [update check](#updates) reads the releases API as.
 
 A key is either `"<host>"` or `"<host>/<owner>"`, resolved owner-first, then host, then `gh`'s
 active account. Case and surrounding whitespace are ignored.

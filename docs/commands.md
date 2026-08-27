@@ -50,5 +50,5 @@ It focuses the new pane unless `--no-focus`.
 | `taskherd update [--check] [-y]` | Check for a newer release and install it |
 
 `taskherd update` replaces the running binary in place. It refuses on a build from source, since
-there is no release to compare it against. See
-[Configuration](configuration.md#updates) for turning the background check off.
+there is no release to compare it against. See [Configuration](configuration.md#updates) for how
+the check authenticates itself, and for turning the background one off.

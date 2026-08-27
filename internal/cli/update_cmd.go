@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/ukwhatn/taskherd/internal/buildinfo"
 	"github.com/ukwhatn/taskherd/internal/config"
+	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/update"
 )
 
@@ -118,7 +120,25 @@ func (a *app) emitUpdateJSON(current, latest string, available bool, installed s
 
 // updateChecker is the record of the releases page for this machine's state directory.
 func (a *app) updateChecker() *update.Checker {
-	return &update.Checker{Dir: a.env.Paths.StateDir, Now: a.env.Now}
+	return &update.Checker{Dir: a.env.Paths.StateDir, Now: a.env.Now, Token: a.releaseToken}
+}
+
+// releaseHost is the host the releases API is read from, and so the one whose gh account settles
+// what the read is authenticated as.
+const releaseHost = "github.com"
+
+// releaseToken hands the releases API whatever token gh already holds for github.com. Behind a
+// shared outbound address the unauthenticated allowance is spent by everyone on it at once, and
+// the check then fails for reasons nothing on this machine can fix.
+//
+// Every failure answers "", which is the unauthenticated request this used to make unconditionally:
+// no config, no gh, no signed-in account are all ordinary, and none of them should stop the check.
+func (a *app) releaseToken(ctx context.Context) string {
+	cfg, err := a.config()
+	if err != nil {
+		return ""
+	}
+	return fetch.NewGitHubFetcher(cfg.GitHub.Accounts).HostToken(ctx, releaseHost)
 }
 
 // updateCheckerFor returns the checker the board should use, or nil when this installation has

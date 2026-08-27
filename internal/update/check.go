@@ -72,6 +72,10 @@ type Checker struct {
 	Now func() time.Time
 	// URL overrides APIURL, for tests.
 	URL string
+	// Token supplies the credential to read the releases API with, and "" asks unauthenticated.
+	// Nil is the same as returning "". Unauthenticated reads are capped per source address, which
+	// a shared outbound address exhausts long before one machine's own daily check would.
+	Token func(context.Context) string
 }
 
 // Path is where the record is kept.
@@ -166,6 +170,11 @@ func (c *Checker) fetchLatestTag(ctx context.Context) (string, error) {
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if c.Token != nil {
+		if token := c.Token(ctx); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
 
 	resp, err := c.client().Do(req)
 	if err != nil {

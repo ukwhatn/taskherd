@@ -1,6 +1,6 @@
 id = "taskherd"
 name = "Taskherd"
-version = "1.0.0"
+version = "1.1.0"
 min_herdr_version = "0.8.0"
 description = "Task board linked to herdr agent sessions, PRs, and Jira tickets"
 platforms = ["macos", "linux"]
