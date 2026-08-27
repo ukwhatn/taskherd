@@ -128,6 +128,10 @@ func (a *Applier) target() (string, error) {
 	return resolved, nil
 }
 
+// download carries no credential, unlike the check that precedes it. A release asset URL redirects
+// to a storage host, and an Authorization header set here would follow the redirect onto it; the
+// asset is public anyway, and its host is not the API whose per-address cap made the check worth
+// authenticating.
 func (a *Applier) download(ctx context.Context, tag, name string) ([]byte, error) {
 	url := fmt.Sprintf("%s/%s/%s", a.baseURL(), tag, name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

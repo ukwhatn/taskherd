@@ -275,6 +275,31 @@ func (f *GitHubFetcher) credentials(ctx context.Context, url string) tokenLookup
 		return tokenLookup{}
 	}
 
+	lookup := f.cachedToken(ctx, host, account)
+	// The key is stamped on the returned copy rather than cached with the token, so a message
+	// names the entry this link matched even when the token came from another owner's entry.
+	lookup.key, lookup.account = key, account
+	return lookup
+}
+
+// HostToken returns the token gh holds for host, or "" when gh will not give one up. The account
+// is the one [github.accounts] names for the host, and gh's own active account when it names none.
+//
+// Callers that address a host rather than a link need this: the releases API is a single URL, not
+// something an owner-scoped [github.accounts] entry could ever match. A failure is answered with ""
+// rather than an error because every caller's fallback is the same — go on unauthenticated.
+func (f *GitHubFetcher) HostToken(ctx context.Context, host string) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return ""
+	}
+	_, account := f.lookupAccount(host, "")
+	return f.cachedToken(ctx, host, account).token
+}
+
+// cachedToken resolves one credential at most once for the life of the process, so two callers
+// served by the same account cost one gh process rather than two.
+func (f *GitHubFetcher) cachedToken(ctx context.Context, host, account string) tokenLookup {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	cacheKey := host + "\x00" + account
@@ -286,9 +311,6 @@ func (f *GitHubFetcher) credentials(ctx context.Context, url string) tokenLookup
 		}
 		f.tokens[cacheKey] = lookup
 	}
-	// The key is stamped on the returned copy rather than cached with the token, so a message
-	// names the entry this link matched even when the token came from another owner's entry.
-	lookup.key, lookup.account = key, account
 	return lookup
 }
 
@@ -322,7 +344,13 @@ func normalizeAccountKey(key string) string {
 // resolveToken asks gh for the named account's token. gh is run with no added environment, so an
 // already-resolved token for another host cannot influence the answer.
 func (f *GitHubFetcher) resolveToken(ctx context.Context, host, account string) tokenLookup {
-	stdout, stderr, err := f.Run(ctx, nil, "auth", "token", "--hostname", host, "--user", account)
+	args := []string{"auth", "token", "--hostname", host}
+	// An empty account is not a configured one: it means "whatever gh is signed in as", which is
+	// exactly what gh answers when --user is left off.
+	if account != "" {
+		args = append(args, "--user", account)
+	}
+	stdout, stderr, err := f.Run(ctx, nil, args...)
 	if err != nil {
 		return tokenLookup{err: &ghTokenError{host: host, account: account, stderr: strings.TrimSpace(string(stderr))}}
 	}
