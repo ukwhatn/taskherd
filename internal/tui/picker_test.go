@@ -3,10 +3,13 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/model"
 )
@@ -162,6 +165,85 @@ func TestPickerShowsErrorWhenHerdrUnreachable(t *testing.T) {
 
 	if p.linked || !p.isError {
 		t.Errorf("linked = %v, isError = %v, want 失敗をエラー表示", p.linked, p.isError)
+	}
+}
+
+// manyPickerTasks is a list long enough that the popup cannot show all of it, with titles wide
+// enough that an untrimmed row overflows the popup on its own.
+func manyPickerTasks(n int) []model.Task {
+	tasks := make([]model.Task, 0, n)
+	for i := 1; i <= n; i++ {
+		tasks = append(tasks, model.Task{
+			ID:     i,
+			Status: "todo",
+			Title:  fmt.Sprintf("タスク %d 折り返しの原因になるくらい長い日本語のタイトル", i),
+		})
+	}
+	return tasks
+}
+
+func pickerViewLines(p *picker) []string {
+	return strings.Split(p.render(), "\n")
+}
+
+func TestPickerViewFitsThePopup(t *testing.T) {
+	sizes := []struct{ width, height int }{
+		{48, 14}, // the popup a 80x24 terminal gives a 60% x 60% entrypoint
+		{48, 7},  // one row of list left over the fixed rows
+		{48, 6},  // exactly the fixed rows
+		{48, 3},  // less than the fixed rows
+		{20, 10}, // narrow enough that every title is cut
+	}
+	cursors := []int{0, 38, 76}
+
+	for _, size := range sizes {
+		for _, cursor := range cursors {
+			p := newTestPicker(PickerDeps{Tasks: newFakeStore(manyPickerTasks(77)...)}, "wS:p1")
+			runPickerCmd(t, p, p.Init())
+			p.Update(tea.WindowSizeMsg{Width: size.width, Height: size.height})
+			p.cursor = cursor
+
+			lines := pickerViewLines(p)
+			if len(lines) > size.height {
+				t.Errorf("%dx%d cursor=%d: %d 行あり端末高を超えた", size.width, size.height, cursor, len(lines))
+			}
+			for i, line := range lines {
+				if w := lipgloss.Width(line); w > size.width {
+					t.Errorf("%dx%d cursor=%d: %d 行目が %d セル幅で端末幅を超えた", size.width, size.height, cursor, i+1, w)
+				}
+			}
+		}
+	}
+}
+
+func TestPickerViewKeepsTheCursorVisible(t *testing.T) {
+	p := newTestPicker(PickerDeps{Tasks: newFakeStore(manyPickerTasks(77)...)}, "wS:p1")
+	runPickerCmd(t, p, p.Init())
+	p.Update(tea.WindowSizeMsg{Width: 60, Height: 14})
+
+	for _, cursor := range []int{0, 20, 76} {
+		p.cursor = cursor
+		view := p.render()
+		marker := fmt.Sprintf("#%-4d", p.tasks[p.filtered[cursor]].ID)
+		if !strings.Contains(view, marker) {
+			t.Errorf("cursor=%d: 選択行 %q が描画されていない", cursor, marker)
+		}
+	}
+}
+
+// The filter is a textinput, so it is sized through the model rather than trimmed after the fact:
+// trimming its value would hide the cursor, and trimming its View would cut an escape sequence.
+func TestPickerFilterStaysInsideTheWidth(t *testing.T) {
+	p := newTestPicker(PickerDeps{Tasks: newFakeStore(manyPickerTasks(3)...)}, "wS:p1")
+	runPickerCmd(t, p, p.Init())
+	p.Update(tea.WindowSizeMsg{Width: 30, Height: 14})
+	p.filter.SetValue(strings.Repeat("絞", 40))
+	p.applyFilter()
+
+	for i, line := range pickerViewLines(p) {
+		if w := lipgloss.Width(line); w > 30 {
+			t.Errorf("%d 行目が %d セル幅で端末幅を超えた", i+1, w)
+		}
 	}
 }
 

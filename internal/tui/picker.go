@@ -11,6 +11,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
@@ -81,6 +82,9 @@ type picker struct {
 	tasks    []model.Task // every task, sorted for display
 	filtered []int        // indexes into tasks matching the current filter
 	cursor   int
+	// offset is the first visible row of the list, kept between renders so a list that need not
+	// scroll does not jump under the selection.
+	offset int
 
 	width, height int
 
@@ -99,7 +103,7 @@ func newPicker(ctx context.Context, deps PickerDeps, targetPane string) *picker 
 	filter.Prompt = text.Picker.FilterPrompt
 	filter.Focus()
 
-	return &picker{
+	p := &picker{
 		ctx:        ctx,
 		deps:       deps,
 		styles:     newStyles(),
@@ -110,6 +114,18 @@ func newPicker(ctx context.Context, deps PickerDeps, targetPane string) *picker 
 		width:      60,
 		height:     20,
 	}
+	p.resizeFilter()
+	return p
+}
+
+// resizeFilter fits the filter to the popup's width.
+//
+// The value is written back onto the model afterwards because textinput recomputes its horizontal
+// scroll window when the value changes, never when the width does: without this, a popup that
+// starts or is resized narrower keeps drawing the wider window and overflows the row.
+func (p *picker) resizeFilter() {
+	p.filter.SetWidth(maxInt(p.width-lipgloss.Width(p.filter.Prompt)-1, 1))
+	p.filter.SetValue(p.filter.Value())
 }
 
 func (p *picker) Init() tea.Cmd {
@@ -140,6 +156,7 @@ func (p *picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		p.width, p.height = msg.Width, msg.Height
+		p.resizeFilter()
 		return p, nil
 
 	case tea.KeyPressMsg:
@@ -330,49 +347,95 @@ func (p *picker) message(err error) string {
 	return text
 }
 
-func (p *picker) View() tea.View {
-	var b strings.Builder
+// pickerFixedLines is what the popup spends on everything but the task list: the title, the
+// filter, the blank line under it, the blank line above the status, the status itself, and the
+// key help. The list gets whatever is left.
+const pickerFixedLines = 6
 
-	fmt.Fprintf(&b, "%s\n", p.styles.heading.Render(fmt.Sprintf(p.text.Picker.Title, p.targetPane)))
-	b.WriteString(p.filter.View())
-	b.WriteString("\n\n")
+func (p *picker) View() tea.View {
+	return tea.NewView(p.render())
+}
+
+func (p *picker) render() string {
+	width := maxInt(p.width, 1)
+
+	lines := []string{
+		p.styles.heading.Render(truncate(fmt.Sprintf(p.text.Picker.Title, p.targetPane), width)),
+		p.filter.View(),
+		"",
+	}
+
+	lines = append(lines, p.listLines(width)...)
+
+	lines = append(lines, "", p.statusLine(width))
+	lines = append(lines, p.styles.footer.Render(truncate(fmt.Sprintf(p.text.Picker.Help, p.icons.verticalKeys()), width)))
+
+	return strings.Join(clampLines(lines, p.height), "\n")
+}
+
+// listLines draws the task list into the rows left over after pickerFixedLines, windowed so the
+// selection stays visible. Rows are trimmed as plain text and styled afterwards, since cutting an
+// already-styled row would land inside an escape sequence.
+func (p *picker) listLines(width int) []string {
+	budget := p.height - pickerFixedLines
+	if budget < 1 {
+		return nil
+	}
 
 	switch {
 	case p.loadErr != nil:
-		b.WriteString(p.styles.alert.Render(p.message(p.loadErr)))
-		b.WriteString("\n")
+		return []string{p.styles.alert.Render(truncate(p.message(p.loadErr), width))}
 	case !p.loaded:
-		b.WriteString(p.styles.dim.Render(p.text.Picker.Loading))
-		b.WriteString("\n")
+		return []string{p.styles.dim.Render(truncate(p.text.Picker.Loading, width))}
 	case len(p.filtered) == 0:
-		b.WriteString(p.styles.dim.Render(p.text.Picker.NoMatch))
-		b.WriteString("\n")
-	default:
-		for i, idx := range p.filtered {
-			task := p.tasks[idx]
-			label := columnLabel(task.Status, p.deps.Columns)
-			line := fmt.Sprintf("#%-4d [%s] %s", task.ID, label, task.Title)
-			if i == p.cursor {
-				line = p.styles.cardTitleSelected.Render(line)
-			}
-			b.WriteString(line)
-			b.WriteString("\n")
-		}
+		return []string{p.styles.dim.Render(truncate(p.text.Picker.NoMatch, width))}
 	}
 
-	b.WriteString("\n")
+	start, visible, before, after := listWindow(p.offset, p.cursor, len(p.filtered), budget)
+	p.offset = start
+
+	lines := make([]string, 0, budget)
+	if before {
+		lines = append(lines, p.styles.dim.Render(truncateMark))
+	}
+	for i := start; i < start+visible; i++ {
+		task := p.tasks[p.filtered[i]]
+		row := truncate(fmt.Sprintf("#%-4d [%s] %s", task.ID, columnLabel(task.Status, p.deps.Columns), task.Title), width)
+		if i == p.cursor {
+			row = p.styles.cardTitleSelected.Render(row)
+		}
+		lines = append(lines, row)
+	}
+	if after {
+		lines = append(lines, p.styles.dim.Render(truncateMark))
+	}
+	return lines
+}
+
+// statusLine is always a line, blank included: the list's budget is measured against a fixed
+// number of surrounding rows, and a status that disappears would change it.
+func (p *picker) statusLine(width int) string {
 	switch {
 	case p.linking:
-		b.WriteString(p.styles.dim.Render(p.text.Picker.Attaching))
+		return p.styles.dim.Render(truncate(p.text.Picker.Attaching, width))
 	case p.status != "" && p.isError:
-		b.WriteString(p.styles.alert.Render(p.status))
+		return p.styles.alert.Render(truncate(p.status, width))
 	case p.status != "":
-		b.WriteString(p.styles.status.Render(p.status))
+		return p.styles.status.Render(truncate(p.status, width))
 	}
-	b.WriteString("\n")
-	b.WriteString(p.styles.footer.Render(fmt.Sprintf(p.text.Picker.Help, p.icons.verticalKeys())))
+	return ""
+}
 
-	return tea.NewView(b.String())
+// clampLines is the last guard on the popup's height, for the sizes where even the fixed rows do
+// not fit. It mirrors renderModal's own cut for the board's dialogs.
+func clampLines(lines []string, height int) []string {
+	if height <= 0 {
+		return nil
+	}
+	if len(lines) <= height {
+		return lines
+	}
+	return append(lines[:height-1:height-1], truncateMark)
 }
 
 func columnLabel(status string, columns model.Columns) string {

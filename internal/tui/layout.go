@@ -285,6 +285,47 @@ func clampIndex(i, n int) int {
 	return i
 }
 
+// listWindow fits count rows into budget lines of a scrolling list. It returns the window to draw
+// plus whether an ellipsis line fits above and below it, so a caller can spend its whole budget
+// without counting the markers itself.
+//
+// A window that hides rows spends a line on each side it hides, and which sides those are is only
+// known once the window has landed — so the shapes are tried from the roomiest down until one
+// whose markers fit is found. When the budget is too small for both a row and its markers, the
+// cursor's row wins and the markers are dropped: a list that scrolls out from under the selection
+// is worse than one that does not say it was cut.
+func listWindow(offset, cursor, count, budget int) (start, visible int, before, after bool) {
+	if budget <= 0 || count <= 0 {
+		return 0, 0, false, false
+	}
+	if count <= budget {
+		return 0, count, false, false
+	}
+	for reserve := 0; reserve <= 2; reserve++ {
+		visible = budget - reserve
+		if visible < 1 {
+			break
+		}
+		start = scrollOffset(offset, cursor, visible, count)
+		before, after = start > 0, start+visible < count
+		if markerLines(before, after) <= reserve {
+			return start, visible, before, after
+		}
+	}
+	return scrollOffset(offset, cursor, budget, count), budget, false, false
+}
+
+func markerLines(before, after bool) int {
+	lines := 0
+	if before {
+		lines++
+	}
+	if after {
+		lines++
+	}
+	return lines
+}
+
 // scrollOffset keeps the selected row inside a viewport of the given height, returning the new
 // first visible row. The previous offset is respected so the list does not jump when it need not.
 func scrollOffset(offset, selected, visible, count int) int {
