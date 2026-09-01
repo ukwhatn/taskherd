@@ -110,9 +110,10 @@ var enCatalog = Catalog{
 		CreateHint: "enter creates %d tasks",
 	},
 	Start: Start{
-		Help:      "tab field  %s move  %s newline  ctrl+y copy  enter start  esc cancel",
-		HelpSpace: "%s pick a space  tab field  enter start  esc cancel",
-		Title:     "Start a session for #%d %s",
+		Help:         "tab field  %s move  %s newline  ctrl+y copy  enter start  esc cancel",
+		HelpSpace:    "%s pick a space  tab field  enter start  esc cancel",
+		HelpComplete: "tab complete  %s move  %s newline  ctrl+y copy  enter start  esc cancel",
+		Title:        "Start a session for #%d %s",
 
 		NoLauncher:  "No session launcher is configured",
 		HerdrDown:   "Cannot start a session while herdr is unreachable",
@@ -121,11 +122,13 @@ var enCatalog = Catalog{
 		NeedCwd:     "Enter a working directory or pick one",
 		StartFailed: "Cannot start #%d: %v",
 
-		LabelSpace:  "Space ",
-		LabelCwd:    "Working directory",
-		LabelCustom: "Enter: ",
-		LabelPrompt: "Prompt",
-		NewSpace:    "+ new space",
+		LabelSpace:      "Space ",
+		LabelCwd:        "Working directory",
+		LabelCustom:     "Enter: ",
+		LabelPrompt:     "Prompt",
+		NewSpace:        "+ new space",
+		CwdHistory:      "%d from history (%s to pick)",
+		MoreSuggestions: "%d more",
 	},
 	Jump: Jump{
 		HerdrDown:           "Cannot jump while herdr is unreachable",

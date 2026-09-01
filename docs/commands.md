@@ -34,7 +34,8 @@ the prompt.
 | `taskherd jump <id> [--session UUID] [--space ID\|--new-space LABEL]` | Go to the attached session, resuming it if its pane is gone |
 | `taskherd start <id> [--cwd PATH] [--prompt TEXT] [--new] [--no-focus] [--space ID\|--new-space LABEL]` | Start a session on the task and attach it |
 
-`start` needs `--cwd` when no candidate can be derived from existing sessions. It reuses the pane it
+`start` needs `--cwd` when no candidate can be derived from existing sessions. A leading `~` in it
+is resolved against `HOME`, so a quoted `--cwd '~/dev/x'` works. It reuses the pane it
 started last time when it can — see
 [herdr integration](herdr-integration.md#reusing-the-pane-from-last-time) — and `--new` skips that.
 It focuses the new pane unless `--no-focus`.

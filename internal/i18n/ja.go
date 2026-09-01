@@ -112,9 +112,10 @@ var jaCatalog = Catalog{
 		CreateHint: "enter で %d 件のタスクを作成します",
 	},
 	Start: Start{
-		Help:      "tab 欄移動  %s 移動  %s 改行  ctrl+y コピー  enter 起動  esc 取消",
-		HelpSpace: "%s space 選択  tab 欄移動  enter 起動  esc 取消",
-		Title:     "#%d %s のセッションを起動",
+		Help:         "tab 欄移動  %s 移動  %s 改行  ctrl+y コピー  enter 起動  esc 取消",
+		HelpSpace:    "%s space 選択  tab 欄移動  enter 起動  esc 取消",
+		HelpComplete: "tab 補完  %s 移動  %s 改行  ctrl+y コピー  enter 起動  esc 取消",
+		Title:        "#%d %s のセッションを起動",
 
 		NoLauncher:  "セッションの起動経路が設定されていません",
 		HerdrDown:   "herdr に接続できないため起動できません",
@@ -123,11 +124,13 @@ var jaCatalog = Catalog{
 		NeedCwd:     "作業ディレクトリを入力するか候補から選んでください",
 		StartFailed: "#%d を起動できません: %v",
 
-		LabelSpace:  "space ",
-		LabelCwd:    "作業ディレクトリ",
-		LabelCustom: "入力: ",
-		LabelPrompt: "プロンプト",
-		NewSpace:    "+ 新しい space",
+		LabelSpace:      "space ",
+		LabelCwd:        "作業ディレクトリ",
+		LabelCustom:     "入力: ",
+		LabelPrompt:     "プロンプト",
+		NewSpace:        "+ 新しい space",
+		CwdHistory:      "履歴 %d 件（%s で選ぶ）",
+		MoreSuggestions: "他 %d 件",
 	},
 	Jump: Jump{
 		HerdrDown:           "herdr に接続できないため移動できません",

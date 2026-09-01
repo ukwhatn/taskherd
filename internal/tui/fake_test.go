@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
+	"github.com/ukwhatn/taskherd/internal/pathcomp"
 )
 
 var boardNow = time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
@@ -365,6 +368,8 @@ func keyMsg(name string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyDelete}
 	case "tab":
 		return tea.KeyPressMsg{Code: tea.KeyTab}
+	case "shift+tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
 	}
 
 	runes := []rune(name)
@@ -398,3 +403,32 @@ func agent(paneID, sessionID, state string) herdrc.Agent {
 }
 
 var errUnavailable = errors.New("herdr に接続できない")
+
+// fakeDirEntry is one directory name for the launch modal's path completion. Only directories are
+// ever offered, so nothing here needs to describe a file.
+type fakeDirEntry string
+
+func (e fakeDirEntry) Name() string               { return string(e) }
+func (e fakeDirEntry) IsDir() bool                { return true }
+func (e fakeDirEntry) Type() fs.FileMode          { return fs.ModeDir }
+func (e fakeDirEntry) Info() (fs.FileInfo, error) { return nil, errors.New("not needed") }
+
+// useFakePaths points the board's completion at a fixed directory tree, so a test asserting on
+// suggestions does not depend on whatever the machine running it happens to have on disk.
+func (h *harness) useFakePaths(home string, dirs map[string][]string) {
+	h.t.Helper()
+	h.board.paths = &pathcomp.Completer{
+		Home: home,
+		ReadDir: func(dir string) ([]os.DirEntry, error) {
+			names, ok := dirs[dir]
+			if !ok {
+				return nil, fs.ErrNotExist
+			}
+			out := make([]os.DirEntry, 0, len(names))
+			for _, name := range names {
+				out = append(out, fakeDirEntry(name))
+			}
+			return out, nil
+		},
+	}
+}

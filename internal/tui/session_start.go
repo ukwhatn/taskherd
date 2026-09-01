@@ -10,15 +10,16 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/model"
+	"github.com/ukwhatn/taskherd/internal/pathcomp"
 )
 
-// Row budgets for the launch modal. The prompt opens at promptVisibleLines and the candidate list
-// at maxCwdCandidateRows, and both give way — the prompt first, down to promptMinLines — when the
+// Row budgets for the launch modal. The prompt opens at promptVisibleLines and the cwd section's
+// list at maxCwdListRows, and both give way — the prompt first, down to promptMinLines — when the
 // terminal cannot hold them.
 const (
-	promptVisibleLines  = 6
-	promptMinLines      = 3
-	maxCwdCandidateRows = 5
+	promptVisibleLines = 6
+	promptMinLines     = 3
+	maxCwdListRows     = 5
 )
 
 // sessionStartFocus is which section of the launch modal has the keyboard.
@@ -40,10 +41,48 @@ type sessionStartState struct {
 	cwdCursor  int
 	cwdOffset  int
 	cwdInput   textinput.Model
-	prompt     textarea.Model
-	space      spaceSelectState
-	focus      sessionStartFocus
-	err        string
+	// suggestions are the directories the free-text row's value matches, recomputed whenever it
+	// changes and empty whenever the cursor is not on that row.
+	suggestions pathcomp.Suggestions
+	prompt      textarea.Model
+	space       spaceSelectState
+	focus       sessionStartFocus
+	err         string
+}
+
+// typingCwd reports that the cursor is on the free-text row rather than on one of the ranked
+// candidates. That row is the one with completion on it, and the one whose suggestions take the
+// space the candidate list otherwise occupies.
+func (s *sessionStartState) typingCwd() bool {
+	return s.cwdCursor == len(s.candidates)
+}
+
+// refreshCwdSuggestions recomputes what the free-text row's value matches.
+//
+// The suggestions belong to that row alone: with the keyboard anywhere else they are cleared,
+// which is also what hands the rows they were drawn in back to the candidate list.
+func (b *Board) refreshCwdSuggestions() {
+	s := &b.sessionStart
+	if s.focus != sessionStartFocusCwd || !s.typingCwd() {
+		s.suggestions = pathcomp.Suggestions{}
+		return
+	}
+	s.suggestions = b.paths.Suggest(strings.TrimSpace(s.cwdInput.Value()), maxCwdListRows)
+}
+
+// completeCwd extends the free-text row as far as its matches agree on, which is what tab does
+// while that row has the keyboard.
+func (b *Board) completeCwd() {
+	s := &b.sessionStart
+	completed, suggestions := b.paths.Complete(strings.TrimSpace(s.cwdInput.Value()), maxCwdListRows)
+	s.suggestions = suggestions
+	if completed == s.cwdInput.Value() {
+		return
+	}
+	s.cwdInput.SetValue(completed)
+	// SetValue leaves the cursor where it was, so the next character typed would otherwise land in
+	// the middle of what was just completed rather than after it.
+	s.cwdInput.CursorEnd()
 }
 
 // resumeStartState is the modal shown before resuming a session whose pane is gone. It replaces
@@ -111,6 +150,9 @@ func (b *Board) openSessionStartModal(task model.Task, candidates []string) {
 	// is copied into the struct would blur or focus the copy already inside it, not the one left
 	// behind in the local.
 	b.sessionStart.prompt.SetValue(model.RenderPrompt(b.settings.SessionStart.TemplateFor(task.Status), task))
+	// One visit to the modal is how stale a directory listing may get: a launch is the moment a
+	// directory created since the board opened is most likely to be the one being typed.
+	b.paths.Reset()
 	// With no candidate row to land the initial cursor on, cwdCursor is already the free-text row,
 	// so this is what gives that row the keyboard from the outset.
 	b.focusSessionStart(sessionStartFocusCwd)
@@ -177,6 +219,12 @@ func (b *Board) handleSessionStartKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			b.closeOverlay()
 			return b, nil
 		case "tab":
+			// On the free-text row tab is completion, which is what a path field is expected to do
+			// with it. shift+tab still walks the sections, so that row is never a dead end.
+			if s.focus == sessionStartFocusCwd && s.typingCwd() {
+				b.completeCwd()
+				return b, nil
+			}
 			b.cycleSessionStartSection(1)
 			return b, nil
 		case "shift+tab":
@@ -211,9 +259,10 @@ func (b *Board) handleSessionStartKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	case sessionStartFocusSpace:
 		return b, s.space.update(msg)
 	case sessionStartFocusCwd:
-		if s.cwdCursor == len(s.candidates) {
+		if s.typingCwd() {
 			updated, cmd := s.cwdInput.Update(msg)
 			s.cwdInput = updated
+			b.refreshCwdSuggestions()
 			return b, cmd
 		}
 	case sessionStartFocusPrompt:
@@ -290,7 +339,7 @@ func (b *Board) focusSessionStart(target sessionStartFocus) {
 	s.focus = target
 
 	s.space.focusRow(target == sessionStartFocusSpace)
-	if target == sessionStartFocusCwd && s.cwdCursor == len(s.candidates) {
+	if target == sessionStartFocusCwd && s.typingCwd() {
 		s.cwdInput.Focus()
 	} else {
 		s.cwdInput.Blur()
@@ -300,6 +349,7 @@ func (b *Board) focusSessionStart(target sessionStartFocus) {
 	} else {
 		s.prompt.Blur()
 	}
+	b.refreshCwdSuggestions()
 }
 
 // pasteIntoSessionStart routes a bracketed paste to whichever field has the keyboard. Without this
@@ -315,9 +365,10 @@ func (b *Board) pasteIntoSessionStart(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		s.prompt = updated
 		return b, cmd
 	case sessionStartFocusCwd:
-		if s.cwdCursor == len(s.candidates) {
+		if s.typingCwd() {
 			updated, cmd := s.cwdInput.Update(msg)
 			s.cwdInput = updated
+			b.refreshCwdSuggestions()
 			return b, cmd
 		}
 	}
@@ -337,6 +388,7 @@ func (b *Board) moveSessionStartCwd(delta int) {
 	} else {
 		s.cwdInput.Blur()
 	}
+	b.refreshCwdSuggestions()
 }
 
 // copySessionStartPrompt copies the prompt to the clipboard via OSC 52. There is no way to detect
@@ -362,7 +414,7 @@ func (b *Board) submitSessionStart() tea.Cmd {
 
 	var cwd string
 	switch {
-	case s.cwdCursor == len(s.candidates):
+	case s.typingCwd():
 		cwd = strings.TrimSpace(s.cwdInput.Value())
 	case s.cwdCursor < len(s.candidates):
 		cwd = s.candidates[s.cwdCursor]
@@ -371,6 +423,9 @@ func (b *Board) submitSessionStart() tea.Cmd {
 		b.sessionStart.err = b.text.Start.NeedCwd
 		return nil
 	}
+	// The launch runs in another process, which has no reason to share this one's idea of ~. It is
+	// resolved here, where the home directory the completion offered paths against is the same one.
+	cwd = b.paths.Expand(cwd)
 	if b.deps.Launcher == nil {
 		b.sessionStart.err = b.text.Start.NoLauncher
 		return nil
@@ -453,7 +508,29 @@ func (b *Board) renderSessionStart() string {
 	s := &b.sessionStart
 	width := b.modalWidth(84)
 	inner := modalInner(width)
-	candidateRows, promptRows := b.sessionStartHeights(len(s.candidates), s.err != "", s.space.available())
+	// The candidate list and the completion suggestions never appear together. The modal has room
+	// for one list, and which one is worth drawing is exactly which row the cursor is on: a cursor
+	// on a candidate is choosing from history, a cursor on the free-text row is typing a path.
+	typing := s.focus == sessionStartFocusCwd && s.typingCwd()
+	history := typing && len(s.candidates) > 0
+
+	// Rows nothing can give up: the cwd label, the free-text row, the blank line, the prompt label
+	// and the help line, plus the space, error and collapsed-history rows when they are drawn.
+	fixed := 5
+	if s.err != "" {
+		fixed++
+	}
+	if s.space.available() {
+		fixed++
+	}
+	if history {
+		fixed++
+	}
+	listWant, listFloor := len(s.candidates), 1
+	if typing {
+		listWant, listFloor = suggestionRows(s.suggestions), 0
+	}
+	listRows, promptRows := b.sessionStartHeights(listWant, fixed, listFloor)
 
 	var lines []string
 	if s.space.available() {
@@ -461,26 +538,37 @@ func (b *Board) renderSessionStart() string {
 	}
 
 	lines = append(lines, b.styles.dim.Render(truncate(b.text.Start.LabelCwd, inner)))
-	start, visible, before, after := listWindow(s.cwdOffset, s.cwdCursor, len(s.candidates), candidateRows)
-	s.cwdOffset = start
-	if before {
-		lines = append(lines, b.styles.dim.Render(truncateMark))
+	indent := padCell("", cursorWidth(b.icons))
+	if history {
+		// The candidates are still reachable while typing, so the row that replaces them says how
+		// many there are and which key goes back to them.
+		summary := fmt.Sprintf(b.text.Start.CwdHistory, len(s.candidates), b.icons.ArrowUp)
+		lines = append(lines, b.styles.dim.Render(truncate(indent+summary, inner)))
 	}
-	for i := start; i < start+visible; i++ {
-		lines = append(lines, b.sessionStartRow(s.candidates[i], inner, s.focus == sessionStartFocusCwd && i == s.cwdCursor))
-	}
-	if after {
-		lines = append(lines, b.styles.dim.Render(truncateMark))
+	if !typing {
+		start, visible, before, after := listWindow(s.cwdOffset, s.cwdCursor, len(s.candidates), listRows)
+		s.cwdOffset = start
+		if before {
+			lines = append(lines, b.styles.dim.Render(truncateMark))
+		}
+		for i := start; i < start+visible; i++ {
+			lines = append(lines, b.sessionStartRow(s.candidates[i], inner, s.focus == sessionStartFocusCwd && i == s.cwdCursor))
+		}
+		if after {
+			lines = append(lines, b.styles.dim.Render(truncateMark))
+		}
 	}
 
-	isCustom := s.cwdCursor == len(s.candidates)
-	marker := padCell("", cursorWidth(b.icons))
-	if s.focus == sessionStartFocusCwd && isCustom {
+	marker := indent
+	if typing {
 		marker = b.icons.Cursor + " "
 	}
 	label := b.text.Start.LabelCustom
 	s.cwdInput.SetWidth(fieldWidth(s.cwdInput, inner-lipgloss.Width(marker)-lipgloss.Width(label)))
 	lines = append(lines, truncate(marker+label+s.cwdInput.View(), inner))
+	if typing {
+		lines = append(lines, b.suggestionLines(listRows, inner, padCell("", cursorWidth(b.icons)+lipgloss.Width(label)))...)
+	}
 
 	lines = append(lines, "")
 	promptLabel := b.text.Start.LabelPrompt
@@ -507,48 +595,79 @@ func (b *Board) renderSessionStart() string {
 	})
 }
 
-// sessionStartHeights divides the modal's body between the cwd candidate list and the prompt.
+// sessionStartHeights divides the modal's body between the one list it draws and the prompt.
 //
-// Both grow on their own: the candidate list with every distinct cwd a session was ever started
-// in, the prompt with whatever the template renders. Left alone they overrun the body an 80x24
-// terminal gives the modal, and renderModal's own cut would then take the prompt's last lines and
-// the key help — the two things the user is looking at — rather than a candidate further down a
-// list. So the rows nothing can give up are subtracted first, and what is left is handed out with
-// the prompt yielding before the candidates do.
-func (b *Board) sessionStartHeights(candidates int, hasErr, hasSpace bool) (candidateRows, promptRows int) {
-	// The cwd label, the free-text row, the blank line, the prompt label and the help line.
-	fixed := 5
-	if hasErr {
-		fixed++
-	}
-	if hasSpace {
-		fixed++
-	}
+// Both grow on their own: the list with every distinct cwd a session was ever started in (or with
+// every directory the typed path matches), the prompt with whatever the template renders. Left
+// alone they overrun the body an 80x24 terminal gives the modal, and renderModal's own cut would
+// then take the prompt's last lines and the key help — the two things the user is looking at —
+// rather than a row further down a list. So fixed, the rows nothing can give up, is subtracted
+// first, and what is left is handed out with the prompt yielding down to promptMinLines before the
+// list yields down to listFloor.
+//
+// listFloor is 1 for the candidate list, whose last row is what listWindow spends on the cursor —
+// a list that hides the selection is worse than one that overruns. It is 0 for the completion
+// suggestions, where nothing is selected and dropping the list only costs a hint.
+func (b *Board) sessionStartHeights(listWant, fixed, listFloor int) (listRows, promptRows int) {
 	room := b.modalBody(0) - fixed
 
 	promptRows = promptVisibleLines
-	candidateRows = minInt(candidates, maxCwdCandidateRows)
-	for promptRows+candidateRows > room {
+	listRows = minInt(listWant, maxCwdListRows)
+	for promptRows+listRows > room {
 		switch {
 		case promptRows > promptMinLines:
 			promptRows--
-		// The last candidate row is kept whatever happens: listWindow spends it on whichever row
-		// the cursor is on, and a list that hides the selection is worse than one that overruns
-		// into renderModal's own cut.
-		case candidateRows > 1:
-			candidateRows--
+		case listRows > listFloor:
+			listRows--
 		default:
-			return candidateRows, promptRows
+			return listRows, promptRows
 		}
 	}
-	return candidateRows, promptRows
+	return listRows, promptRows
 }
 
-// sessionStartHelp names the keys that actually do something where the cursor is: tab means two
-// different things depending on the row, and a footer that claims both would describe neither.
+// suggestionRows is how many rows a completion list wants: one per suggestion, plus one for the
+// count of the ones it has no room for.
+func suggestionRows(s pathcomp.Suggestions) int {
+	if s.Total > len(s.Items) {
+		return len(s.Items) + 1
+	}
+	return len(s.Items)
+}
+
+// suggestionLines draws the completion list under the free-text row, within rows lines.
+func (b *Board) suggestionLines(rows, inner int, indent string) []string {
+	s := b.sessionStart.suggestions
+	if rows <= 0 || len(s.Items) == 0 {
+		return nil
+	}
+	shown := minInt(len(s.Items), rows)
+	if s.Total > shown {
+		// The last row goes to the count rather than to one more suggestion: a list that stops
+		// without saying so reads as "that is all there is".
+		shown--
+	}
+
+	var lines []string
+	for _, item := range s.Items[:shown] {
+		lines = append(lines, b.styles.dim.Render(truncate(indent+item, inner)))
+	}
+	if hidden := s.Total - shown; hidden > 0 {
+		more := fmt.Sprintf(b.text.Start.MoreSuggestions, hidden)
+		lines = append(lines, b.styles.dim.Render(truncate(indent+more, inner)))
+	}
+	return lines
+}
+
+// sessionStartHelp names the keys that actually do something where the cursor is: tab means three
+// different things depending on the row, and a footer that claims all of them would describe none.
 func (b *Board) sessionStartHelp() string {
-	if b.sessionStart.focus == sessionStartFocusSpace {
+	s := &b.sessionStart
+	switch {
+	case s.focus == sessionStartFocusSpace:
 		return fmt.Sprintf(b.text.Start.HelpSpace, b.icons.horizontalKeys())
+	case s.focus == sessionStartFocusCwd && s.typingCwd():
+		return fmt.Sprintf(b.text.Start.HelpComplete, b.icons.verticalKeys(), b.newlineKey())
 	}
 	return fmt.Sprintf(b.text.Start.Help, b.icons.verticalKeys(), b.newlineKey())
 }
