@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -98,6 +99,9 @@ func (c *Completer) Suggest(input string, limit int) Suggestions {
 // the input stands and the list is the answer instead. A lone match gains a trailing separator, so
 // pressing the key again walks into it.
 func (c *Completer) Complete(input string, limit int) (string, Suggestions) {
+	// A bare ~ is answered with ~/ even when nothing inside it agrees on a prefix, so that pressing
+	// the key walks into the home directory rather than doing nothing.
+	input = forCompletion(input)
 	matches := c.matches(input)
 	suggestions := suggestionsOf(matches, limit)
 	if len(matches) == 0 {
@@ -119,6 +123,7 @@ func (c *Completer) matches(input string) []string {
 	if strings.TrimSpace(input) == "" {
 		return nil
 	}
+	input = forCompletion(input)
 	dir, prefix := splitInput(c.Expand(input))
 	entries, ok := c.readDir(dir)
 	if !ok {
@@ -130,6 +135,9 @@ func (c *Completer) matches(input string) []string {
 	var out []string
 	for _, entry := range entries {
 		name := entry.Name()
+		if !displayable(name) {
+			continue
+		}
 		if !strings.HasPrefix(strings.ToLower(name), lowered) {
 			continue
 		}
@@ -144,6 +152,36 @@ func (c *Completer) matches(input string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// displayable reports whether a name can be drawn as text.
+//
+// Directory names are the one input here that neither taskherd nor the person typing produced:
+// they come off the filesystem as arbitrary bytes, and a name carrying an escape sequence would
+// reach the terminal intact through whatever draws the suggestions — a terminal renderer measures
+// an escape as zero cells and passes it through rather than removing it, so a length check is no
+// defence. Such a name cannot be completed; it can still be typed in full.
+func displayable(name string) bool {
+	if !utf8.ValidString(name) {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// forCompletion is how an input reads while it is being completed rather than submitted. A bare ~
+// names the home directory itself — the ~user form is deliberately not resolved, so ~ is not the
+// start of any other name — and completing it means looking inside it. Left alone it would be
+// taken as a prefix and list the home directory's siblings instead.
+func forCompletion(input string) string {
+	if input == "~" {
+		return "~/"
+	}
+	return input
 }
 
 // splitInput separates the directory to list from the prefix to filter its names by. A path that
