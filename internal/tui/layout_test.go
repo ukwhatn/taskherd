@@ -343,13 +343,6 @@ func manyTasks(n int) []model.Task {
 	return tasks
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func TestListWindow(t *testing.T) {
 	tests := []struct {
 		name                          string

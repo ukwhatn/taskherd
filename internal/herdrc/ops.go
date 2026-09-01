@@ -28,11 +28,24 @@ const cliTimeout = 15 * time.Second
 
 // TabSpec describes a tab to create for a resumed session.
 type TabSpec struct {
-	Cwd   string
-	Label string
+	// WorkspaceID is the space to create the tab in. Empty leaves it to herdr, which uses the
+	// focused space — the behaviour every caller had before spaces could be chosen.
+	WorkspaceID string
+	Cwd         string
+	Label       string
 	// Focus moves the user to the new tab as it is created, rather than leaving it in the
 	// background. Verified against herdr 0.8.2: `tab create` without --focus emits no focus event
 	// and leaves the focused tab where it was, so this has to be asked for explicitly.
+	Focus bool
+}
+
+// WorkspaceSpec describes a space to create, for a session that should start in one of its own
+// rather than in an existing space.
+type WorkspaceSpec struct {
+	Cwd string
+	// Label names the space in herdr's sidebar. Empty leaves the naming to herdr rather than
+	// setting the label to an empty string.
+	Label string
 	Focus bool
 }
 
@@ -83,24 +96,57 @@ func (c *Client) CreateTab(ctx context.Context, spec TabSpec) (Tab, error) {
 	defer cancel()
 
 	args := []string{"tab", "create"}
-	if spec.Cwd != "" {
-		args = append(args, "--cwd", spec.Cwd)
+	if spec.WorkspaceID != "" {
+		args = append(args, "--workspace", spec.WorkspaceID)
 	}
-	if spec.Label != "" {
-		args = append(args, "--label", spec.Label)
+	args = append(args, cwdLabelFocusArgs(spec.Cwd, spec.Label, spec.Focus)...)
+
+	return c.createdTab(callCtx, "herdr tab create returned no pane", args)
+}
+
+// CreateWorkspace opens a new space and returns the root pane of the tab herdr creates in it.
+//
+// It answers in the same shape as CreateTab — herdr's workspace_created result is tab_created plus
+// the space it landed in — so a launch sequence only has to choose which one to call, not what to
+// do with the answer.
+func (c *Client) CreateWorkspace(ctx context.Context, spec WorkspaceSpec) (Tab, error) {
+	callCtx, cancel := requestContext(ctx, cliTimeout)
+	defer cancel()
+
+	args := append([]string{"workspace", "create"}, cwdLabelFocusArgs(spec.Cwd, spec.Label, spec.Focus)...)
+	return c.createdTab(callCtx, "herdr workspace create returned no pane", args)
+}
+
+// cwdLabelFocusArgs is the flag trio tab create and workspace create share. Absent values are
+// omitted rather than sent empty: `--label ""` sets the label to the empty string, where leaving
+// the flag off lets herdr name the thing itself.
+func cwdLabelFocusArgs(cwd, label string, focus bool) []string {
+	var args []string
+	if cwd != "" {
+		args = append(args, "--cwd", cwd)
+	}
+	if label != "" {
+		args = append(args, "--label", label)
 	}
 	// Only the positive flag is ever sent: leaving the tab in the background is herdr's own
 	// default, so --no-focus would just restate it.
-	if spec.Focus {
+	if focus {
 		args = append(args, "--focus")
 	}
+	return args
+}
 
-	out, err := c.runner.Run(callCtx, args...)
+// createdTab runs a tab-producing herdr command and reads the pane out of its result.
+func (c *Client) createdTab(ctx context.Context, noPaneMsg string, args []string) (Tab, error) {
+	out, err := c.runner.Run(ctx, args...)
 	if err != nil {
 		return Tab{}, err
 	}
 
 	var payload struct {
+		Workspace struct {
+			WorkspaceID string `json:"workspace_id"`
+		} `json:"workspace"`
 		Tab struct {
 			TabID       string `json:"tab_id"`
 			WorkspaceID string `json:"workspace_id"`
@@ -114,11 +160,15 @@ func (c *Client) CreateTab(ctx context.Context, spec TabSpec) (Tab, error) {
 		return Tab{}, err
 	}
 	if payload.RootPane.PaneID == "" {
-		return Tab{}, errors.New("herdr tab create returned no pane")
+		return Tab{}, errors.New(noPaneMsg)
+	}
+	workspaceID := payload.Tab.WorkspaceID
+	if workspaceID == "" {
+		workspaceID = payload.Workspace.WorkspaceID
 	}
 	return Tab{
 		TabID:       payload.Tab.TabID,
-		WorkspaceID: payload.Tab.WorkspaceID,
+		WorkspaceID: workspaceID,
 		PaneID:      payload.RootPane.PaneID,
 		Cwd:         payload.RootPane.Cwd,
 	}, nil

@@ -52,9 +52,21 @@ type HerdrOps interface {
 type SessionLauncher interface {
 	// StartSession starts a fresh session for the task and links it, then sends prompt (empty
 	// prompt means start without sending one).
-	StartSession(taskID int, cwd, prompt string) error
+	StartSession(taskID int, cwd, prompt string, space SpaceChoice) error
 	// ResumeSession reopens an already-linked session whose pane is gone.
-	ResumeSession(taskID int, sessionID string) error
+	ResumeSession(taskID int, sessionID string, space SpaceChoice) error
+}
+
+// SpaceChoice is where a launch should put the pane it creates: an existing space, a space to be
+// created for it, or — the zero value — wherever herdr is focused, which is what every launch did
+// before spaces could be chosen.
+type SpaceChoice struct {
+	// WorkspaceID names an existing space. Ignored when Create is set.
+	WorkspaceID string
+	// Create asks for a new space instead of an existing one.
+	Create bool
+	// Label names the created space. Empty leaves the naming to herdr.
+	Label string
 }
 
 // CacheLoader reads the live-status cache. *fetch.Cache satisfies this.

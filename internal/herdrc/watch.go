@@ -19,12 +19,24 @@ const (
 	maxFilteredSubscriptions = 64
 )
 
-// broadcastSubscriptions are the unfiltered events that signal a change in the pane set.
+// broadcastSubscriptions are the unfiltered events that signal a change in the pane set or in the
+// space list the launch modal offers.
+//
+// workspace.updated and workspace.metadata_updated are deliberately absent: they also fire on a
+// space's aggregated agent status, which changes constantly while agents work and never moves the
+// fingerprint. The six kept here are the ones that change a space's id, label, order or focus —
+// exactly what the list is drawn from.
 var broadcastSubscriptions = []string{
 	"pane.created",
 	"pane.closed",
 	"pane.exited",
 	"pane.agent_detected",
+	"workspace.created",
+	"workspace.renamed",
+	"workspace.closed",
+	"workspace.focused",
+	"workspace.moved",
+	"workspace.reordered",
 }
 
 // Update is one live report from a Watcher. Snapshot is nil while herdr is unreachable.

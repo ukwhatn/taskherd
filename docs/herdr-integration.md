@@ -101,6 +101,7 @@ every column that has no override.
 | Already attached to this task | Nothing starts; you are pointed at `jump` |
 | Blocked, or no session id yet | Nothing starts; you are pointed at the pane |
 | A different cwd was asked for | Neither reused nor started — you are pointed at the existing pane or `--new`, rather than having the cwd you asked for quietly ignored |
+| A different space was asked for | The same: reuse would put the session somewhere other than where it was asked for. A launch that named no space takes the pane wherever it is |
 | Not found | A new one starts, as usual |
 
 `--new` skips the reuse check when a second session is what you actually want. Only the herdr agent
@@ -109,6 +110,16 @@ name gets a suffix (`taskherd-43-2`, the lowest free number).
 Starting, attaching and jumping all set `#<id> <title>` on the agent's row in herdr's sidebar
 (`pane report-metadata --display-agent`). That is a display name only, distinct from the agent name
 used as a target by `agent focus`, so `--new`'s numbering never shows up in it.
+
+## Which space a session starts in
+
+A new pane goes to the focused space unless something says otherwise. The start modal and the
+resume dialog both carry a row for it, `--space <workspace_id>` names one on the command line, and
+`--new-space <label>` makes one for the session — a space per task, when that is how you work.
+`herdr workspace list` prints the ids.
+
+Only pane *creation* is covered. Going to a session whose pane is still alive focuses it where it
+already is; moving a live pane between spaces is herdr's own operation.
 
 ## A launch from the board runs outside it
 

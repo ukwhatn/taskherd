@@ -175,6 +175,7 @@ var knownOperations = [][]string{
 	{"agent", "start"},
 	{"agent", "wait"},
 	{"agent", "prompt"},
+	{"workspace", "create"},
 	{"tab", "create"},
 	{"pane", "report-metadata"},
 	{"api", "snapshot"},

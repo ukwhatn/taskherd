@@ -172,26 +172,28 @@ type startCall struct {
 	taskID int
 	cwd    string
 	prompt string
+	space  SpaceChoice
 }
 
 type resumeCall struct {
 	taskID    int
 	sessionID string
+	space     SpaceChoice
 }
 
-func (f *fakeLauncher) StartSession(taskID int, cwd, prompt string) error {
+func (f *fakeLauncher) StartSession(taskID int, cwd, prompt string, space SpaceChoice) error {
 	if f.err != nil {
 		return f.err
 	}
-	f.starts = append(f.starts, startCall{taskID: taskID, cwd: cwd, prompt: prompt})
+	f.starts = append(f.starts, startCall{taskID: taskID, cwd: cwd, prompt: prompt, space: space})
 	return nil
 }
 
-func (f *fakeLauncher) ResumeSession(taskID int, sessionID string) error {
+func (f *fakeLauncher) ResumeSession(taskID int, sessionID string, space SpaceChoice) error {
 	if f.err != nil {
 		return f.err
 	}
-	f.resumes = append(f.resumes, resumeCall{taskID: taskID, sessionID: sessionID})
+	f.resumes = append(f.resumes, resumeCall{taskID: taskID, sessionID: sessionID, space: space})
 	return nil
 }
 

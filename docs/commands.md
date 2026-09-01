@@ -31,13 +31,21 @@ the prompt.
 |---|---|
 | `taskherd session link <id> [--current\|--session-id UUID\|--pane PANE_ID]` | Attach an agent session |
 | `taskherd session unlink <id> <uuid>` | Detach one |
-| `taskherd jump <id> [--session UUID]` | Go to the attached session, resuming it if its pane is gone |
-| `taskherd start <id> [--cwd PATH] [--prompt TEXT] [--new] [--no-focus]` | Start a session on the task and attach it |
+| `taskherd jump <id> [--session UUID] [--space ID\|--new-space LABEL]` | Go to the attached session, resuming it if its pane is gone |
+| `taskherd start <id> [--cwd PATH] [--prompt TEXT] [--new] [--no-focus] [--space ID\|--new-space LABEL]` | Start a session on the task and attach it |
 
 `start` needs `--cwd` when no candidate can be derived from existing sessions. It reuses the pane it
 started last time when it can — see
 [herdr integration](herdr-integration.md#reusing-the-pane-from-last-time) — and `--new` skips that.
 It focuses the new pane unless `--no-focus`.
+
+**Which space it lands in.** Without `--space` or `--new-space` the pane goes wherever herdr would
+put it, which is the focused space. `--space <workspace_id>` names an existing one; `--new-space
+<label>` makes one and starts there, with an empty label leaving the naming to herdr. The two
+cannot be combined. `herdr workspace list` prints the ids. A `start` that would recover last time's
+pane refuses when that pane sits in a different space from the one named, the same way it refuses a
+different `--cwd`. On `jump` the flags only apply to a resume, since a live pane is focused where it
+already is.
 
 ## Everything else
 

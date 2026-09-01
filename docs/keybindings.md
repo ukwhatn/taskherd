@@ -115,11 +115,17 @@ The same item list as the detail modal — title, status, due date, note, links 
 
 ## The start modal (`g` on a task with no session)
 
-Holds a list of candidate working directories — the cwds of existing sessions, by frequency, then
-by how recently they were linked, then alphabetically — and an editable initial prompt.
+Holds the space to start in, a list of candidate working directories — the cwds of existing
+sessions, by frequency, then by how recently they were linked, then alphabetically — and an
+editable initial prompt.
 
-- `Tab` switches between the directory and the prompt.
-- `↑↓` picks a directory. The last row (*type one*) turns it into free text.
+- `Tab` / `Shift+Tab` move between the space, the directory and the prompt.
+- `↑↓` also move between them, and pick a directory within the list. The last row (*type one*)
+  turns it into free text.
+- The space row takes `←→`. Its last cell creates a space and asks for a label. Leaving the row
+  where it opened starts the session wherever herdr would have put it, which is also what keeps a
+  leftover pane from an earlier attempt recoverable. The row is not drawn when herdr is
+  unreachable.
 - The prompt is multi-line. **`Enter` launches from anywhere in it**, so newlines use the same keys
   as the add modal.
 - `Ctrl+Y` copies the prompt to the clipboard (OSC 52; it lands only on terminals that support it,
@@ -128,6 +134,12 @@ by how recently they were linked, then alphabetically — and an editable initia
   [herdr integration](herdr-integration.md#a-launch-from-the-board-runs-outside-it). The board
   closes, so you land on the new tab.
 - `Esc` closes the modal.
+
+## The resume dialog (`g` on a session whose pane is gone)
+
+A resume creates a tab, so it asks first — and, like the start modal, offers the space to create it
+in on a row driven by `←→`. `Enter` resumes, `Esc` cancels. The resume itself runs outside the
+board, the same way a launch does.
 
 ## Text fields
 

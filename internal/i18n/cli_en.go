@@ -140,9 +140,10 @@ var cliEN = CLI{
 		HerdrDownNote: "note: session state is left out because herdr is unreachable (%v)\n",
 	},
 	Jump: CLIJump{
-		Short:       "go to a linked session (resuming it when the pane is gone)",
-		FlagSession: "session UUID to go to (when several are linked)",
-		FlagYes:     "skip the confirmation before resuming",
+		Short:        "go to a linked session (resuming it when the pane is gone)",
+		FlagSession:  "session UUID to go to (when several are linked)",
+		FlagYes:      "skip the confirmation before resuming",
+		FlagNewSpace: "create a space and resume in it (the value is its label; ignored when the pane is still alive)",
 		NoSession: Problem{
 			Msg:  "No session is attached to #%d",
 			Hint: "Attach one with taskherd session link %d --current",
@@ -188,6 +189,8 @@ var cliEN = CLI{
 		FlagPrompt:       "prompt to send once it starts (default: the config template; an explicit empty string sends none)",
 		FlagNew:          "start a new agent even when the previous one is still around (NAME gets a suffix)",
 		FlagNoFocus:      "do not move to the new pane (the default is to move)",
+		FlagSpace:        "space to start in (a herdr workspace id); the focused space by default",
+		FlagNewSpace:     "create a space and start in it (the value is its label; empty lets herdr name it)",
 		CandidatesHeader: "Working directory candidates:",
 		ChoosePrompt:     "Number, or a path",
 		BlankCwd: Problem{
@@ -221,6 +224,14 @@ var cliEN = CLI{
 		OtherCwd: Problem{
 			Msg:  "The previous launch of #%[1]d is running in pane %[3]s under a different cwd (%[2]s)",
 			Hint: "Move to pane %[1]s, or start a new one with taskherd start %[2]d --new --cwd %[3]s",
+		},
+		OtherSpace: Problem{
+			Msg:  "The previous launch of #%[1]d is running in pane %[3]s in a different space (%[2]s)",
+			Hint: "Move to pane %[1]s, or run taskherd start %[2]d without a space to recover that pane",
+		},
+		SpaceConflict: Problem{
+			Msg:  "--space and --new-space cannot both be given",
+			Hint: "Use --space for an existing space, or --new-space to create one",
 		},
 		PartialLabel:      "start failed after the launch had begun (the result is already on stdout)",
 		StartFailed:       "Look at pane %s (the launch failed)",

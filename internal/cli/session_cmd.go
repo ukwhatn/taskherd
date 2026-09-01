@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/model"
+	"github.com/ukwhatn/taskherd/internal/tui"
 )
 
 // currentSessionKeyword is the value of --session that means "the session in this pane".
@@ -242,6 +243,7 @@ func (a *app) jumpCmd() *cobra.Command {
 	var (
 		sessionID string
 		yes       bool
+		space     spaceFlags
 	)
 
 	cmd := &cobra.Command{
@@ -265,12 +267,17 @@ func (a *app) jumpCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.jumpTo(cmd.Context(), task, target, yes)
+			choice, err := a.spaceChoice(cmd, space)
+			if err != nil {
+				return err
+			}
+			return a.jumpTo(cmd.Context(), task, target, choice, yes)
 		},
 	}
 
 	cmd.Flags().StringVar(&sessionID, "session", "", a.text.CLI.Jump.FlagSession)
 	cmd.Flags().BoolVar(&yes, "yes", false, a.text.CLI.Jump.FlagYes)
+	a.addSpaceFlags(cmd, &space, a.text.CLI.Jump.FlagNewSpace)
 	return cmd
 }
 
@@ -333,7 +340,7 @@ func (a *app) promptSession(task *model.Task) (*model.SessionRef, error) {
 	return &task.Sessions[index-1], nil
 }
 
-func (a *app) jumpTo(ctx context.Context, task *model.Task, target *model.SessionRef, yes bool) error {
+func (a *app) jumpTo(ctx context.Context, task *model.Task, target *model.SessionRef, space tui.SpaceChoice, yes bool) error {
 	client := a.herdr()
 
 	snapshot, err := client.Snapshot(ctx)
@@ -342,12 +349,14 @@ func (a *app) jumpTo(ctx context.Context, task *model.Task, target *model.Sessio
 	}
 
 	if agent, ok := snapshot.AgentBySessionID(target.SessionID); ok {
-		// One focus call moves workspace, tab and pane together.
+		// One focus call moves workspace, tab and pane together. The chosen space has nothing to
+		// act on here: this pane already exists somewhere, and moving it is a different operation
+		// from choosing where a new one is created.
 		if err := client.FocusAgent(ctx, agent.PaneID); err != nil {
 			return err
 		}
 		a.stampTaskToken(ctx, agent.PaneID, task.ID, task.Title)
-		return a.emitJump(task, target, jumpActionFocus, agent.PaneID, false)
+		return a.emitJump(task, target, jumpActionFocus, agent.PaneID, agent.WorkspaceID, false)
 	}
 
 	if target.Agent != resumeAgent {
@@ -377,12 +386,12 @@ func (a *app) jumpTo(ctx context.Context, task *model.Task, target *model.Sessio
 	// Focused as it is created, matching the live-pane branch above: jump means "take me there"
 	// either way, and a resumed session left in a background tab would be the one case where it
 	// silently does not.
-	tab, err := client.CreateTab(ctx, herdrc.TabSpec{Cwd: target.Cwd, Label: task.Title, Focus: true})
+	tab, err := createLaunchPane(ctx, client, space, target.Cwd, task.Title, true)
 	if err != nil {
 		return err
 	}
 	started, err := client.StartAgent(ctx, herdrc.AgentSpec{
-		Name:   fmt.Sprintf("taskherd-%d", task.ID),
+		Name:   agentNameFor(task.ID),
 		Kind:   resumeAgent,
 		PaneID: tab.PaneID,
 		Args:   []string{"--resume", target.SessionID},
@@ -391,7 +400,7 @@ func (a *app) jumpTo(ctx context.Context, task *model.Task, target *model.Sessio
 		return err
 	}
 	a.stampTaskToken(ctx, started.PaneID, task.ID, task.Title)
-	return a.emitJump(task, target, jumpActionResume, started.PaneID, started.NeedsAttention)
+	return a.emitJump(task, target, jumpActionResume, started.PaneID, tab.WorkspaceID, started.NeedsAttention)
 }
 
 // offlineJumpError turns an unreachable herdr into the command the user can run by hand.
@@ -408,19 +417,21 @@ func (a *app) offlineJumpError(target *model.SessionRef, cause error) error {
 	}
 }
 
-func (a *app) emitJump(task *model.Task, target *model.SessionRef, action, paneID string, needsAttention bool) error {
+func (a *app) emitJump(task *model.Task, target *model.SessionRef, action, paneID, workspaceID string, needsAttention bool) error {
 	if a.jsonOut {
 		return a.emitJSON(struct {
 			TaskID         int    `json:"task_id"`
 			SessionID      string `json:"session_id"`
 			Action         string `json:"action"`
 			PaneID         string `json:"pane_id"`
+			WorkspaceID    string `json:"workspace_id,omitempty"`
 			NeedsAttention bool   `json:"needs_attention"`
 		}{
 			TaskID:         task.ID,
 			SessionID:      target.SessionID,
 			Action:         action,
 			PaneID:         paneID,
+			WorkspaceID:    workspaceID,
 			NeedsAttention: needsAttention,
 		})
 	}

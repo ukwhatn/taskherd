@@ -11,7 +11,6 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
@@ -124,7 +123,7 @@ func newPicker(ctx context.Context, deps PickerDeps, targetPane string) *picker 
 // scroll window when the value changes, never when the width does: without this, a popup that
 // starts or is resized narrower keeps drawing the wider window and overflows the row.
 func (p *picker) resizeFilter() {
-	p.filter.SetWidth(maxInt(p.width-lipgloss.Width(p.filter.Prompt)-1, 1))
+	p.filter.SetWidth(fieldWidth(p.filter, p.width))
 	p.filter.SetValue(p.filter.Value())
 }
 

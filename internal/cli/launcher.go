@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ukwhatn/taskherd/internal/i18n"
+	"github.com/ukwhatn/taskherd/internal/tui"
 )
 
 // detachedLogName is the file under the state directory that a detached launch's output goes to.
@@ -50,38 +51,53 @@ func newDetachedLauncher(stateDir string, now func() time.Time, text *i18n.Catal
 	return &detachedLauncher{exePath: exe, stateDir: stateDir, now: now, text: i18n.OrDefault(text)}, nil
 }
 
-func (l *detachedLauncher) StartSession(taskID int, cwd, prompt string) error {
-	return l.spawn(startSessionArgs(l.text, taskID, cwd, prompt))
+func (l *detachedLauncher) StartSession(taskID int, cwd, prompt string, space tui.SpaceChoice) error {
+	return l.spawn(startSessionArgs(l.text, taskID, cwd, prompt, space))
 }
 
-func (l *detachedLauncher) ResumeSession(taskID int, sessionID string) error {
-	return l.spawn(resumeSessionArgs(l.text, taskID, sessionID))
+func (l *detachedLauncher) ResumeSession(taskID int, sessionID string, space tui.SpaceChoice) error {
+	return l.spawn(resumeSessionArgs(l.text, taskID, sessionID, space))
 }
 
 // startSessionArgs is the argv of a detached `taskherd start`.
 //
 // --prompt is always passed, empty included: an omitted flag means "fall back to the config
 // template", and the modal's prompt field is exactly what the user decided to send, blank or not.
-func startSessionArgs(text *i18n.Catalog, taskID int, cwd, prompt string) []string {
+func startSessionArgs(text *i18n.Catalog, taskID int, cwd, prompt string, space tui.SpaceChoice) []string {
 	text = i18n.OrDefault(text)
-	return []string{
+	args := []string{
 		"start", strconv.Itoa(taskID),
 		"--cwd", cwd,
 		"--prompt", prompt,
-		"--notify-error", fmt.Sprintf(text.CLI.Start.LaunchLabel, taskID),
 	}
+	args = append(args, spaceArgs(space)...)
+	return append(args, "--notify-error", fmt.Sprintf(text.CLI.Start.LaunchLabel, taskID))
 }
 
 // resumeSessionArgs is the argv of a detached `taskherd jump` for a session whose pane is gone.
-// --yes is safe here because the board already asked: runConfirm only reaches resumeCmd on y.
-func resumeSessionArgs(text *i18n.Catalog, taskID int, sessionID string) []string {
+// --yes is safe here because the board already asked: the resume modal only submits on enter.
+func resumeSessionArgs(text *i18n.Catalog, taskID int, sessionID string, space tui.SpaceChoice) []string {
 	text = i18n.OrDefault(text)
-	return []string{
+	args := []string{
 		"jump", strconv.Itoa(taskID),
 		"--session", sessionID,
 		"--yes",
-		"--notify-error", fmt.Sprintf(text.CLI.Start.ResumeLabel, taskID),
 	}
+	args = append(args, spaceArgs(space)...)
+	return append(args, "--notify-error", fmt.Sprintf(text.CLI.Start.ResumeLabel, taskID))
+}
+
+// spaceArgs turns the modal's space choice into flags. A new space passes --new-space even with an
+// empty label, since the flag's presence is what asks for the space and the value only names it.
+// The zero choice passes nothing, which is what leaves the launch in herdr's focused space.
+func spaceArgs(space tui.SpaceChoice) []string {
+	switch {
+	case space.Create:
+		return []string{"--new-space", space.Label}
+	case space.WorkspaceID != "":
+		return []string{"--space", space.WorkspaceID}
+	}
+	return nil
 }
 
 // spawn starts the child and returns as soon as it exists, without waiting for it.

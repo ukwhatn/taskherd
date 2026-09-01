@@ -110,8 +110,9 @@ var enCatalog = Catalog{
 		CreateHint: "enter creates %d tasks",
 	},
 	Start: Start{
-		Help:  "tab field  %s working dir  %s newline (prompt)  ctrl+y copy  enter start  esc cancel",
-		Title: "Start a session for #%d %s",
+		Help:      "tab field  %s move  %s newline  ctrl+y copy  enter start  esc cancel",
+		HelpSpace: "%s pick a space  tab field  enter start  esc cancel",
+		Title:     "Start a session for #%d %s",
 
 		NoLauncher:  "No session launcher is configured",
 		HerdrDown:   "Cannot start a session while herdr is unreachable",
@@ -120,9 +121,11 @@ var enCatalog = Catalog{
 		NeedCwd:     "Enter a working directory or pick one",
 		StartFailed: "Cannot start #%d: %v",
 
+		LabelSpace:  "Space ",
 		LabelCwd:    "Working directory",
 		LabelCustom: "Enter: ",
 		LabelPrompt: "Prompt",
+		NewSpace:    "+ new space",
 	},
 	Jump: Jump{
 		HerdrDown:           "Cannot jump while herdr is unreachable",
@@ -134,8 +137,10 @@ var enCatalog = Catalog{
 		NoLauncher:          "No session launcher is configured",
 		ResumeFailed:        "Cannot resume #%d: %v",
 
-		TargetTitle: "Jump target for #%d",
-		TargetHelp:  "%s select  enter confirm  q close",
+		TargetTitle:     "Jump target for #%d",
+		TargetHelp:      "%s select  enter confirm  q close",
+		ResumeHelp:      "enter resume  esc cancel",
+		ResumeHelpSpace: "%s pick a space  enter resume  esc cancel",
 	},
 	Select: Select{
 		NoTargetColumn: "There is no other column to move to",

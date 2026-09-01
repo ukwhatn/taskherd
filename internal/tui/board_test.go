@@ -412,8 +412,9 @@ func TestBoardJumpFocusFailureKeepsBoardOpen(t *testing.T) {
 	}
 }
 
-// A pane that is gone means a resume, and a resume creates a pane: that gets a confirmation, and
-// then goes out to a process of its own rather than running here (§3.1 of the PR-15 plan).
+// A pane that is gone means a resume, and a resume creates a pane: that gets a confirmation with
+// a space to create it in, and then goes out to a process of its own rather than running here
+// (§3.1 of the PR-15 plan).
 func TestBoardJumpConfirmsResume(t *testing.T) {
 	store := newFakeStore(model.Task{
 		ID: 4, Title: "resume 対象", Status: "todo",
@@ -425,20 +426,20 @@ func TestBoardJumpConfirmsResume(t *testing.T) {
 	h.dispatch(snapshotUpdate())
 
 	h.key("g")
-	if h.board.mode != modeConfirm {
-		t.Fatalf("mode = %v, want modeConfirm", h.board.mode)
+	if h.board.mode != modeResumeStart {
+		t.Fatalf("mode = %v, want modeResumeStart", h.board.mode)
 	}
 	if len(launcher.resumes) != 0 {
 		t.Fatal("確認前に resume が走った")
 	}
 
-	h.key("n")
+	h.key("esc")
 	if len(launcher.resumes) != 0 {
-		t.Fatal("n で中止したのに resume が走った")
+		t.Fatal("esc で中止したのに resume が走った")
 	}
 
 	h.key("g")
-	h.key("y")
+	h.key("enter")
 
 	if len(launcher.resumes) != 1 {
 		t.Fatalf("resumes = %+v, want 1 件", launcher.resumes)
@@ -463,7 +464,7 @@ func TestBoardResumeFailureKeepsBoardOpen(t *testing.T) {
 	h.dispatch(snapshotUpdate())
 
 	h.key("g")
-	h.key("y")
+	h.key("enter")
 
 	if h.quit {
 		t.Fatal("resume を渡せなかったのに board が終了した")
