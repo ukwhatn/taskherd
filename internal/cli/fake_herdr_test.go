@@ -53,9 +53,11 @@ type fakeAgent struct {
 	PaneID string
 	Agent  string
 	// Name is the identifier `agent start` registered the agent under, which AgentByName resolves.
-	Name   string
-	Status string
-	Cwd    string
+	Name string
+	// WorkspaceID is the space the pane sits in; empty defaults to the focused one.
+	WorkspaceID string
+	Status      string
+	Cwd         string
 }
 
 func newFakeHerdr() *fakeHerdr {
@@ -68,6 +70,9 @@ func (f *fakeHerdr) withAgent(sessionID string, agent fakeAgent) *fakeHerdr {
 	}
 	if agent.Status == "" {
 		agent.Status = "idle"
+	}
+	if agent.WorkspaceID == "" {
+		agent.WorkspaceID = "wS"
 	}
 	f.agents[sessionID] = agent
 	return f
@@ -112,8 +117,23 @@ func (f *fakeHerdr) Run(_ context.Context, args ...string) ([]byte, error) {
 		if f.createTabErr != nil {
 			return nil, f.createTabErr
 		}
+		workspaceID := "wS"
+		for i, arg := range args {
+			if arg == "--workspace" && i+1 < len(args) {
+				workspaceID = args[i+1]
+			}
+		}
 		return []byte(fmt.Sprintf(`{"id":"cli:tab:create","result":{"type":"tab_created",`+
-			`"tab":{"tab_id":"wS:t9","workspace_id":"wS"},`+
+			`"tab":{"tab_id":"%[1]s:t9","workspace_id":%[1]q},`+
+			`"root_pane":{"pane_id":%[2]q,"cwd":"/repo"}}}`, workspaceID, f.newPaneID)), nil
+
+	case strings.HasPrefix(joined, "workspace create"):
+		if f.createTabErr != nil {
+			return nil, f.createTabErr
+		}
+		return []byte(fmt.Sprintf(`{"id":"cli:workspace:create","result":{"type":"workspace_created",`+
+			`"workspace":{"workspace_id":"wNEW"},`+
+			`"tab":{"tab_id":"wNEW:t1","workspace_id":"wNEW"},`+
 			`"root_pane":{"pane_id":%q,"cwd":"/repo"}}}`, f.newPaneID)), nil
 
 	case strings.HasPrefix(joined, "agent wait"):
@@ -188,12 +208,19 @@ func (f *fakeHerdr) snapshotJSON() string {
 		if sessionID != "" {
 			session = fmt.Sprintf(`{"agent":%q,"kind":"id","source":"herdr:claude","value":%q}`, agent.Agent, sessionID)
 		}
+		workspaceID := agent.WorkspaceID
+		if workspaceID == "" {
+			workspaceID = "wS"
+		}
 		entries = append(entries, fmt.Sprintf(
-			`{"pane_id":%q,"tab_id":"wS:t1","workspace_id":"wS","agent":%q,"name":%q,"agent_status":%q,"cwd":%q,"agent_session":%s}`,
-			agent.PaneID, agent.Agent, agent.Name, agent.Status, agent.Cwd, session))
+			`{"pane_id":%q,"tab_id":"wS:t1","workspace_id":%q,"agent":%q,"name":%q,"agent_status":%q,"cwd":%q,"agent_session":%s}`,
+			agent.PaneID, workspaceID, agent.Agent, agent.Name, agent.Status, agent.Cwd, session))
 	}
 	return `{"version":"0.8.2","protocol":20,"focused_workspace_id":"wS","focused_tab_id":"wS:t1",` +
-		`"focused_pane_id":"wS:p1","panes":[],"agents":[` + strings.Join(entries, ",") + `]}`
+		`"focused_pane_id":"wS:p1",` +
+		`"workspaces":[{"workspace_id":"wS","label":"作業","number":1,"focused":true},` +
+		`{"workspace_id":"wG","label":"調査","number":2,"focused":false}],` +
+		`"panes":[],"agents":[` + strings.Join(entries, ",") + `]}`
 }
 
 // called reports whether a command starting with prefix was invoked.

@@ -179,9 +179,10 @@ type CLISession struct {
 
 // CLIJump covers jump, which moves to a live pane or resumes one that is gone.
 type CLIJump struct {
-	Short       string
-	FlagSession string
-	FlagYes     string
+	Short        string
+	FlagSession  string
+	FlagYes      string
+	FlagNewSpace string
 	// NoSession refuses a task with nothing linked. Msg and Hint each take the id.
 	NoSession Problem
 	// NotLinked refuses a session the task does not have. Msg takes the id and the session id,
@@ -222,6 +223,8 @@ type CLIStart struct {
 	FlagPrompt       string
 	FlagNew          string
 	FlagNoFocus      string
+	FlagSpace        string
+	FlagNewSpace     string
 	CandidatesHeader string
 	ChoosePrompt     string
 	// BlankCwd refuses a --cwd of only whitespace.
@@ -244,6 +247,11 @@ type CLIStart struct {
 	// OtherCwd reports a recovered pane running somewhere else. Msg takes the id, the pane's cwd
 	// and the pane id; Hint takes the pane id, the task id and the requested cwd.
 	OtherCwd Problem
+	// OtherSpace reports a recovered pane sitting in a different space from the one asked for.
+	// Msg takes the id, the pane's space id and the pane id; Hint takes the pane id and the id.
+	OtherSpace Problem
+	// SpaceConflict refuses --space and --new-space together.
+	SpaceConflict Problem
 	// PartialLabel names the failure shape where the result is already on stdout.
 	PartialLabel string
 	// StartFailed and the entries below it are the ways a launch stops partway. Each hint takes

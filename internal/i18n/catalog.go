@@ -198,10 +198,15 @@ type Start struct {
 	NeedCwd string
 	// StartFailed reports a launch that could not be handed off. Takes the id and the error.
 	StartFailed string
-	// LabelCwd / LabelCustom / LabelPrompt name the modal's three regions.
+	// LabelSpace / LabelCwd / LabelCustom / LabelPrompt name the modal's regions.
+	LabelSpace  string
 	LabelCwd    string
 	LabelCustom string
 	LabelPrompt string
+	// NewSpace is the selector cell that creates a space instead of choosing one.
+	NewSpace string
+	// HelpSpace is the key list while the space row has the keyboard. Takes the horizontal arrows.
+	HelpSpace string
 }
 
 // Jump is the g flow: moving to a live pane, or resuming one that is gone.
@@ -228,6 +233,10 @@ type Jump struct {
 	TargetTitle string
 	// TargetHelp is the session picker's key line. Takes the vertical arrow glyphs.
 	TargetHelp string
+	// ResumeHelp is the resume modal's key line, and ResumeHelpSpace the one shown when it also
+	// offers a space to resume into. ResumeHelpSpace takes the horizontal arrow glyphs.
+	ResumeHelp      string
+	ResumeHelpSpace string
 }
 
 // Select is the two selectors: Tab's status picker and the detail modal's agent picker.

@@ -73,13 +73,7 @@ func (b *Board) jumpTo(taskID int, title string, session model.SessionRef) tea.C
 		return status(fmt.Sprintf(b.text.Jump.PaneGoneUnsupported, session.Agent, session.Cwd), true)
 	}
 
-	b.openConfirm(confirmState{
-		kind:    confirmResume,
-		prompt:  fmt.Sprintf(b.text.Jump.ConfirmResume, session.Cwd),
-		taskID:  taskID,
-		title:   title,
-		session: session,
-	})
+	b.beginResumeStart(taskID, title, session)
 	return nil
 }
 
@@ -105,13 +99,13 @@ func (b *Board) focusCmd(taskID int, title, paneID string) tea.Cmd {
 // a resume creates a tab and starts an agent, and herdr's readiness wait for a resumed transcript
 // runs long enough that the board — closed by the user as soon as the new tab shows up — cannot be
 // the process waiting on it.
-func (b *Board) resumeCmd(state confirmState) tea.Cmd {
-	taskID, sessionID := state.taskID, state.session.SessionID
+func (b *Board) resumeCmd(state resumeStartState) tea.Cmd {
+	taskID, sessionID, space := state.taskID, state.session.SessionID, state.space.choice()
 	return func() tea.Msg {
 		if b.deps.Launcher == nil {
 			return statusMsg{text: b.text.Jump.NoLauncher, isError: true}
 		}
-		if err := b.deps.Launcher.ResumeSession(taskID, sessionID); err != nil {
+		if err := b.deps.Launcher.ResumeSession(taskID, sessionID, space); err != nil {
 			return statusMsg{text: fmt.Sprintf(b.text.Jump.ResumeFailed, taskID, err), isError: true}
 		}
 		return tea.QuitMsg{}

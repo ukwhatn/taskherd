@@ -141,9 +141,10 @@ var cliJA = CLI{
 		HerdrDownNote: "注記: herdr に接続できないためセッション状態を表示しません（%v）\n",
 	},
 	Jump: CLIJump{
-		Short:       "紐づいたセッションへ移動する（消滅している場合は resume 起動）",
-		FlagSession: "移動先のセッション UUID（複数紐づいている場合に指定）",
-		FlagYes:     "resume 起動の確認プロンプトを省略する",
+		Short:        "紐づいたセッションへ移動する（消滅している場合は resume 起動）",
+		FlagSession:  "移動先のセッション UUID（複数紐づいている場合に指定）",
+		FlagYes:      "resume 起動の確認プロンプトを省略する",
+		FlagNewSpace: "新しい space を作って resume 起動する（値はラベル。生存 pane への移動では無視される）",
 		NoSession: Problem{
 			Msg:  "#%d にセッションが紐づいていません",
 			Hint: "taskherd session link %d --current で紐づけます",
@@ -189,6 +190,8 @@ var cliJA = CLI{
 		FlagPrompt:       "起動直後に送るプロンプト（省略時は config のテンプレートを使う。空文字を明示すると送らない）",
 		FlagNew:          "前回起動した agent があっても回収せず、新しく起こす（NAME に連番が付く）",
 		FlagNoFocus:      "起こした pane へ移動しない（既定は移動する）",
+		FlagSpace:        "起動先の space（herdr の workspace id）。既定は現在の space",
+		FlagNewSpace:     "新しい space を作ってそこで起動する（値はラベル。空なら herdr が名前を決める）",
 		CandidatesHeader: "作業ディレクトリの候補:",
 		ChoosePrompt:     "番号か、パスを直接入力",
 		BlankCwd: Problem{
@@ -222,6 +225,14 @@ var cliJA = CLI{
 		OtherCwd: Problem{
 			Msg:  "#%d の前回の起動が別の cwd（%s）の pane %s で動いています",
 			Hint: "pane %s へ移るか、taskherd start %d --new --cwd %s で新しく起こします",
+		},
+		OtherSpace: Problem{
+			Msg:  "#%d の前回の起動が別の space（%s）の pane %s で動いています",
+			Hint: "pane %s へ移るか、space を指定せずに taskherd start %d を実行してその pane を回収します",
+		},
+		SpaceConflict: Problem{
+			Msg:  "--space と --new-space は同時に指定できません",
+			Hint: "既存の space に立てるなら --space、新しい space を作るなら --new-space だけを指定します",
 		},
 		PartialLabel:      "start は起動を開始したあとに失敗しました（結果は stdout に出力済み）",
 		StartFailed:       "pane %s を確認してください（起動に失敗しました）",

@@ -3,6 +3,7 @@ package herdrc
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -30,13 +31,38 @@ var statePriority = map[string]int{
 
 // Snapshot is the part of herdr's session.snapshot that taskherd reads.
 type Snapshot struct {
-	Version            string  `json:"version"`
-	Protocol           int     `json:"protocol"`
-	FocusedWorkspaceID string  `json:"focused_workspace_id"`
-	FocusedTabID       string  `json:"focused_tab_id"`
-	FocusedPaneID      string  `json:"focused_pane_id"`
-	Panes              []Pane  `json:"panes"`
-	Agents             []Agent `json:"agents"`
+	Version            string      `json:"version"`
+	Protocol           int         `json:"protocol"`
+	FocusedWorkspaceID string      `json:"focused_workspace_id"`
+	FocusedTabID       string      `json:"focused_tab_id"`
+	FocusedPaneID      string      `json:"focused_pane_id"`
+	Workspaces         []Workspace `json:"workspaces"`
+	Panes              []Pane      `json:"panes"`
+	Agents             []Agent     `json:"agents"`
+}
+
+// Workspace is one of herdr's spaces — what its own UI calls a space and its API calls a
+// workspace. It is where a tab gets created, so taskherd offers the list when starting a session.
+type Workspace struct {
+	WorkspaceID string `json:"workspace_id"`
+	Label       string `json:"label"`
+	// Number is herdr's own ordering, which is what the sidebar shows and what a reordering
+	// changes. It is carried so a list drawn from a snapshot reads in herdr's order.
+	Number  int  `json:"number"`
+	Focused bool `json:"focused"`
+}
+
+// FocusedWorkspace returns the space herdr currently shows, the default a new session starts in.
+func (s *Snapshot) FocusedWorkspace() (*Workspace, bool) {
+	if s == nil {
+		return nil, false
+	}
+	for i := range s.Workspaces {
+		if s.Workspaces[i].Focused {
+			return &s.Workspaces[i], true
+		}
+	}
+	return nil, false
 }
 
 // Pane is one terminal pane. Entity ids are pane_id/tab_id/workspace_id, not "id".
@@ -178,6 +204,20 @@ func (s *Snapshot) Fingerprint() string {
 	b.WriteString(s.FocusedTabID)
 	b.WriteByte('|')
 	b.WriteString(s.FocusedPaneID)
+	// The space list is drawn from whatever snapshot the board last accepted, so a rename, a
+	// reorder or a new space has to move the fingerprint or the launch modal keeps offering the
+	// old list.
+	for i := range s.Workspaces {
+		space := &s.Workspaces[i]
+		b.WriteByte('\n')
+		b.WriteString(space.WorkspaceID)
+		b.WriteByte('\t')
+		b.WriteString(space.Label)
+		b.WriteByte('\t')
+		b.WriteString(strconv.Itoa(space.Number))
+		b.WriteByte('\t')
+		b.WriteString(strconv.FormatBool(space.Focused))
+	}
 	for i := range s.Agents {
 		agent := &s.Agents[i]
 		b.WriteByte('\n')

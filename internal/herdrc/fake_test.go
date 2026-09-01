@@ -189,6 +189,9 @@ func (r *fakeRunner) Calls() [][]string {
 func snapshotJSON(agents ...string) string {
 	body := `{"version":"0.8.2","protocol":20,` +
 		`"focused_workspace_id":"wS","focused_tab_id":"wS:t1","focused_pane_id":"wS:p1",` +
+		`"workspaces":[` +
+		`{"workspace_id":"wS","label":"作業","number":1,"focused":true,"tab_count":1,"pane_count":1},` +
+		`{"workspace_id":"wG","label":"調査","number":2,"focused":false,"tab_count":1,"pane_count":1}],` +
 		`"panes":[],"agents":[`
 	for i, agent := range agents {
 		if i > 0 {

@@ -12,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/ukwhatn/taskherd/internal/fetch"
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/i18n"
@@ -41,6 +42,7 @@ const (
 	modeJump
 	modeConfirm
 	modeSessionStart
+	modeResumeStart
 )
 
 // Board is the kanban board program.
@@ -102,6 +104,7 @@ type Board struct {
 	jump         jumpState
 	confirm      confirmState
 	sessionStart sessionStartState
+	resumeStart  resumeStartState
 	// sessionStartProbe is the id of a task whose launch modal is deferred behind one herdr snapshot
 	// (probeRecoverableCwdCmd, session_start.go), 0 when none is in flight.
 	sessionStartProbe int
@@ -181,20 +184,16 @@ type jumpState struct {
 type confirmKind int
 
 const (
-	confirmResume confirmKind = iota
-	confirmDeleteTask
+	confirmDeleteTask confirmKind = iota
 	confirmUnlinkLink
 	confirmUnlinkSession
 )
 
-// confirmState is the yes/no prompt shown before an irreversible or pane-creating action.
+// confirmState is the yes/no prompt shown before an irreversible action.
 type confirmState struct {
 	kind   confirmKind
 	prompt string
 	taskID int
-	// title labels the tab a resume creates.
-	title   string
-	session model.SessionRef
 	// ref identifies what an unlink acts on: a link URL or a session id.
 	ref string
 }
@@ -245,6 +244,15 @@ func newFieldInput() textinput.Model {
 	input.KeyMap.PrevSuggestion = key.NewBinding()
 	input.KeyMap.AcceptSuggestion = key.NewBinding()
 	return input
+}
+
+// fieldWidth is the width to give a modal text field so that its whole row fits in room cells.
+//
+// SetWidth sizes the value alone. What View actually draws around it is the prompt in front and a
+// cell for the cursor sitting past the last character, so a caller that hands over the row's own
+// width overflows by both and gets the row cut out from under the cursor.
+func fieldWidth(input textinput.Model, room int) int {
+	return maxInt(room-lipgloss.Width(input.Prompt)-1, 1)
 }
 
 // Init loads the initial data and starts listening to every live source.
@@ -363,6 +371,8 @@ func (b *Board) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return b.handleConfirmKey(msg)
 	case modeSessionStart:
 		return b.handleSessionStartKey(msg)
+	case modeResumeStart:
+		return b.handleResumeStartKey(msg)
 	default:
 		return b.handleBoardKey(msg)
 	}
@@ -378,6 +388,8 @@ func (b *Board) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		return b.pasteIntoAdd(msg)
 	case modeSessionStart:
 		return b.pasteIntoSessionStart(msg)
+	case modeResumeStart:
+		return b.pasteIntoResumeStart(msg)
 	}
 	return b, nil
 }
@@ -521,7 +533,7 @@ func (b *Board) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 // the screen the overlay was opened from otherwise.
 func (b *Board) baseMode() mode {
 	switch b.mode {
-	case modeStatusSelect, modeSessionSelect, modeJump, modeConfirm, modeSessionStart:
+	case modeStatusSelect, modeSessionSelect, modeJump, modeConfirm, modeSessionStart, modeResumeStart:
 		return b.overlayBack
 	default:
 		return b.mode
@@ -561,8 +573,6 @@ func (b *Board) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (b *Board) runConfirm(state confirmState) tea.Cmd {
 	switch state.kind {
-	case confirmResume:
-		return b.resumeCmd(state)
 	case confirmDeleteTask:
 		return b.deleteTaskCmd(state.taskID)
 	case confirmUnlinkLink:

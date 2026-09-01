@@ -7,10 +7,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ukwhatn/taskherd/internal/tui"
 )
 
 func TestStartSessionArgs(t *testing.T) {
-	got := startSessionArgs(ja, 42, "/repo/work", "これをやって\n2 行目")
+	got := startSessionArgs(ja, 42, "/repo/work", "これをやって\n2 行目", tui.SpaceChoice{})
 	want := []string{
 		"start", "42",
 		"--cwd", "/repo/work",
@@ -23,7 +25,7 @@ func TestStartSessionArgs(t *testing.T) {
 // An empty prompt still travels as an explicit --prompt "": omitting the flag would make start
 // fall back to the config template, which is the opposite of what an emptied prompt field means.
 func TestStartSessionArgsKeepsEmptyPromptExplicit(t *testing.T) {
-	got := startSessionArgs(ja, 7, "/repo", "")
+	got := startSessionArgs(ja, 7, "/repo", "", tui.SpaceChoice{})
 	want := []string{
 		"start", "7",
 		"--cwd", "/repo",
@@ -33,8 +35,52 @@ func TestStartSessionArgsKeepsEmptyPromptExplicit(t *testing.T) {
 	assertArgs(t, got, want)
 }
 
+func TestSpaceArgsMatchTheChoice(t *testing.T) {
+	tests := []struct {
+		name  string
+		space tui.SpaceChoice
+		want  []string
+	}{
+		{name: "指定なし", space: tui.SpaceChoice{}, want: nil},
+		{name: "既存 space", space: tui.SpaceChoice{WorkspaceID: "wG"}, want: []string{"--space", "wG"}},
+		{name: "新しい space", space: tui.SpaceChoice{Create: true, Label: "調査"}, want: []string{"--new-space", "調査"}},
+		{name: "ラベルなしの新しい space", space: tui.SpaceChoice{Create: true}, want: []string{"--new-space", ""}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, args := range [][]string{
+				startSessionArgs(ja, 1, "/repo", "", tc.space),
+				resumeSessionArgs(ja, 1, "s-1", tc.space),
+			} {
+				if !containsRun(args, tc.want) {
+					t.Errorf("argv = %v, want %v を含む", args, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// containsRun reports whether want appears as a consecutive run in args. An empty want means the
+// space flags must be absent entirely, which is how "leave it where herdr puts it" travels.
+func containsRun(args, want []string) bool {
+	if len(want) == 0 {
+		for _, arg := range args {
+			if arg == "--space" || arg == "--new-space" {
+				return false
+			}
+		}
+		return true
+	}
+	for i := 0; i+len(want) <= len(args); i++ {
+		if strings.Join(args[i:i+len(want)], "\x00") == strings.Join(want, "\x00") {
+			return true
+		}
+	}
+	return false
+}
+
 func TestResumeSessionArgs(t *testing.T) {
-	got := resumeSessionArgs(ja, 3, "s-gone")
+	got := resumeSessionArgs(ja, 3, "s-gone", tui.SpaceChoice{})
 	want := []string{
 		"jump", "3",
 		"--session", "s-gone",
@@ -64,7 +110,7 @@ func TestDetachedLauncherWritesLogHeader(t *testing.T) {
 	stamp := time.Date(2026, 8, 26, 13, 9, 20, 0, time.FixedZone("JST", 9*60*60))
 	l := &detachedLauncher{exePath: "/bin/echo", stateDir: stateDir, now: func() time.Time { return stamp }}
 
-	if err := l.StartSession(42, "/repo/work", "1 行目\n2 行目"); err != nil {
+	if err := l.StartSession(42, "/repo/work", "1 行目\n2 行目", tui.SpaceChoice{}); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 
@@ -87,7 +133,7 @@ func TestDetachedLauncherLogIsPrivate(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	l := &detachedLauncher{exePath: "/bin/echo", stateDir: stateDir}
 
-	if err := l.ResumeSession(1, "s-1"); err != nil {
+	if err := l.ResumeSession(1, "s-1", tui.SpaceChoice{}); err != nil {
 		t.Fatalf("ResumeSession: %v", err)
 	}
 
@@ -106,7 +152,7 @@ func TestDetachedLauncherReportsUnstartableExecutable(t *testing.T) {
 	dir := t.TempDir()
 	l := &detachedLauncher{exePath: filepath.Join(dir, "does-not-exist"), stateDir: filepath.Join(dir, "state")}
 
-	err := l.StartSession(1, "/repo", "")
+	err := l.StartSession(1, "/repo", "", tui.SpaceChoice{})
 
 	if err == nil {
 		t.Fatal("err = nil, want 起動できない旨のエラー")

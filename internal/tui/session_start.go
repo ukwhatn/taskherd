@@ -12,14 +12,21 @@ import (
 	"github.com/ukwhatn/taskherd/internal/model"
 )
 
-// promptVisibleLines is how many rows the prompt textarea shows inside the modal.
-const promptVisibleLines = 6
+// Row budgets for the launch modal. The prompt opens at promptVisibleLines and the candidate list
+// at maxCwdCandidateRows, and both give way — the prompt first, down to promptMinLines — when the
+// terminal cannot hold them.
+const (
+	promptVisibleLines  = 6
+	promptMinLines      = 3
+	maxCwdCandidateRows = 5
+)
 
-// sessionStartFocus is which widget in the launch modal has the keyboard.
+// sessionStartFocus is which section of the launch modal has the keyboard.
 type sessionStartFocus int
 
 const (
-	sessionStartFocusCwd sessionStartFocus = iota
+	sessionStartFocusSpace sessionStartFocus = iota
+	sessionStartFocusCwd
 	sessionStartFocusPrompt
 )
 
@@ -31,10 +38,22 @@ type sessionStartState struct {
 	// one is always "enter it by hand", selected when cwdCursor == len(candidates).
 	candidates []string
 	cwdCursor  int
+	cwdOffset  int
 	cwdInput   textinput.Model
 	prompt     textarea.Model
+	space      spaceSelectState
 	focus      sessionStartFocus
 	err        string
+}
+
+// resumeStartState is the modal shown before resuming a session whose pane is gone. It replaces
+// what used to be a plain yes/no confirmation: a resume creates a tab, so it has a space to choose
+// the same way a fresh launch does, and a yes/no prompt has nowhere to put that choice.
+type resumeStartState struct {
+	taskID  int
+	title   string
+	session model.SessionRef
+	space   spaceSelectState
 }
 
 func newFieldTextarea() textarea.Model {
@@ -84,6 +103,7 @@ func (b *Board) openSessionStartModal(task model.Task, candidates []string) {
 		candidates: candidates,
 		cwdInput:   newFieldInput(),
 		prompt:     newFieldTextarea(),
+		space:      newSpaceSelect(b.snapshot),
 		focus:      sessionStartFocusCwd,
 	}
 	// Mutated through the field rather than built as locals and assigned in: a bubbles Model's
@@ -91,11 +111,9 @@ func (b *Board) openSessionStartModal(task model.Task, candidates []string) {
 	// is copied into the struct would blur or focus the copy already inside it, not the one left
 	// behind in the local.
 	b.sessionStart.prompt.SetValue(model.RenderPrompt(b.settings.SessionStart.TemplateFor(task.Status), task))
-	if len(candidates) == 0 {
-		// No candidate row exists to land the initial cursor on, so it starts on the free-text
-		// row instead — which means that row has the keyboard from the outset.
-		b.sessionStart.cwdInput.Focus()
-	}
+	// With no candidate row to land the initial cursor on, cwdCursor is already the free-text row,
+	// so this is what gives that row the keyboard from the outset.
+	b.focusSessionStart(sessionStartFocusCwd)
 	b.openOverlay(modeSessionStart)
 }
 
@@ -159,18 +177,29 @@ func (b *Board) handleSessionStartKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			b.closeOverlay()
 			return b, nil
 		case "tab":
-			b.toggleSessionStartFocus()
+			b.cycleSessionStartSection(1)
+			return b, nil
+		case "shift+tab":
+			b.cycleSessionStartSection(-1)
 			return b, nil
 		case "enter":
 			return b, b.submitSessionStart()
+		case "left":
+			if s.focus == sessionStartFocusSpace {
+				s.space.move(-1)
+				return b, nil
+			}
+		case "right":
+			if s.focus == sessionStartFocusSpace {
+				s.space.move(1)
+				return b, nil
+			}
 		case "up":
-			if s.focus == sessionStartFocusCwd {
-				b.moveSessionStartCwd(-1)
+			if b.sessionStartMoveUp() {
 				return b, nil
 			}
 		case "down":
-			if s.focus == sessionStartFocusCwd {
-				b.moveSessionStartCwd(1)
+			if b.sessionStartMoveDown() {
 				return b, nil
 			}
 		case "ctrl+y":
@@ -179,6 +208,8 @@ func (b *Board) handleSessionStartKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	}
 
 	switch s.focus {
+	case sessionStartFocusSpace:
+		return b, s.space.update(msg)
 	case sessionStartFocusCwd:
 		if s.cwdCursor == len(s.candidates) {
 			updated, cmd := s.cwdInput.Update(msg)
@@ -191,6 +222,84 @@ func (b *Board) handleSessionStartKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		return b, cmd
 	}
 	return b, nil
+}
+
+// sessionStartMoveUp walks the modal's sections upward. It reports false when the key belongs to
+// the widget that has the keyboard — a prompt with lines above its cursor — so the caller passes
+// the event on rather than stealing it.
+func (b *Board) sessionStartMoveUp() bool {
+	s := &b.sessionStart
+	switch s.focus {
+	case sessionStartFocusCwd:
+		if s.cwdCursor > 0 {
+			b.moveSessionStartCwd(-1)
+			return true
+		}
+		b.focusSessionStart(sessionStartFocusSpace)
+	case sessionStartFocusPrompt:
+		if s.prompt.Line() > 0 {
+			return false
+		}
+		b.focusSessionStart(sessionStartFocusCwd)
+	}
+	return true
+}
+
+func (b *Board) sessionStartMoveDown() bool {
+	s := &b.sessionStart
+	switch s.focus {
+	case sessionStartFocusSpace:
+		b.focusSessionStart(sessionStartFocusCwd)
+	case sessionStartFocusCwd:
+		if s.cwdCursor < len(s.candidates) {
+			b.moveSessionStartCwd(1)
+			return true
+		}
+		b.focusSessionStart(sessionStartFocusPrompt)
+	case sessionStartFocusPrompt:
+		return false
+	}
+	return true
+}
+
+// cycleSessionStartSection moves the keyboard to the next section, wrapping. The space row is
+// skipped when herdr reported no spaces, since it is not drawn either.
+func (b *Board) cycleSessionStartSection(delta int) {
+	sections := []sessionStartFocus{sessionStartFocusCwd, sessionStartFocusPrompt}
+	if b.sessionStart.space.available() {
+		sections = append([]sessionStartFocus{sessionStartFocusSpace}, sections...)
+	}
+	at := 0
+	for i, section := range sections {
+		if section == b.sessionStart.focus {
+			at = i
+			break
+		}
+	}
+	next := ((at+delta)%len(sections) + len(sections)) % len(sections)
+	b.focusSessionStart(sections[next])
+}
+
+// focusSessionStart hands the keyboard to one section and takes it from the others. Every section
+// change goes through here so that no two text fields hold focus at once.
+func (b *Board) focusSessionStart(target sessionStartFocus) {
+	s := &b.sessionStart
+	if target == sessionStartFocusSpace && !s.space.available() {
+		return
+	}
+	s.focus = target
+
+	s.space.focusRow(target == sessionStartFocusSpace)
+	if target == sessionStartFocusCwd && s.cwdCursor == len(s.candidates) {
+		s.cwdInput.Focus()
+	} else {
+		s.cwdInput.Blur()
+	}
+	if target == sessionStartFocusPrompt {
+		s.prompt.Focus()
+	} else {
+		s.prompt.Blur()
+	}
 }
 
 // pasteIntoSessionStart routes a bracketed paste to whichever field has the keyboard. Without this
@@ -199,6 +308,8 @@ func (b *Board) handleSessionStartKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 func (b *Board) pasteIntoSessionStart(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	s := &b.sessionStart
 	switch s.focus {
+	case sessionStartFocusSpace:
+		return b, s.space.update(msg)
 	case sessionStartFocusPrompt:
 		updated, cmd := s.prompt.Update(msg)
 		s.prompt = updated
@@ -211,21 +322,6 @@ func (b *Board) pasteIntoSessionStart(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return b, nil
-}
-
-func (b *Board) toggleSessionStartFocus() {
-	s := &b.sessionStart
-	if s.focus == sessionStartFocusCwd {
-		s.focus = sessionStartFocusPrompt
-		s.cwdInput.Blur()
-		s.prompt.Focus()
-	} else {
-		s.focus = sessionStartFocusCwd
-		s.prompt.Blur()
-		if s.cwdCursor == len(s.candidates) {
-			s.cwdInput.Focus()
-		}
-	}
 }
 
 func (b *Board) moveSessionStartCwd(delta int) {
@@ -280,7 +376,7 @@ func (b *Board) submitSessionStart() tea.Cmd {
 		return nil
 	}
 
-	if err := b.deps.Launcher.StartSession(s.taskID, cwd, s.prompt.Value()); err != nil {
+	if err := b.deps.Launcher.StartSession(s.taskID, cwd, s.prompt.Value(), s.space.choice()); err != nil {
 		// The board stays open: this failed before anything was created, so the status line is
 		// still the only place the user would ever see it.
 		b.closeOverlay()
@@ -289,23 +385,101 @@ func (b *Board) submitSessionStart() tea.Cmd {
 	return tea.Quit
 }
 
+// beginResumeStart opens the resume modal for a linked session whose pane herdr no longer has.
+func (b *Board) beginResumeStart(taskID int, title string, session model.SessionRef) {
+	b.resumeStart = resumeStartState{
+		taskID:  taskID,
+		title:   title,
+		session: session,
+		space:   newSpaceSelect(b.snapshot),
+	}
+	b.resumeStart.space.focusRow(true)
+	b.openOverlay(modeResumeStart)
+}
+
+func (b *Board) handleResumeStartKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	s := &b.resumeStart
+
+	if !isTextKey(msg) {
+		switch msg.String() {
+		case "esc":
+			b.closeOverlay()
+			b.setStatus(b.text.Common.Cancelled, false)
+			return b, nil
+		case "enter":
+			target := *s
+			b.closeOverlay()
+			return b, b.resumeCmd(target)
+		case "left":
+			s.space.move(-1)
+			return b, nil
+		case "right":
+			s.space.move(1)
+			return b, nil
+		}
+	}
+	return b, s.space.update(msg)
+}
+
+func (b *Board) pasteIntoResumeStart(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	return b, b.resumeStart.space.update(msg)
+}
+
+func (b *Board) renderResumeStart() string {
+	s := &b.resumeStart
+	prompt := fmt.Sprintf(b.text.Jump.ConfirmResume, s.session.Cwd)
+	// Sized to the question, with a floor that leaves the space row something to draw in: the
+	// question names the cwd the session will be resumed in, which is the one thing being confirmed.
+	width := b.modalWidth(maxInt(lipgloss.Width(prompt)+boxChrome, 72))
+	inner := modalInner(width)
+
+	lines := []string{b.styles.alert.Render(truncate(prompt, inner))}
+	help := b.text.Jump.ResumeHelp
+	if s.space.available() {
+		lines = append(lines, "", b.renderSpaceRow(&s.space, b.text.Start.LabelSpace, inner, true))
+		help = fmt.Sprintf(b.text.Jump.ResumeHelpSpace, b.icons.horizontalKeys())
+	}
+
+	return b.renderModal(modal{
+		title:   b.text.Common.ConfirmTitle,
+		body:    lines,
+		help:    help,
+		width:   width,
+		focused: true,
+	})
+}
+
 func (b *Board) renderSessionStart() string {
 	s := &b.sessionStart
 	width := b.modalWidth(84)
 	inner := modalInner(width)
+	candidateRows, promptRows := b.sessionStartHeights(len(s.candidates), s.err != "", s.space.available())
 
 	var lines []string
-	lines = append(lines, b.styles.dim.Render(truncate(b.text.Start.LabelCwd, inner)))
-	for i, cwd := range s.candidates {
-		lines = append(lines, b.sessionStartRow(cwd, inner, s.focus == sessionStartFocusCwd && i == s.cwdCursor))
+	if s.space.available() {
+		lines = append(lines, b.renderSpaceRow(&s.space, b.text.Start.LabelSpace, inner, s.focus == sessionStartFocusSpace))
 	}
+
+	lines = append(lines, b.styles.dim.Render(truncate(b.text.Start.LabelCwd, inner)))
+	start, visible, before, after := listWindow(s.cwdOffset, s.cwdCursor, len(s.candidates), candidateRows)
+	s.cwdOffset = start
+	if before {
+		lines = append(lines, b.styles.dim.Render(truncateMark))
+	}
+	for i := start; i < start+visible; i++ {
+		lines = append(lines, b.sessionStartRow(s.candidates[i], inner, s.focus == sessionStartFocusCwd && i == s.cwdCursor))
+	}
+	if after {
+		lines = append(lines, b.styles.dim.Render(truncateMark))
+	}
+
 	isCustom := s.cwdCursor == len(s.candidates)
 	marker := padCell("", cursorWidth(b.icons))
 	if s.focus == sessionStartFocusCwd && isCustom {
 		marker = b.icons.Cursor + " "
 	}
 	label := b.text.Start.LabelCustom
-	s.cwdInput.SetWidth(maxInt(inner-lipgloss.Width(marker)-lipgloss.Width(label), 1))
+	s.cwdInput.SetWidth(fieldWidth(s.cwdInput, inner-lipgloss.Width(marker)-lipgloss.Width(label)))
 	lines = append(lines, truncate(marker+label+s.cwdInput.View(), inner))
 
 	lines = append(lines, "")
@@ -317,6 +491,7 @@ func (b *Board) renderSessionStart() string {
 	}
 	lines = append(lines, b.styles.dim.Render(truncate(promptLabel, inner)))
 	s.prompt.SetWidth(inner)
+	s.prompt.SetHeight(promptRows)
 	lines = append(lines, strings.Split(s.prompt.View(), "\n")...)
 
 	if s.err != "" {
@@ -326,10 +501,56 @@ func (b *Board) renderSessionStart() string {
 	return b.renderModal(modal{
 		title:   fmt.Sprintf(b.text.Start.Title, s.taskID, s.title),
 		body:    lines,
-		help:    fmt.Sprintf(b.text.Start.Help, b.icons.verticalKeys(), b.newlineKey()),
+		help:    b.sessionStartHelp(),
 		width:   width,
 		focused: true,
 	})
+}
+
+// sessionStartHeights divides the modal's body between the cwd candidate list and the prompt.
+//
+// Both grow on their own: the candidate list with every distinct cwd a session was ever started
+// in, the prompt with whatever the template renders. Left alone they overrun the body an 80x24
+// terminal gives the modal, and renderModal's own cut would then take the prompt's last lines and
+// the key help — the two things the user is looking at — rather than a candidate further down a
+// list. So the rows nothing can give up are subtracted first, and what is left is handed out with
+// the prompt yielding before the candidates do.
+func (b *Board) sessionStartHeights(candidates int, hasErr, hasSpace bool) (candidateRows, promptRows int) {
+	// The cwd label, the free-text row, the blank line, the prompt label and the help line.
+	fixed := 5
+	if hasErr {
+		fixed++
+	}
+	if hasSpace {
+		fixed++
+	}
+	room := b.modalBody(0) - fixed
+
+	promptRows = promptVisibleLines
+	candidateRows = minInt(candidates, maxCwdCandidateRows)
+	for promptRows+candidateRows > room {
+		switch {
+		case promptRows > promptMinLines:
+			promptRows--
+		// The last candidate row is kept whatever happens: listWindow spends it on whichever row
+		// the cursor is on, and a list that hides the selection is worse than one that overruns
+		// into renderModal's own cut.
+		case candidateRows > 1:
+			candidateRows--
+		default:
+			return candidateRows, promptRows
+		}
+	}
+	return candidateRows, promptRows
+}
+
+// sessionStartHelp names the keys that actually do something where the cursor is: tab means two
+// different things depending on the row, and a footer that claims both would describe neither.
+func (b *Board) sessionStartHelp() string {
+	if b.sessionStart.focus == sessionStartFocusSpace {
+		return fmt.Sprintf(b.text.Start.HelpSpace, b.icons.horizontalKeys())
+	}
+	return fmt.Sprintf(b.text.Start.Help, b.icons.verticalKeys(), b.newlineKey())
 }
 
 func (b *Board) sessionStartRow(cwd string, inner int, selected bool) string {

@@ -12,6 +12,7 @@ import (
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
+	"github.com/ukwhatn/taskherd/internal/tui"
 )
 
 // Session-start stages, reported in startResult.Stage. Each names the last step that completed,
@@ -67,11 +68,45 @@ type startResult struct {
 	SessionID  string `json:"session_id,omitempty"`
 	Linked     bool   `json:"linked"`
 	PromptSent bool   `json:"prompt_sent"`
+	// WorkspaceID is the space the launch landed in, filled the moment the pane exists so that a
+	// result reporting a later failure still says where to look.
+	WorkspaceID string `json:"workspace_id,omitempty"`
 	// Reused reports that no new pane was created: a previous launch's agent was found idle with a
 	// session already, and that pane was linked and prompted instead (§4 of the design).
 	Reused bool   `json:"reused"`
 	Error  string `json:"error,omitempty"`
 	Hint   string `json:"hint,omitempty"`
+}
+
+// spaceFlags are the --space / --new-space pair, shared by start and jump.
+type spaceFlags struct {
+	id       string
+	newLabel string
+}
+
+func (a *app) addSpaceFlags(cmd *cobra.Command, flags *spaceFlags, newSpaceHelp string) {
+	cmd.Flags().StringVar(&flags.id, "space", "", a.text.CLI.Start.FlagSpace)
+	cmd.Flags().StringVar(&flags.newLabel, "new-space", "", newSpaceHelp)
+}
+
+// spaceChoice reads the pair into the launch's target space.
+//
+// The presence of --new-space is what asks for a new space, not its value: an unlabelled space is
+// a space herdr names itself, which is a different request from not asking for one. Giving both
+// flags is a contradiction rather than a precedence question, so it is refused instead of ranked.
+func (a *app) spaceChoice(cmd *cobra.Command, flags spaceFlags) (tui.SpaceChoice, error) {
+	create := cmd.Flags().Changed("new-space")
+	id := strings.TrimSpace(flags.id)
+	if create && id != "" {
+		return tui.SpaceChoice{}, &UserError{
+			Msg:      a.text.CLI.Start.SpaceConflict.Msg,
+			HintText: a.text.CLI.Start.SpaceConflict.Hint,
+		}
+	}
+	if create {
+		return tui.SpaceChoice{Create: true, Label: strings.TrimSpace(flags.newLabel)}, nil
+	}
+	return tui.SpaceChoice{WorkspaceID: id}, nil
 }
 
 func (a *app) startCmd() *cobra.Command {
@@ -80,6 +115,7 @@ func (a *app) startCmd() *cobra.Command {
 		promptFlag string
 		newFlag    bool
 		noFocus    bool
+		space      spaceFlags
 	)
 
 	cmd := &cobra.Command{
@@ -104,6 +140,10 @@ func (a *app) startCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			target, err := a.spaceChoice(cmd, space)
+			if err != nil {
+				return err
+			}
 
 			prompt := promptFlag
 			if !cmd.Flags().Changed("prompt") {
@@ -114,7 +154,7 @@ func (a *app) startCmd() *cobra.Command {
 				prompt = model.RenderPrompt(cfg.SessionStart.TemplateFor(task.Status), *task)
 			}
 
-			return a.startSession(cmd.Context(), task, cwd, prompt, newFlag, !noFocus)
+			return a.startSession(cmd.Context(), task, cwd, prompt, target, newFlag, !noFocus)
 		},
 	}
 
@@ -125,6 +165,7 @@ func (a *app) startCmd() *cobra.Command {
 		a.text.CLI.Start.FlagNew)
 	cmd.Flags().BoolVar(&noFocus, "no-focus", false,
 		a.text.CLI.Start.FlagNoFocus)
+	a.addSpaceFlags(cmd, &space, a.text.CLI.Start.FlagNewSpace)
 	return cmd
 }
 
@@ -248,7 +289,12 @@ func (a *app) sessionWaitTimeout() time.Duration {
 // reused (the whole point of retrying with a different cwd would silently be thrown away), and it
 // is not started fresh either — that would leave two agents under the same name, which is exactly
 // what this check exists to prevent. Only --new is allowed to add a second one.
-func (a *app) findReusableAgent(ctx context.Context, client *herdrc.Client, task *model.Task, agentName, cwd string) (*herdrc.Agent, error) {
+//
+// space is treated the same way for the same reason: recovering a pane in one space when the
+// caller asked for another would put the session somewhere it did not ask for and say nothing.
+// A space the caller left unspecified matches whatever the recovered pane is in, since that is
+// still "wherever herdr had it".
+func (a *app) findReusableAgent(ctx context.Context, client *herdrc.Client, task *model.Task, agentName, cwd string, space tui.SpaceChoice) (*herdrc.Agent, error) {
 	snapshot, err := client.Snapshot(ctx)
 	if err != nil {
 		return nil, nil
@@ -278,6 +324,13 @@ func (a *app) findReusableAgent(ctx context.Context, client *herdrc.Client, task
 				a.text.CLI.Start.OtherCwd.Hint, agent.PaneID, task.ID, cwd),
 		}
 	}
+	if space.Create || (space.WorkspaceID != "" && space.WorkspaceID != agent.WorkspaceID) {
+		return nil, &UserError{
+			Msg: fmt.Sprintf(a.text.CLI.Start.OtherSpace.Msg, task.ID, agent.WorkspaceID, agent.PaneID),
+			HintText: fmt.Sprintf(
+				a.text.CLI.Start.OtherSpace.Hint, agent.PaneID, task.ID),
+		}
+	}
 	return agent, nil
 }
 
@@ -285,6 +338,23 @@ func (a *app) findReusableAgent(ctx context.Context, client *herdrc.Client, task
 // recovery lookup and startSession's own so both ask about the same agent.
 func agentNameFor(taskID int) string {
 	return fmt.Sprintf("taskherd-%d", taskID)
+}
+
+// createLaunchPane opens the pane a launch will run in, in whichever space was chosen. Both herdr
+// calls answer in the same shape, so the rest of the sequence does not branch on which one ran.
+//
+// A created space carries the label and the new tab inside it takes herdr's own — `workspace
+// create` has no separate tab label, and the space is the thing being named.
+func createLaunchPane(ctx context.Context, client *herdrc.Client, space tui.SpaceChoice, cwd, label string, focus bool) (herdrc.Tab, error) {
+	if space.Create {
+		return client.CreateWorkspace(ctx, herdrc.WorkspaceSpec{Cwd: cwd, Label: space.Label, Focus: focus})
+	}
+	return client.CreateTab(ctx, herdrc.TabSpec{
+		WorkspaceID: space.WorkspaceID,
+		Cwd:         cwd,
+		Label:       label,
+		Focus:       focus,
+	})
 }
 
 // agentIsUsable reports whether agent is far enough along to recover: it has a session id and is
@@ -320,7 +390,7 @@ func nextAgentName(snapshot *herdrc.Snapshot, agentName string) string {
 // around half a minute to reach a linked session with a prompt in it, and pulling focus at the end
 // of that would yank the user out of whatever they moved on to. --no-focus is for a launch nobody
 // is waiting on, started for a task other than the one at hand.
-func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt string, forceNew, focus bool) error {
+func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt string, space tui.SpaceChoice, forceNew, focus bool) error {
 	client := a.herdr()
 	result := startResult{TaskID: task.ID}
 	agentName := agentNameFor(task.ID)
@@ -335,7 +405,7 @@ func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt st
 		// findReusableAgent's own fallback.
 	} else {
 		var err error
-		reused, err = a.findReusableAgent(ctx, client, task, agentName, cwd)
+		reused, err = a.findReusableAgent(ctx, client, task, agentName, cwd, space)
 		if err != nil {
 			return err
 		}
@@ -345,18 +415,19 @@ func (a *app) startSession(ctx context.Context, task *model.Task, cwd, prompt st
 	if reused != nil {
 		paneID, sessionID, linkCwd = reused.PaneID, reused.SessionID(), reused.Cwd
 		result.PaneID, result.SessionID, result.Stage, result.Reused = paneID, sessionID, stageWaited, true
+		result.WorkspaceID = reused.WorkspaceID
 		if focus {
 			// Best-effort, like every other focus in this file: a recovered pane that cannot be
 			// focused is still a pane the launch is about to link and prompt.
 			_ = client.FocusAgent(ctx, paneID)
 		}
 	} else {
-		tab, err := client.CreateTab(ctx, herdrc.TabSpec{Cwd: cwd, Label: task.Title, Focus: focus})
+		tab, err := createLaunchPane(ctx, client, space, cwd, task.Title, focus)
 		if err != nil {
 			// Nothing was created: a plain error, not a partial result.
 			return err
 		}
-		result.PaneID = tab.PaneID
+		result.PaneID, result.WorkspaceID = tab.PaneID, tab.WorkspaceID
 
 		started, err := client.StartAgent(ctx, herdrc.AgentSpec{
 			Name:   agentName,

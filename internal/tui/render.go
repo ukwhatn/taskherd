@@ -532,6 +532,8 @@ func (b *Board) renderOverlay() string {
 		return b.renderConfirm()
 	case modeSessionStart:
 		return b.renderSessionStart()
+	case modeResumeStart:
+		return b.renderResumeStart()
 	default:
 		return ""
 	}
