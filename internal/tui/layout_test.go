@@ -349,3 +349,63 @@ func minInt(a, b int) int {
 	}
 	return b
 }
+
+func TestListWindow(t *testing.T) {
+	tests := []struct {
+		name                          string
+		offset, cursor, count, budget int
+		wantStart, wantVisible        int
+		wantBefore, wantAfter         bool
+	}{
+		{"全部入るなら省略記号を出さない", 0, 0, 5, 10, 0, 5, false, false},
+		{"ちょうど入る", 0, 4, 5, 5, 0, 5, false, false},
+		{"先頭では下だけ隠れる", 0, 0, 77, 14, 0, 13, false, true},
+		{"末尾では上だけ隠れる", 0, 76, 77, 14, 64, 13, true, false},
+		{"中央では上下とも隠れる", 0, 38, 77, 14, 27, 12, true, true},
+		{"直前の位置を尊重する", 30, 33, 77, 14, 30, 12, true, true},
+		{"budget 3 は 1 行と上下の省略記号", 0, 38, 77, 3, 38, 1, true, true},
+		{"budget 2 はカーソル行を優先し省略記号を捨てる", 0, 38, 77, 2, 37, 2, false, false},
+		{"budget 1 はカーソル行だけを残す", 0, 38, 77, 1, 38, 1, false, false},
+		{"budget 0 は何も出さない", 0, 0, 77, 0, 0, 0, false, false},
+		{"空の一覧", 0, 0, 0, 10, 0, 0, false, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			start, visible, before, after := listWindow(tc.offset, tc.cursor, tc.count, tc.budget)
+			if start != tc.wantStart || visible != tc.wantVisible || before != tc.wantBefore || after != tc.wantAfter {
+				t.Errorf("listWindow(%d,%d,%d,%d) = (%d,%d,%v,%v), want (%d,%d,%v,%v)",
+					tc.offset, tc.cursor, tc.count, tc.budget,
+					start, visible, before, after,
+					tc.wantStart, tc.wantVisible, tc.wantBefore, tc.wantAfter)
+			}
+		})
+	}
+}
+
+// TestListWindowNeverExceedsBudget covers every shape at once: the window plus the markers it
+// asks for must fit in the budget, and the cursor must land inside the window.
+func TestListWindowNeverExceedsBudget(t *testing.T) {
+	for count := 0; count <= 20; count++ {
+		for budget := 0; budget <= 12; budget++ {
+			for cursor := 0; cursor < count; cursor++ {
+				start, visible, before, after := listWindow(0, cursor, count, budget)
+				rows := visible
+				if before {
+					rows++
+				}
+				if after {
+					rows++
+				}
+				if rows > budget {
+					t.Fatalf("count=%d budget=%d cursor=%d: 行数 %d が budget %d を超えた", count, budget, cursor, rows, budget)
+				}
+				if visible == 0 {
+					continue
+				}
+				if cursor < start || cursor >= start+visible {
+					t.Fatalf("count=%d budget=%d cursor=%d: カーソルが窓 [%d,%d) の外", count, budget, cursor, start, start+visible)
+				}
+			}
+		}
+	}
+}
