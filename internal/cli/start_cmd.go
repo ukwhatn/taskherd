@@ -192,7 +192,7 @@ func (a *app) resolveStartCwd(ctx context.Context, f model.File, flag string, ch
 				HintText: a.text.CLI.Start.BlankCwd.Hint,
 			}
 		}
-		return cwd, nil
+		return a.paths().Expand(cwd), nil
 	}
 
 	candidates := model.RankSessionCwds(f)

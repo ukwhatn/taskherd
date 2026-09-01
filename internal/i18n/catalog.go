@@ -207,6 +207,14 @@ type Start struct {
 	NewSpace string
 	// HelpSpace is the key list while the space row has the keyboard. Takes the horizontal arrows.
 	HelpSpace string
+	// HelpComplete is the key list while the free-text directory row has it, where Tab completes
+	// the path instead of moving between fields. Takes the vertical arrows and the line-break key.
+	HelpComplete string
+	// CwdHistory stands in for the candidate list while the free-text row is being typed in. Takes
+	// the number of candidates and the up arrow.
+	CwdHistory string
+	// MoreSuggestions closes a truncated completion list. Takes how many are not shown.
+	MoreSuggestions string
 }
 
 // Jump is the g flow: moving to a live pane, or resuming one that is gone.

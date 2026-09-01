@@ -17,6 +17,7 @@ import (
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
+	"github.com/ukwhatn/taskherd/internal/pathcomp"
 )
 
 // Backoff bounds for the background refresh cycle. A rate-limited cycle stretches the interval
@@ -63,6 +64,10 @@ type Board struct {
 	// snapshot is the last herdr report, kept so the session states can be re-derived when the
 	// task list changes rather than only when herdr speaks again.
 	snapshot *herdrc.Snapshot
+	// paths completes the launch modal's working-directory field. It sits on the board rather
+	// than in Deps because its only dependency is the home directory, and a test replaces it in
+	// place.
+	paths *pathcomp.Completer
 
 	// tasksLoaded and cacheLoaded gate the startup fetch: which links are stale is only
 	// answerable once both the task list and the cache are in, and they arrive in either order.
@@ -200,7 +205,11 @@ type confirmState struct {
 
 // New builds a board over the given ports.
 func New(ctx context.Context, deps Deps, settings Settings) *Board {
+	// A home directory that cannot be resolved costs only ~ expansion; a path typed in full still
+	// works, so this is not worth refusing to open the board over.
+	home, _ := os.UserHomeDir()
 	return &Board{
+		paths:    &pathcomp.Completer{Home: home},
 		ctx:      ctx,
 		deps:     deps,
 		settings: settings,

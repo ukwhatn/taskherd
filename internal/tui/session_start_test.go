@@ -153,7 +153,7 @@ func TestBoardSessionStartHandsOffToLauncherAndQuits(t *testing.T) {
 	h.key("down") // select #2
 
 	h.key("g")
-	h.key("tab") // cwd -> prompt
+	h.key("tab") // 候補行にいるので tab は欄移動
 	h.board.sessionStart.prompt.SetValue("これをやって")
 	h.key("enter")
 
@@ -288,7 +288,7 @@ func TestBoardSessionStartPasteIntoPromptKeepsLineBreaks(t *testing.T) {
 	h := newHarness(t, startDeps(store, &fakeHerdr{}, &fakeLauncher{}), Settings{})
 
 	h.key("g")
-	h.key("tab") // cwd -> prompt
+	h.key("down") // cwd -> prompt
 	h.paste("1 行目\n2 行目")
 
 	if got := h.board.sessionStart.prompt.Value(); !strings.Contains(got, "1 行目\n2 行目") {
@@ -334,7 +334,7 @@ func TestBoardSessionStartCtrlJInsertsNewlineInPrompt(t *testing.T) {
 	h := newHarness(t, startDeps(store, &fakeHerdr{}, launcher), Settings{})
 
 	h.key("g")
-	h.key("tab") // cwd -> prompt
+	h.key("down") // cwd -> prompt
 	h.board.sessionStart.prompt.SetValue("1 行目")
 	h.dispatch(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
 	h.typeText("2行目")
@@ -352,7 +352,7 @@ func TestBoardSessionStartAltEnterInsertsNewlineInPrompt(t *testing.T) {
 	h := newHarness(t, startDeps(store, &fakeHerdr{}, &fakeLauncher{}), Settings{})
 
 	h.key("g")
-	h.key("tab")
+	h.key("down")
 	h.board.sessionStart.prompt.SetValue("1")
 	h.dispatch(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	h.typeText("2")
@@ -372,7 +372,7 @@ func TestBoardSessionStartShiftEnterInsertsNewlineInPrompt(t *testing.T) {
 	h.dispatch(tea.KeyboardEnhancementsMsg{Flags: 1})
 
 	h.key("g")
-	h.key("tab") // cwd -> prompt
+	h.key("down") // cwd -> prompt
 	h.board.sessionStart.prompt.SetValue("1")
 	h.dispatch(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
 	h.typeText("2")
@@ -393,7 +393,7 @@ func TestBoardSessionStartCtrlYCopiesPromptToClipboard(t *testing.T) {
 	h := newHarness(t, startDeps(store, &fakeHerdr{}, &fakeLauncher{}), Settings{})
 
 	h.key("g")
-	h.key("tab")
+	h.key("down") // cwd -> prompt
 	h.board.sessionStart.prompt.SetValue("コピー対象")
 	h.run(h.dispatch(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl}))
 

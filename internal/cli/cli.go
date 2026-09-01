@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +21,7 @@ import (
 	"github.com/ukwhatn/taskherd/internal/herdrc"
 	"github.com/ukwhatn/taskherd/internal/i18n"
 	"github.com/ukwhatn/taskherd/internal/model"
+	"github.com/ukwhatn/taskherd/internal/pathcomp"
 	"github.com/ukwhatn/taskherd/internal/store"
 )
 
@@ -262,7 +262,7 @@ func (a *app) jiraCredentials(cfg *config.Config) fetch.JiraCredentials {
 		return creds
 	}
 
-	data, err := os.ReadFile(a.expandHome(cfg.Jira.TokenFile))
+	data, err := os.ReadFile(a.paths().Expand(cfg.Jira.TokenFile))
 	if err != nil {
 		// The path is quoted but the file's content never is: this string is written to cache.json
 		// and drawn on the board.
@@ -275,17 +275,11 @@ func (a *app) jiraCredentials(cfg *config.Config) fetch.JiraCredentials {
 	return creds
 }
 
-// expandHome resolves a leading ~/ against HOME, which is how a hand-written config actually writes
-// a path in the home directory. Any other form is left as written.
-func (a *app) expandHome(path string) string {
-	if !strings.HasPrefix(path, "~/") {
-		return path
-	}
-	home := a.env.Getenv("HOME")
-	if home == "" {
-		return path
-	}
-	return filepath.Join(home, path[2:])
+// paths resolves the ~ a hand-written config or a quoted --cwd leaves for the program to expand.
+// It reads HOME through the app's own environment rather than os.UserHomeDir so that a test can
+// hand it one.
+func (a *app) paths() pathcomp.Completer {
+	return pathcomp.Completer{Home: a.env.Getenv("HOME")}
 }
 
 func (a *app) herdr() *herdrc.Client {

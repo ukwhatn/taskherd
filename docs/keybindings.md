@@ -119,9 +119,15 @@ Holds the space to start in, a list of candidate working directories — the cwd
 sessions, by frequency, then by how recently they were linked, then alphabetically — and an
 editable initial prompt.
 
-- `Tab` / `Shift+Tab` move between the space, the directory and the prompt.
+- `Tab` / `Shift+Tab` move between the space, the directory and the prompt — except on the
+  free-text directory row, where `Tab` **completes the path** instead. `Shift+Tab` and `↑↓` still
+  leave that row.
 - `↑↓` also move between them, and pick a directory within the list. The last row (*type one*)
   turns it into free text.
+- The free-text row completes directories only, `~` included, and lists what the value matches
+  below it. While it has the keyboard the candidate list collapses to a single row saying how many
+  candidates `↑` goes back to, since the modal has room for one list at a time. A `~` left in the
+  field is resolved when the session is launched.
 - The space row takes `←→`. Its last cell creates a space and asks for a label. Leaving the row
   where it opened starts the session wherever herdr would have put it, which is also what keeps a
   leftover pane from an earlier attempt recoverable. The row is not drawn when herdr is
