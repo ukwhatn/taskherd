@@ -1,5 +1,8 @@
 # taskherd
 
+> [!IMPORTANT]
+> taskherd is archived and no longer maintained. Its successor is [taskboard](https://github.com/ukwhatn/taskboard), a macOS, iPadOS and iOS app with a daemon that ties the Claude Code and Codex sessions on all your Macs to task cards.
+
 A kanban board for the work your coding agents are doing.
 
 Tasks live on your machine as one JSON file. Each one can carry agent sessions, GitHub pull

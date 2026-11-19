@@ -1,5 +1,8 @@
 # taskherd
 
+> [!IMPORTANT]
+> taskherd はアーカイブしました。今後は更新しません。後継は [taskboard](https://github.com/ukwhatn/taskboard) で、複数の Mac の Claude Code と Codex のセッションをタスクのカードに結ぶ macOS・iPadOS・iOS のアプリと daemon です。
+
 コーディングエージェントの作業を並べて見る kanban ボード。
 
 タスクはローカルの JSON ファイル 1 枚に置かれます。1 つのタスクにエージェントセッション・GitHub
